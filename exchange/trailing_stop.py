@@ -178,12 +178,46 @@ class TrailingStopManager:
         Returns:
             Number of filled TP orders
         """
-        # Get TP orders from order manager's internal state
-        exit_orders = self.order_manager._exit_orders.get(symbol, {})
-        tp_orders = exit_orders.get("take_profits", [])
+        # CRITICAL FIX: Try to get TP orders from order manager, fallback to simplified logic
+        tp_orders = []
         
+        # Try order manager first
+        if hasattr(self.order_manager, '_exit_orders'):
+            exit_orders = self.order_manager._exit_orders.get(symbol, {})
+            tp_orders = exit_orders.get("take_profits", [])
+        
+        # Fallback: If no TP orders from order manager, use simplified logic 
         if not tp_orders:
-            return 0
+            logger.debug(f"[TRAIL_SL] {symbol}: No TP orders from order manager, using fallback logic")
+            
+            # Get position data and count TP orders from open orders
+            pos_data = self._positions.get(symbol, {})
+            total_expected_tps = len(pos_data.get("tp_levels", []))
+            
+            if total_expected_tps == 0:
+                return 0
+            
+            try:
+                # Count remaining TP orders (reduce-only LIMIT orders)
+                open_orders = self.client.get_open_orders(symbol)
+                remaining_tp_orders = len([
+                    order for order in open_orders 
+                    if (order.get('type') == 'LIMIT' and 
+                        order.get('reduceOnly', False) and
+                        order.get('side') != pos_data.get('side', 'BUY'))  # opposite side
+                ])
+                
+                # Filled TPs = Total expected - Still open
+                filled_count = max(0, total_expected_tps - remaining_tp_orders)
+                
+                logger.debug(f"[TRAIL_SL] {symbol}: Fallback count - Expected TPs: {total_expected_tps}, "
+                           f"Remaining: {remaining_tp_orders}, Filled: {filled_count}")
+                
+                return filled_count
+                
+            except Exception as e:
+                logger.warning(f"[TRAIL_SL] {symbol}: Fallback TP counting failed: {e}")
+                return 0
         
         filled_count = 0
         
@@ -196,19 +230,22 @@ class TrailingStopManager:
                 filled_count += 1
                 continue
             
-            # Fetch order status from exchange
+            # CRITICAL FIX: Check if order is still open (if not, it's likely filled)
             try:
-                order_status = await self.client.get_order(symbol, order_id)
+                open_orders = self.client.get_open_orders(symbol)
+                order_still_open = any(order.get('orderId') == order_id for order in open_orders)
                 
-                if order_status and order_status.get("status") == "FILLED":
-                    # Mark as filled
+                if not order_still_open:
+                    # Order not in open orders - likely filled
                     self._filled_tps.setdefault(symbol, set()).add(order_id)
                     filled_count += 1
-                    logger.info(f"[TRAIL_SL] {symbol}: TP level {tp['level']} filled "
+                    logger.info(f"🎯 [TRAIL_SL] {symbol}: TP level {tp['level']} FILLED "
                                f"@ {tp['price']:.4f} (order {order_id})")
+                else:
+                    logger.debug(f"[TRAIL_SL] {symbol}: TP order {order_id} still open")
             
             except Exception as e:
-                logger.warning(f"[TRAIL_SL] Failed to fetch order {order_id} for {symbol}: {e}")
+                logger.warning(f"[TRAIL_SL] Failed to check order {order_id} for {symbol}: {e}")
         
         return filled_count
     
@@ -234,8 +271,8 @@ class TrailingStopManager:
         
         # Get current market price
         try:
-            ticker = await self.client.get_ticker(symbol)
-            current_price = float(ticker.get("lastPrice", entry))
+            ticker = self.client.get_ticker_price(symbol)
+            current_price = float(ticker.get("price", entry))
         except Exception as e:
             logger.warning(f"[TRAIL_SL] Failed to get current price for {symbol}, using entry: {e}")
             current_price = entry
@@ -266,12 +303,12 @@ class TrailingStopManager:
             logger.info(f"[TRAIL_SL] {symbol}: Updating SL: {old_sl:.4f} → {new_sl:.4f} "
                        f"(after {tp_filled_count} TP fills, rule: {adjustment_rule})")
             
-            # Cancel existing SL
-            self.order_manager._cancel_existing_exit_order(symbol, "stop_loss")
+            # CRITICAL FIX: Cancel existing SL orders directly via client
+            await self._cancel_existing_sl_orders(symbol)
             
-            # Place new SL
+            # Place new SL order directly via client
             close_side = "SELL" if side == "BUY" else "BUY"
-            self.order_manager._setup_stop_loss(symbol, close_side, new_sl)
+            await self._place_stop_loss_order(symbol, close_side, new_sl)
             
             # Update internal state
             pos_data["last_sl"] = new_sl
@@ -364,6 +401,51 @@ class TrailingStopManager:
                 await self.check_and_update(symbol)
             except Exception as e:
                 logger.error(f"[TRAIL_SL] Error monitoring {symbol}: {e}")
+    
+    async def _cancel_existing_sl_orders(self, symbol: str) -> None:
+        """Cancel existing stop loss orders for symbol."""
+        try:
+            open_orders = self.client.get_open_orders(symbol)
+            
+            for order in open_orders:
+                order_type = order.get('type', '').upper()
+                is_sl_order = (
+                    order_type in ('STOP_MARKET', 'STOP', 'STOP_LOSS_LIMIT') or
+                    order.get('closePosition', False)
+                )
+                
+                if is_sl_order:
+                    try:
+                        self.client.cancel_order(symbol=symbol, orderId=order['orderId'])
+                        logger.info(f"🎯 [TRAIL_SL] Cancelled existing SL order {order['orderId']} for {symbol}")
+                    except Exception as e:
+                        logger.warning(f"[TRAIL_SL] Failed to cancel SL order {order['orderId']}: {e}")
+        
+        except Exception as e:
+            logger.warning(f"[TRAIL_SL] Failed to cancel existing SL orders for {symbol}: {e}")
+    
+    async def _place_stop_loss_order(self, symbol: str, side: str, stop_price: float) -> None:
+        """Place new stop loss order."""
+        try:
+            # Round stop price to proper precision
+            rounded_stop_price = round(stop_price, 4)  # Most pairs use 4 decimals for price
+            
+            # Place STOP_MARKET order with closePosition=true
+            order_result = self.client.place_order(
+                symbol=symbol,
+                side=side,
+                type="STOP_MARKET",
+                stopPrice=rounded_stop_price,
+                closePosition="true",  # Close entire position
+                workingType="MARK_PRICE"  # Use mark price to avoid manipulation
+            )
+            
+            logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} @ {rounded_stop_price:.4f} "
+                       f"(order: {order_result.get('orderId', 'N/A')})")
+            
+        except Exception as e:
+            logger.error(f"[TRAIL_SL] Failed to place SL order for {symbol}: {e}")
+            raise
     
     def get_status(self, symbol: str) -> Optional[dict]:
         """Get current trailing stop status for a symbol."""

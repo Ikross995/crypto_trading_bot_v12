@@ -84,15 +84,15 @@ class Config(BaseModel):
     gpt_enable: bool = Field(default=False)
     
     # Self-Learning System
-    enable_trade_journal: bool = Field(default=False)
-    enable_adaptive_optimizer: bool = Field(default=False)
-    enable_realtime_adaptation: bool = Field(default=False)
+    enable_trade_journal: bool = Field(default=True)  # ✅ ВКЛЮЧЕНО для ИИ обучения
+    enable_adaptive_optimizer: bool = Field(default=True)  # ✅ ВКЛЮЧЕНО для адаптации параметров
+    enable_realtime_adaptation: bool = Field(default=True)  # ✅ ВКЛЮЧЕНО для реального времени
     optimization_interval_hours: int = Field(default=24, ge=1, le=168)
     min_trades_for_optimization: int = Field(default=20, ge=5, le=100)
     pause_on_loss_streak: int = Field(default=5, ge=3, le=10)
     
     # Data Loading
-    preload_candles: int = Field(default=1200, ge=100, le=5000)  # Increased to 1200 for FVG analysis (needs 1200 candles)
+    preload_candles: int = Field(default=500, ge=100, le=5000)  # Optimized: 500 candles for IMBA (needs 250+) with buffer
     signal_cooldown_seconds: int = Field(default=60, ge=10, le=300)  # Cooldown between signals
     high_confidence_threshold: float = Field(default=1.2, ge=0.8, le=3.0)  # Signals >= this confidence bypass cooldown
     

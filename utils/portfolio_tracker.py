@@ -162,17 +162,37 @@ class PortfolioTracker:
             }
         """
         try:
-            # Get futures account info
-            account = self.client.futures_account()
+            # FIXED: Use BinanceClient.get_account_balance() method
+            total_balance = self.client.get_account_balance()
             
-            total_balance = float(account.get('totalWalletBalance', 0))
-            available_balance = float(account.get('availableBalance', 0))
-            margin_balance = total_balance - available_balance
+            # Try to get detailed balance info if available
+            try:
+                # Get balance details via REST API
+                balance_data = self.client._rest("GET", "/fapi/v2/balance", {})
+                usdt_balance = None
+                for asset in balance_data:
+                    if asset.get("asset") == "USDT":
+                        usdt_balance = asset
+                        break
+                
+                if usdt_balance:
+                    wallet_balance = float(usdt_balance.get('walletBalance', total_balance))
+                    available_balance = float(usdt_balance.get('availableBalance', total_balance))
+                    margin_balance = wallet_balance - available_balance
+                    
+                    return {
+                        'total_balance': wallet_balance,
+                        'available_balance': available_balance,
+                        'margin_balance': margin_balance
+                    }
+            except Exception as detail_e:
+                logger.debug(f"Could not get detailed balance, using total: {detail_e}")
             
+            # Fallback to basic balance
             return {
                 'total_balance': total_balance,
-                'available_balance': available_balance,
-                'margin_balance': margin_balance
+                'available_balance': total_balance,  # Estimate
+                'margin_balance': 0.0  # Estimate
             }
             
         except Exception as e:
@@ -193,8 +213,8 @@ class PortfolioTracker:
         positions = []
         
         try:
-            # Get position information
-            position_info = self.client.futures_position_information()
+            # FIXED: Use BinanceClient.get_positions() method
+            position_info = self.client.get_positions()
             
             for pos in position_info:
                 quantity = float(pos.get('positionAmt', 0))

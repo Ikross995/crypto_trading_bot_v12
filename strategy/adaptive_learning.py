@@ -212,6 +212,49 @@ class AdaptiveLearningSystem:
             
         except Exception as e:
             logger.error(f"❌ [TRADE_RECORD] Failed to record trade: {e}")
+    
+    async def update_trade_exit(self, symbol: str, exit_price: float, exit_reason: str = "manual") -> bool:
+        """Обновляет существующую незакрытую сделку при выходе из позиции."""
+        try:
+            # Ищем последнюю незакрытую сделку для этого символа
+            for i in range(len(self.trades_history) - 1, -1, -1):
+                trade = self.trades_history[i]
+                if (trade.symbol == symbol and 
+                    trade.exit_reason == "pending" and 
+                    trade.exit_price == trade.entry_price):
+                    
+                    # Обновляем данные о выходе
+                    trade.exit_price = exit_price
+                    trade.exit_reason = exit_reason
+                    
+                    # Рассчитываем PnL
+                    if trade.side.upper() == "BUY":
+                        trade.pnl = (exit_price - trade.entry_price) * trade.quantity
+                    else:  # SELL
+                        trade.pnl = (trade.entry_price - exit_price) * trade.quantity
+                    
+                    trade.pnl_pct = (trade.pnl / (trade.entry_price * trade.quantity)) * 100
+                    
+                    # Обновляем время удержания
+                    hold_time = (datetime.now(timezone.utc) - trade.timestamp).total_seconds()
+                    trade.hold_time_seconds = hold_time
+                    
+                    logger.info(f"✅ [TRADE_UPDATE] {symbol} сделка закрыта: PnL {trade.pnl:+.2f} USDT ({trade.pnl_pct:+.2f}%), держали {hold_time/60:.1f} мин")
+                    
+                    # Пересчитываем метрики
+                    await self._update_metrics()
+                    
+                    # Сохраняем обновленные данные
+                    self._save_data()
+                    
+                    return True
+            
+            logger.warning(f"⚠️ [TRADE_UPDATE] Не найдена незакрытая сделка для {symbol}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ [TRADE_UPDATE] Failed to update trade exit for {symbol}: {e}")
+            return False
             
     async def _update_metrics(self) -> None:
         """Обновляет метрики производительности."""

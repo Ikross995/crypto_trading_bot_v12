@@ -72,9 +72,10 @@ class ExitManager:
     - Dynamic exit adjustment
     """
 
-    def __init__(self, order_manager=None, config: Config = None):
+    def __init__(self, order_manager=None, config: Config = None, adaptive_learning_system=None):
         self.order_manager = order_manager
         self.config = config or get_config()
+        self.adaptive_learning = adaptive_learning_system  # ✅ Интеграция с ИИ системой
         
         # Active exit orders tracking
         self.active_exits: dict[str, list[ExitOrder]] = {}  # {symbol: [exit_orders]}
@@ -638,6 +639,27 @@ class ExitManager:
             logger.debug(f"Cleaned up {cleaned_count} completed exit orders")
         
         return cleaned_count
+    
+    async def notify_position_closed(self, trade_id: str, symbol: str, exit_price: float, exit_reason: str = "exit_order", fees_paid: float = 0.0) -> None:
+        """Уведомляет AdaptiveLearningSystem о закрытии позиции для обновления торгового журнала."""
+        try:
+            if self.adaptive_learning:
+                success = await self.adaptive_learning.update_trade_exit(
+                    trade_id=trade_id,
+                    exit_price=exit_price, 
+                    exit_reason=exit_reason,
+                    tp_level_hit=exit_reason if exit_reason.startswith('tp') else None,
+                    fees_paid=fees_paid
+                )
+                if success:
+                    logger.info(f"✅ [AI_UPDATE] 🎯 Trade {trade_id} exit recorded: {exit_reason} @ ${exit_price:.2f}")
+                    logger.info(f"📈 [TRACKING] ✅ Position {symbol} will be analyzed by AI for learning")
+                else:
+                    logger.warning(f"⚠️ [AI_UPDATE] Failed to update trade journal for {trade_id}")
+            else:
+                logger.debug(f"📝 [AI_UPDATE] AdaptiveLearningSystem not connected for {symbol}")
+        except Exception as e:
+            logger.error(f"❌ [AI_UPDATE] Error notifying position close {trade_id}: {e}")
 
     def get_performance_stats(self) -> dict[str, Any]:
         """Get exit system performance statistics."""
