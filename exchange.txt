@@ -1,0 +1,539 @@
+2025-11-03 11:10:06,461 | exchange.trailing_stop | DEBUG | [TRAIL_SL] XRPUSDT: No SL adjustment needed for TP count 3
+2025-11-03 11:10:08,299 | runner.live | INFO | 🎯 [POSITION_CLOSED] Detected closed position: AVAXUSDT @ ~$17.75
+2025-11-03 11:10:08.299 | ERROR    | strategy.exits:notify_position_closed:662 - ❌ [AI_UPDATE] Error notifying position close T_AVAXUSDT_20251103_093855_a5267efa: 'EnhancedAdaptiveLearningSystem' object has no attribute 'update_trade_exit'
+2025-11-03 11:10:09,096 | runner.live | INFO | 🎯 [POSITION_CLOSED] Detected closed position: BTCUSDT @ ~$107920.80
+2025-11-03 11:10:09.096 | ERROR    | strategy.exits:notify_position_closed:662 - ❌ [AI_UPDATE] Error notifying position close T_BTCUSDT_20251103_103711_0c725c66: 'EnhancedAdaptiveLearningSystem' object has no attribute 'update_trade_exit'
+2025-11-03 11:10:09,913 | runner.live | INFO | 🎯 [POSITION_CLOSED] Detected closed position: XRPUSDT @ ~$2.45
+2025-11-03 11:10:09.913 | ERROR    | strategy.exits:notify_position_closed:662 - ❌ [AI_UPDATE] Error notifying position close T_XRPUSDT_20251103_093425_7ebb950c: 'EnhancedAdaptiveLearningSystem' object has no attribute 'update_trade_exit'
+2025-11-03 11:10:09,913 | runner.live | DEBUG | [POSITION_CLOSED] No pending trade info for ADAUSDT
+2025-11-03 11:10:10,736 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762146610473, Local: 1762146610736, Offset: -263ms
+2025-11-03 11:10:11.069 | DEBUG    | strategy.enhanced_dashboard:_get_trading_engine_data:224 - [DASHBOARD] Failed to get market data: 'BinanceClient' object has no attribute 'get_24hr_ticker'
+2025-11-03 11:10:11.074 | INFO     | strategy.enhanced_dashboard:update_dashboard:102 - 📊 [ENHANCED_DASHBOARD] Updated: data\learning_reports\enhanced_dashboard.html
+2025-11-03 11:10:11,074 | runner.live | DEBUG | 📊 [ENHANCED_DASHBOARD] Updated successfully: data\learning_reports\enhanced_dashboard.html
+2025-11-03 11:10:12,548 | exchange.market_data | DEBUG | [GET_CANDLES] Requesting BTCUSDT 30m limit=250
+2025-11-03 11:10:12,548 | exchange.market_data | DEBUG | [GET_CANDLES] BTCUSDT: HTTP fallback to https://testnet.binancefuture.com/fapi/v1/klines?symbol=BTCUSDT&interval=30m&limit=250
+2025-11-03 11:10:13,369 | exchange.market_data | INFO | [GET_CANDLES] BTCUSDT: Got 250 candles via HTTP fallback
+2025-11-03 11:10:13,370 | exchange.market_data | INFO | [GET_CANDLES] BTCUSDT: Range 2025-10-29 06:30:00 → 2025-11-03 11:00:00
+2025-11-03 11:10:13,370 | exchange.market_data | INFO | [GET_CANDLES] BTCUSDT: Latest OHLC: 107839.0/107922.8/107793.7/107921.3
+2025-11-03 11:10:13,370 | strategy.signals | DEBUG | [SIGNAL_DATA] BTCUSDT: Received 250 candles, latest close: 107921.3
+2025-11-03 11:10:13,370 | strategy.signals | DEBUG | [IMBA_THRESHOLD] BTCUSDT: Using min_confidence=1.2 (config.bt_conf_min=1.2)
+2025-11-03 11:10:13,370 | strategy.signals | DEBUG | Converting list of 250 candle dicts to DataFrame for IMBA
+2025-11-03 11:10:13,371 | strategy.signals | DEBUG | ✅ Converted to DataFrame: 250 candles, range: 2025-11-03 11:10:13.371405 → 2025-11-03 11:10:13.371405
+2025-11-03 11:10:13,374 | strategy.signals | DEBUG | IMBA using cached+new data: 1200 total candles for BTCUSDT
+2025-11-03 11:10:13,374 | strategy.imba_integration | DEBUG | [IMBA_DATA] BTCUSDT: Using 1200 candles
+2025-11-03 11:10:13,374 | strategy.imba_integration | DEBUG | [IMBA_DATA] BTCUSDT: Range 2025-11-03 04:31:25.642748 → 2025-11-03 11:10:13.371405
+2025-11-03 11:10:13,374 | strategy.imba_integration | DEBUG | [IMBA_DATA] BTCUSDT: Latest OHLC: 107839.00/107922.80/107793.70/107921.30
+2025-11-03 11:10:13,374 | strategy.regime | INFO | Regime detected: flat (ADX=0.00, BBW=0.0000, confidence=0.90) 
+
+
+
+
+
+
+
+
+11-03 11:47:27,488 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 107951-109900 (str:0.9)
+2025-11-03 11:47:27,488 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 107951-113216 (str:0.9)
+2025-11-03 11:47:27,489 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 107951-113216 (str:0.9)
+2025-11-03 11:47:27,490 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 107951-109424 (str:0.9)
+2025-11-03 11:47:27,490 | strategy.fvg_signal | DEBUG | [FVG] 🧹 Cleaned up: 212 expired, 7 filled → 8 active
+2025-11-03 11:47:27,495 | strategy.imba_integration | DEBUG | [IMBA_VOTES] BTCUSDT: BUY=0.00, SELL=1.49
+2025-11-03 11:47:27,495 | strategy.imba_integration | DEBUG | [IMBA_SIGNALS] BTCUSDT: bb_squeeze(wait), vwap_pullback(wait), vwap_bands_mr(wait), breakout_retest(wait), atr_momentum(wait)...
+2025-11-03 11:47:27,495 | strategy.imba_integration | INFO | [FEAR_GREED] BTCUSDT: SELL confidence adjusted: 1.49 → 1.34 (Fear & Greed: 42/100, fear)
+2025-11-03 11:47:27,496 | strategy.imba_integration | INFO | [BTC_DOMINANCE] BTCUSDT: confidence adjusted: 1.34 → 1.74 (BTC.D: 57.89267281652039%, extreme_btc, trend: stable)
+2025-11-03 11:47:27,497 | utils.exchange_prices | DEBUG | Fetching prices for BTCUSDT from multiple sources...
+2025-11-03 11:47:29,086 | strategy.imba_integration | DEBUG | [SPREAD_DEBUG] BTCUSDT: Collected 3 spot prices: {'bybit': 107530.5, 'okx': 107546.1, 'kraken': 107536.9}
+2025-11-03 11:47:29,087 | strategy.imba_integration | INFO | [SPREAD_CHECK_START] BTCUSDT: Checking spread with 3 spot exchanges
+2025-11-03 11:47:29,087 | strategy.spread_filter | INFO | [SPREAD_CHECK] BTCUSDT: -0.03% (futures=$107502.90, spot=$107536.90) - Below 3.0% threshold, no signal
+2025-11-03 11:47:29,087 | strategy.imba_integration | DEBUG | [SPREAD_RESULT] BTCUSDT: spread_signal=None
+2025-11-03 11:47:29,088 | strategy.imba_integration | INFO |
+================================================================================
+🔴 IMBA SIGNAL ANALYSIS: BTCUSDT 🔴
+================================================================================
+📊 REGIME: FLAT
+  ├─ ADX: 0.00
+  ├─ BBW: 0.0000
+  └─ Confidence: 0.90
+
+🗳️  VOTING RESULTS:
+  ├─ BUY votes:  0.000 ⚪
+  ├─ SELL votes: 1.489 🔴
+  ├─ Base confidence: 1.489
+  ├─ After Fear & Greed (×0.90): 1.340
+  ├─ After BTC.D (×1.30): 1.742
+  └─ Final confidence: 1.742 ✅
+
+🔍 SIGNAL BREAKDOWN (12 indicators):
+  ├─ 1️⃣  bb_squeeze      │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 2️⃣  vwap_pullback   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 3️⃣  vwap_bands_mr   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 4️⃣  breakout_retest │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 5️⃣  atr_momentum    │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 6️⃣  rsi_mr          │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 7️⃣  sfp             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 8️⃣  ema_pinch       │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 9️⃣  cvd             │ 🔴 SELL     │ Vote: 0.55×1.4×1.0=0.77
+  ├─ 10️⃣  fvg             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 11️⃣  volume_profile  │ 🔴 SELL     │ Vote: 0.55×1.3×1.0=0.72
+
+📊 CURRENT PRICE: $107,502.90 (Binance Futures)
+💱 SPOT EXCHANGES:
+  └─ Bybit $107,530.50 (+0.03%) | Okx $107,546.10 (+0.04%) | Kraken $107,536.90 (+0.03%)
+
+😱 Fear & Greed: 42/100 (Fear) → BUY+10%
+📊 BTC.D: 57.9% (Extreme Btc, → stable) → ALT+30%
+
+🎯 FINAL DECISION: SELL 🔴
+  ├─ Signal Strength: 1.742 / 1.2 (145%)
+  ├─ Confidence Threshold: ✅ MET
+  ├─ Filters Passed: ✅ YES
+  └─ Trade Action: 🚀 EXECUTE
+================================================================================
+
+2025-11-03 11:47:29,088 | strategy.signals | INFO | ⚡ COOLDOWN BYPASSED for BTCUSDT: High confidence 1.74 >= 1.20
+2025-11-03 11:47:29,089 | strategy.signals | INFO | IMBA SELL signal for BTCUSDT (confidence: 1.74, regime: unknown)
+2025-11-03 11:47:30,710 | strategy.enhanced_ml_system | INFO | 📊 [CANDLES_CACHE] Updated BTCUSDT: 250 candles
+2025-11-03 11:47:30,710 | strategy.enhanced_ml_system | DEBUG | 📊 [CANDLES_DEBUG] BTCUSDT latest: OHLC=107950.90/107483.20/107502.90
+2025-11-03 11:47:30,715 | strategy.enhanced_ml_system | INFO | ✅ [TECHNICAL] Extracted 22 real indicators for BTCUSDT
+2025-11-03 11:47:30,715 | strategy.enhanced_ml_system | DEBUG | 📊 [TECHNICAL_SAMPLE] BTCUSDT: RSI=21.2, MACD=-657.2594, Vol=0.009
+2025-11-03 11:47:30,715 | strategy.enhanced_ml_system | ERROR | ❌ [FEATURE_EXTRACTION] Error: 'MarketContext' object has no attribute 'ema_200'
+2025-11-03 11:47:30,717 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model xgboost_pnl failed: need to call fit or load_model beforehand
+2025-11-03 11:47:30,717 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model lightgbm_pnl failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model random_forest failed: This RandomForestRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model gradient_boost failed: This GradientBoostingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model neural_network failed: This MLPRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model ensemble_voting failed: This VotingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model volatility_predictor failed: need to call fit or load_model beforehand
+2025-11-03 11:47:30,718 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model sentiment_model failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 11:47:30,718 | runner.live | INFO | 🚀 [ADVANCED_ML] BTCUSDT: ENSEMBLE prediction from 0 models | Expected: +2.40% PnL | Win: 68% | Confidence: 0.50 | Source: historical_enhanced
+2025-11-03 11:47:30,719 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 11:47:30,719 | strategy.ai_status_monitor | INFO | 🧠 [AI_PREDICTION] #330 - BTCUSDT
+2025-11-03 11:47:30,719 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 11:47:30,719 | strategy.ai_status_monitor | INFO | 📈 Expected PnL: +2.40%
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | 🟢 Win Probability: 68%
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | ✨ ML Confidence: 0.50
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | 🛡️ Risk Level: UNKNOWN
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | ✅ Decision: TRADE
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | ⚡ Processing: 8.40ms
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | 🎯 [AI_DECISION] APPROVED for trading (Total: 225)
+2025-11-03 11:47:30,720 | strategy.ai_status_monitor | INFO | 📊 [AI_STATS] Approval Rate: 68.2% (225/330)
+2025-11-03 11:47:30,720 | runner.live | INFO | 🧠 [ML_ANALYSIS] BTCUSDT: Expected PnL +2.40% | Win Prob 68% | Risk medium | Confidence 0.50
+2025-11-03 11:47:30,721 | runner.live | INFO | 🎯 [TRADING_DECISION] No reasoning
+2025-11-03 11:47:30,721 | runner.live | INFO | 📊 [ML_SIZING] Signal strength: 1.74 → 1.74 (ML multiplier: 1.00)
+2025-11-03 11:47:30,721 | strategy.ai_status_monitor | INFO | 🎛️ [ML_SIZING] ➡️ UNCHANGED position size:
+2025-11-03 11:47:30,721 | strategy.ai_status_monitor | INFO |     Signal: 1.74 → 1.74 (ML × 1.00)
+2025-11-03 11:47:30,721 | strategy.ai_status_monitor | INFO |     Total adjustments: 225
+2025-11-03 11:47:30,721 | runner.live | INFO | [POSITION_SIZE] Equity=1000.00, Risk=1.73%, Strength=1.74 (clamped=1.00), Value=864.00 (max=2000.00), Qty=0.008037
+2025-11-03 11:47:30,721 | runner.live | INFO | [SIGNAL] SELL BTCUSDT @ 107500.10 (strength=1.74) -> qty=0.008037 [DRY-RUN=False]
+2025-11-03 11:47:31,108 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762148850765, Local: 1762148851108, Offset: -343ms
+2025-11-03 11:47:31,768 | runner.live | INFO | [ORDER] Placing SELL order: 0.008 BTCUSDT @ 107500.10 (notional: 864.00 USDT)
+2025-11-03 11:47:32,096 | runner.live | INFO | [ORDER_PRICE] Signal: $107500.1000, Market: $107513.4000, Limit: $107405.9000
+2025-11-03 11:47:32,425 | runner.live | INFO | [ORDER_RESULT] SELL order 8310165101: status=NEW, executed=0.000/0.008
+2025-11-03 11:47:32,425 | runner.live | INFO | [ORDER_DEBUG] status='NEW', executed_qty=0.0 (type: <class 'float'>), zero_check=True
+2025-11-03 11:47:32,425 | runner.live | INFO | [ORDER_WAIT] Market order placed, waiting for execution...
+2025-11-03 11:47:33,258 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762148852976, Local: 1762148853258, Offset: -282ms
+2025-11-03 11:47:33,905 | runner.live | DEBUG | [ORDER_CHECK] Attempt 1: status=FILLED, executed=0.008
+2025-11-03 11:47:34,810 | runner.live | INFO | [POSITION_VERIFY] ✅ Position confirmed: 0.008 BTCUSDT (SELL)
+2025-11-03 11:47:34,810 | runner.live | INFO | [ADVANCED_TP_SL] Using monolith exit management system
+2025-11-03 11:47:34,810 | exchange.exits | INFO | [MONOLITH] Setting up exits for BTCUSDT: qty=0.008, sl=109650.10200000001, tps=3 levels
+2025-11-03 11:47:35,304 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762148855018, Local: 1762148855304, Offset: -286ms
+2025-11-03 11:47:36,126 | exchange.exits | DEBUG | [MONOLITH] Found entry price: 107513.4 for BTCUSDT
+2025-11-03 11:47:36,126 | exchange.exits | DEBUG | [MONOLITH] Calculated TP quantities: [0.0032, 0.0028, 0.002] from shares [0.4, 0.35, 0.25]
+2025-11-03 11:47:36,126 | exchange.orders | INFO | [EXIT_SETUP] BTCUSDT: position.is_long=False, side=BUY
+2025-11-03 11:47:36,128 | exchange.orders | INFO | [EXIT_SETUP] BTCUSDT: entry=107513.4, sl=109650.10200000001, tps=[104878.9859670164, 103568.42895052458, 102257.87193403277]
+2025-11-03 11:47:36,476 | exchange.orders | DEBUG | [CANCEL_ORDER] Order BTCUSDT 8303922882 already filled/cancelled (APIError -2011)
+2025-11-03 11:47:37,169 | exchange.orders | INFO | Setup stop loss for BTCUSDT @ 109650.1
+2025-11-03 11:47:37,524 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762148857212, Local: 1762148857524, Offset: -312ms
+2025-11-03 11:47:37,850 | exchange.orders | INFO | [TP_SETUP] Position verified: 0.008 BTCUSDT (SELL)
+2025-11-03 11:47:37,850 | exchange.orders | INFO | [TP_DEBUG] Input side=BUY, prices=[104878.9859670164, 103568.42895052458, 102257.87193403277], quantities=[0.0032, 0.0028, 0.002]
+2025-11-03 11:47:38,178 | exchange.orders | DEBUG | [CANCEL_ORDER] Order BTCUSDT 8303926679 already filled/cancelled (APIError -2011)
+2025-11-03 11:47:38,511 | exchange.orders | DEBUG | [CANCEL_ORDER] Order BTCUSDT 8303927066 already filled/cancelled (APIError -2011)
+2025-11-03 11:47:39,415 | exchange.orders | DEBUG | [CANCEL_ORDER] Order BTCUSDT 8303928411 already filled/cancelled (APIError -2011)
+2025-11-03 11:47:39,415 | exchange.orders | INFO | [TP_DEBUG] Normalized side=BUY
+2025-11-03 11:47:39,415 | exchange.orders | INFO | [TP_PLACE] Level 1: BUY 0.003 @ 104878.9 (orig: 104878.9859670164)
+2025-11-03 11:47:39,748 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762148859458, Local: 1762148859748, Offset: -290ms
+2025-11-03 11:47:40,102 | exchange.orders | INFO | [TP_PLACE] Level 2: BUY 0.002 @ 103568.4 (orig: 103568.42895052458)
+2025-11-03 11:47:40,430 | exchange.orders | INFO | [TP_PLACE] Level 3: BUY 0.002 @ 102257.8 (orig: 102257.87193403277)
+2025-11-03 11:47:40,791 | exchange.orders | INFO | [TP_SUCCESS] Setup 3 take profit orders for BTCUSDT
+2025-11-03 11:47:40,791 | exchange.orders | DEBUG | [TP_ORDER] Level 1: 0.003 @ 104878.9
+2025-11-03 11:47:40,791 | exchange.orders | DEBUG | [TP_ORDER] Level 2: 0.002 @ 103568.4
+2025-11-03 11:47:40,792 | exchange.orders | DEBUG | [TP_ORDER] Level 3: 0.002 @ 102257.8
+2025-11-03 11:47:40,792 | exchange.exits | INFO | [MONOLITH] Combined exits setup successful for BTCUSDT
+2025-11-03 11:47:40,792 | runner.live | INFO | [ADVANCED_TP_SL] Monolith exit setup successful
+2025-11-03 11:47:40,792 | runner.live | INFO | [TP_SL] Setup complete for BTCUSDT: 3 TP levels, SL at 109650.10
+2025-11-03 11:47:40,792 | exchange.trailing_stop | INFO | [TRAIL_SL] Registered position for BTCUSDT: entry=107500.1000, side=SELL, TPs=3, initial_sl=109650.1020
+2025-11-03 11:47:40,792 | runner.live | INFO | [TRAIL_SL] Position registered for BTCUSDT
+2025-11-03 11:47:40,792 | runner.live | INFO | 🧠 [ML_RECORD] Storing ML predictions: PnL +2.40%, Win prob 68%
+2025-11-03 11:47:40,792 | strategy.enhanced_adaptive_learning | INFO | 📝 [ENHANCED_RECORD] BTCUSDT SELL: Entry @ $107500.10, Qty: 0.008
+2025-11-03 11:47:40,792 | runner.live | INFO | 🧠 [ENHANCED_ML] ✅ Trade recorded with ML context
+2025-11-03 11:47:40,792 | runner.live | INFO | 🧠 [ENHANCED_LEARNING] ✅ Trade recorded in advanced ML system: SELL 0.008 @ 107500.1000
+2025-11-03 11:47:40,792 | runner.live | INFO | [ORDER_SUCCESS] ✅ SELL position opened: 0.008 BTCUSDT
+2025-11-03 11:47:40,793 | strategy.dca | WARNING | DCA position already active for BTCUSDT
+2025-11-03 11:47:40,793 | runner.live | INFO | [DCA] Started DCA position for BTCUSDT
+2025-11-03 11:47:40,793 | exchange.market_data | DEBUG | [GET_CANDLES] Requesting ETHUSDT 30m limit=250
+2025-11-03 11:47:40,793 | exchange.market_data | DEBUG | [GET_CANDLES] ETHUSDT: HTTP fallback to https://testnet.binancefuture.com/fapi/v1/klines?symbol=ETHUSDT&interval=30m&limit=250
+2025-11-03 11:47:41,572 | exchange.market_data | INFO | [GET_CANDLES] ETHUSDT: Got 250 candles via HTTP fallback
+2025-11-03 11:47:41,572 | exchange.market_data | INFO | [GET_CANDLES] ETHUSDT: Range 2025-10-29 07:00:00 → 2025-11-03 11:30:00
+2025-11-03 11:47:41,572 | exchange.market_data | INFO | [GET_CANDLES] ETHUSDT: Latest OHLC: 3756.0/3756.72/3731.58/3732.58
+2025-11-03 11:47:41,572 | strategy.signals | DEBUG | [SIGNAL_DATA] ETHUSDT: Received 250 candles, latest close: 3732.58
+2025-11-03 11:47:41,572 | strategy.signals | DEBUG | [IMBA_THRESHOLD] ETHUSDT: Using min_confidence=1.2 (config.bt_conf_min=1.2)
+2025-11-03 11:47:41,572 | strategy.signals | DEBUG | Converting list of 250 candle dicts to DataFrame for IMBA
+2025-11-03 11:47:41,572 | strategy.signals | DEBUG | ✅ Converted to DataFrame: 250 candles, range: 2025-11-03 11:47:41.572326 → 2025-11-03 11:47:41.572326
+2025-11-03 11:47:41,576 | strategy.signals | DEBUG | IMBA using cached+new data: 1200 total candles for ETHUSDT
+2025-11-03 11:47:41,577 | strategy.imba_integration | DEBUG | [IMBA_DATA] ETHUSDT: Using 1200 candles
+2025-11-03 11:47:41,577 | strategy.imba_integration | DEBUG | [IMBA_DATA] ETHUSDT: Range 2025-11-03 05:16:25.847985 → 2025-11-03 11:47:41.572326
+2025-11-03 11:47:41,577 | strategy.imba_integration | DEBUG | [IMBA_DATA] ETHUSDT: Latest OHLC: 3756.00/3756.72/3731.58/3732.58
+2025-11-03 11:47:41,578 | strategy.regime | INFO | Regime detected: flat (ADX=0.00, BBW=0.0000, confidence=0.90)
+2025-11-03 11:47:41,644 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 3757-3892 (str:0.9)
+2025-11-03 11:47:41,647 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 3757-3843 (str:0.9)
+2025-11-03 11:47:41,647 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 3757-3843 (str:0.9)
+2025-11-03 11:47:41,647 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 3757-3909 (str:0.9)
+2025-11-03 11:47:41,649 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 3757-3927 (str:0.9)
+2025-11-03 11:47:41,649 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 3757-3869 (str:0.9)
+2025-11-03 11:47:41,649 | strategy.fvg_signal | DEBUG | [FVG] 🔴 Bearish gap: 3757-3869 (str:0.9)
+2025-11-03 11:47:41,649 | strategy.fvg_signal | DEBUG | [FVG] 🧹 Cleaned up: 218 expired, 8 filled → 10 active
+2025-11-03 11:47:41,655 | strategy.imba_integration | DEBUG | [IMBA_VOTES] ETHUSDT: BUY=1.10, SELL=0.00
+2025-11-03 11:47:41,655 | strategy.imba_integration | DEBUG | [IMBA_SIGNALS] ETHUSDT: bb_squeeze(wait), vwap_pullback(wait), vwap_bands_mr(wait), breakout_retest(wait), atr_momentum(wait)...
+2025-11-03 11:47:41,655 | strategy.imba_integration | INFO | [BTC_DOMINANCE] ETHUSDT: confidence adjusted: 0.00 → 0.00 (BTC.D: 57.89267281652039%, extreme_btc, trend: stable)
+2025-11-03 11:47:41,655 | utils.exchange_prices | DEBUG | Fetching prices for ETHUSDT from multiple sources...
+2025-11-03 11:47:43,208 | strategy.imba_integration | DEBUG | [SPREAD_DEBUG] ETHUSDT: Collected 3 spot prices: {'bybit': 3733.17, 'okx': 3733.67, 'kraken': 3733.25}
+2025-11-03 11:47:43,209 | strategy.imba_integration | INFO | [SPREAD_CHECK_START] ETHUSDT: Checking spread with 3 spot exchanges
+2025-11-03 11:47:43,209 | strategy.spread_filter | INFO | [SPREAD_CHECK] ETHUSDT: -0.02% (futures=$3732.58, spot=$3733.25) - Below 3.0% threshold, no signal
+2025-11-03 11:47:43,209 | strategy.imba_integration | DEBUG | [SPREAD_RESULT] ETHUSDT: spread_signal=None
+2025-11-03 11:47:43,209 | strategy.imba_integration | INFO |
+ 
+
+
+
+2025-11-03 11:53:25.499 | ERROR    | strategy.exits:notify_position_closed:662 - ❌ [AI_UPDATE] Error notifying position close T_BTCUSDT_20251103_114740_c2e5a2c9: 'EnhancedAdaptiveLearningSystem' object has no attribute 'update_trade_exit'
+2025-11-03 11:53:26,430 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762149206089, Local: 1762149206430, Offset: -341ms
+2025-11-03 11:53:26.755 | DEBUG    | strategy.enhanced_dashboard:_get_trading_engine_data:224 - [DASHBOARD] Failed to get market data: 'BinanceClient' object has no attribute 'get_24hr_ticker'
+2025-11-03 11:53:26.760 | INFO     | strategy.enhanced_dashboard:update_dashboard:102 - 📊 [ENHANCED_DASHBOARD] Updated: data\learning_reports\enhanced_dashboard.html
+2025-11-03 11:53:26,760 | runner.live | DEBUG | 📊 [ENHANCED_DASHBOARD] Updated successfully: data\learning_reports\enhanced_dashboard.html
+2025-11-03 11:53:28,242 | exchange.market_data | DEBUG | [GET_CANDLES] Requesting BTCUSDT 30m limit=250
+
+
+
+
+
+025-11-03 12:16:42,904 | strategy.signals | DEBUG | [SIGNAL_DATA] ADAUSDT: Received 250 candles, latest close: 0.5723
+2025-11-03 12:16:42,904 | strategy.signals | DEBUG | [IMBA_THRESHOLD] ADAUSDT: Using min_confidence=1.2 (config.bt_conf_min=1.2)
+2025-11-03 12:16:42,904 | strategy.signals | DEBUG | Converting list of 250 candle dicts to DataFrame for IMBA
+2025-11-03 12:16:42,904 | strategy.signals | DEBUG | ✅ Converted to DataFrame: 250 candles, range: 2025-11-03 12:16:42.904144 → 2025-11-03 12:16:42.904144
+2025-11-03 12:16:42,904 | strategy.signals | DEBUG | IMBA using cached+new data: 1200 total candles for ADAUSDT
+2025-11-03 12:16:42,908 | strategy.imba_integration | DEBUG | [IMBA_DATA] ADAUSDT: Using 1200 candles
+2025-11-03 12:16:42,908 | strategy.imba_integration | DEBUG | [IMBA_DATA] ADAUSDT: Range 2025-11-03 05:58:47.321969 → 2025-11-03 12:16:42.904144
+2025-11-03 12:16:42,908 | strategy.imba_integration | DEBUG | [IMBA_DATA] ADAUSDT: Latest OHLC: 0.57/0.57/0.57/0.57
+2025-11-03 12:16:42,908 | strategy.regime | INFO | Regime detected: flat (ADX=0.00, BBW=0.0000, confidence=0.90)
+2025-11-03 12:16:42,995 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:42,995 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.8)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 1-1 (str:0.9)
+2025-11-03 12:16:43,000 | strategy.fvg_signal | DEBUG | [FVG] 🧹 Cleaned up: 292 expired, 10 filled → 19 active
+2025-11-03 12:16:43,009 | strategy.regime | DEBUG | Allowing high-quality signal sfp regardless of regime
+2025-11-03 12:16:43,009 | strategy.imba_integration | DEBUG | [IMBA_VOTES] ADAUSDT: BUY=1.91, SELL=0.00
+2025-11-03 12:16:43,009 | strategy.imba_integration | DEBUG | [IMBA_SIGNALS] ADAUSDT: bb_squeeze(wait), vwap_pullback(wait), vwap_bands_mr(wait), breakout_retest(wait), atr_momentum(wait)...
+2025-11-03 12:16:43,009 | strategy.imba_integration | INFO | [FEAR_GREED] ADAUSDT: BUY confidence adjusted: 1.91 → 2.10 (Fear & Greed: 42/100, fear)
+2025-11-03 12:16:43,012 | strategy.imba_integration | INFO | [BTC_DOMINANCE] ADAUSDT: confidence adjusted: 2.10 → 1.89 (BTC.D: 57.89267281652039%, extreme_btc, trend: stable)
+2025-11-03 12:16:43,012 | utils.exchange_prices | DEBUG | Fetching prices for ADAUSDT from multiple sources...
+2025-11-03 12:16:44,323 | strategy.imba_integration | DEBUG | [SPREAD_DEBUG] ADAUSDT: Collected 3 spot prices: {'bybit': 0.573, 'okx': 0.573, 'kraken': 0.572531}
+2025-11-03 12:16:44,323 | strategy.imba_integration | INFO | [SPREAD_CHECK_START] ADAUSDT: Checking spread with 3 spot exchanges
+2025-11-03 12:16:44,323 | strategy.spread_filter | INFO | [SPREAD_CHECK] ADAUSDT: -0.12% (futures=$0.57, spot=$0.57) - Below 3.0% threshold, no signal
+2025-11-03 12:16:44,323 | strategy.imba_integration | DEBUG | [SPREAD_RESULT] ADAUSDT: spread_signal=None
+2025-11-03 12:16:44,323 | strategy.imba_integration | INFO |
+================================================================================
+🟢 IMBA SIGNAL ANALYSIS: ADAUSDT 🟢
+================================================================================
+📊 REGIME: FLAT
+  ├─ ADX: 0.00
+  ├─ BBW: 0.0000
+  └─ Confidence: 0.90
+
+🗳️  VOTING RESULTS:
+  ├─ BUY votes:  1.906 🟢
+  ├─ SELL votes: 0.000 ⚪
+  ├─ Base confidence: 1.906
+  ├─ After Fear & Greed (×1.10): 2.096
+  ├─ After BTC.D (×0.90): 1.887
+  └─ Final confidence: 1.887 ✅
+
+🔍 SIGNAL BREAKDOWN (12 indicators):
+  ├─ 1️⃣  bb_squeeze      │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 2️⃣  vwap_pullback   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 3️⃣  vwap_bands_mr   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 4️⃣  breakout_retest │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 5️⃣  atr_momentum    │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 6️⃣  rsi_mr          │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 7️⃣  sfp             │ 🟢 BUY      │ Vote: 0.55×1.3×1.1=0.80
+  ├─ 8️⃣  ema_pinch       │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 9️⃣  cvd             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 10️⃣  fvg             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 11️⃣  volume_profile  │ 🟢 BUY      │ Vote: 0.85×1.3×1.0=1.10
+
+📊 CURRENT PRICE: $0.5723 (Binance Futures)
+💱 SPOT EXCHANGES:
+  └─ Bybit $0.5730 (+0.12%) | Okx $0.5730 (+0.12%) | Kraken $0.5725 (+0.04%)
+
+😱 Fear & Greed: 42/100 (Fear) → BUY+10%
+📊 BTC.D: 57.9% (Extreme Btc, → stable) → ALT-9%
+
+🎯 FINAL DECISION: BUY 🟢
+  ├─ Signal Strength: 1.887 / 1.2 (157%)
+  ├─ Confidence Threshold: ✅ MET
+  ├─ Filters Passed: ✅ YES
+  └─ Trade Action: 🚀 EXECUTE
+================================================================================
+
+2025-11-03 12:16:44,323 | strategy.signals | INFO | ⚡ COOLDOWN BYPASSED for ADAUSDT: High confidence 1.89 >= 1.20
+2025-11-03 12:16:44,323 | strategy.signals | INFO | IMBA BUY signal for ADAUSDT (confidence: 1.89, regime: unknown)
+2025-11-03 12:16:45,066 | strategy.enhanced_ml_system | INFO | 📊 [CANDLES_CACHE] Updated ADAUSDT: 250 candles
+2025-11-03 12:16:45,066 | strategy.enhanced_ml_system | DEBUG | 📊 [CANDLES_DEBUG] ADAUSDT latest: OHLC=0.57/0.57/0.57
+2025-11-03 12:16:45,070 | strategy.enhanced_ml_system | INFO | ✅ [TECHNICAL] Extracted 22 real indicators for ADAUSDT
+2025-11-03 12:16:45,070 | strategy.enhanced_ml_system | DEBUG | 📊 [TECHNICAL_SAMPLE] ADAUSDT: RSI=18.3, MACD=-0.0079, Vol=0.021
+2025-11-03 12:16:45,070 | strategy.enhanced_ml_system | ERROR | ❌ [FEATURE_EXTRACTION] Error: 'MarketContext' object has no attribute 'ema_200'
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model xgboost_pnl failed: need to call fit or load_model beforehand
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model lightgbm_pnl failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model random_forest failed: This RandomForestRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model gradient_boost failed: This GradientBoostingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model neural_network failed: This MLPRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model ensemble_voting failed: This VotingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model volatility_predictor failed: need to call fit or load_model beforehand
+2025-11-03 12:16:45,076 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model sentiment_model failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 12:16:45,076 | runner.live | INFO | 🚀 [ADVANCED_ML] ADAUSDT: ENSEMBLE prediction from 0 models | Expected: +2.40% PnL | Win: 68% | Confidence: 0.50 | Source: historical_enhanced
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | 🧠 [AI_PREDICTION] #337 - ADAUSDT
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | 📈 Expected PnL: +2.40%
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | 🟢 Win Probability: 68%
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | ✨ ML Confidence: 0.50
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | 🛡️ Risk Level: UNKNOWN
+2025-11-03 12:16:45,076 | strategy.ai_status_monitor | INFO | ✅ Decision: TRADE
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO | ⚡ Processing: 9.67ms
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO | 🎯 [AI_DECISION] APPROVED for trading (Total: 230)
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO | 📊 [AI_STATS] Approval Rate: 68.2% (230/337)
+2025-11-03 12:16:45,079 | runner.live | INFO | 🧠 [ML_ANALYSIS] ADAUSDT: Expected PnL +2.40% | Win Prob 68% | Risk medium | Confidence 0.50
+2025-11-03 12:16:45,079 | runner.live | INFO | 🎯 [TRADING_DECISION] No reasoning
+2025-11-03 12:16:45,079 | runner.live | INFO | 📊 [ML_SIZING] Signal strength: 1.89 → 1.89 (ML multiplier: 1.00)
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO | 🎛️ [ML_SIZING] ➡️ UNCHANGED position size:
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO |     Signal: 1.89 → 1.89 (ML × 1.00)
+2025-11-03 12:16:45,079 | strategy.ai_status_monitor | INFO |     Total adjustments: 230
+2025-11-03 12:16:45,079 | runner.live | INFO | [POSITION_SIZE] Equity=1000.00, Risk=1.73%, Strength=1.89 (clamped=1.00), Value=864.00 (max=2000.00), Qty=1508.643269
+2025-11-03 12:16:45,079 | runner.live | INFO | [SIGNAL] BUY ADAUSDT @ 0.57 (strength=1.89) -> qty=1508.643269 [DRY-RUN=False]
+2025-11-03 12:16:45,718 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150605105, Local: 1762150605718, Offset: -613ms
+2025-11-03 12:16:46,874 | runner.live | INFO | [ORDER] Placing BUY order: 1509 ADAUSDT @ 0.57 (notional: 864.00 USDT)
+2025-11-03 12:16:47,195 | runner.live | INFO | [ORDER_PRICE] Signal: $0.5727, Market: $0.5723, Limit: $0.5730
+2025-11-03 12:16:47,522 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150607224, Local: 1762150607522, Offset: -298ms
+2025-11-03 12:16:47,886 | runner.live | INFO | [ORDER_RESULT] BUY order 417608125: status=NEW, executed=0.000/1509.000
+2025-11-03 12:16:47,886 | runner.live | INFO | [ORDER_DEBUG] status='NEW', executed_qty=0.0 (type: <class 'float'>), zero_check=True
+2025-11-03 12:16:47,886 | runner.live | INFO | [ORDER_WAIT] Market order placed, waiting for execution...
+2025-11-03 12:16:49,093 | runner.live | DEBUG | [ORDER_CHECK] Attempt 1: status=FILLED, executed=1509.000
+2025-11-03 12:16:49,930 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150609622, Local: 1762150609930, Offset: -308ms
+2025-11-03 12:16:50,255 | runner.live | INFO | [POSITION_VERIFY] ✅ Position confirmed: 1509.000 ADAUSDT (BUY)
+2025-11-03 12:16:50,255 | runner.live | INFO | [ADVANCED_TP_SL] Using monolith exit management system
+2025-11-03 12:16:50,255 | exchange.exits | INFO | [MONOLITH] Setting up exits for ADAUSDT: qty=1509.0, sl=0.561246, tps=3 levels
+2025-11-03 12:16:50,740 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150610440, Local: 1762150610739, Offset: -299ms
+2025-11-03 12:16:51,069 | exchange.exits | DEBUG | [MONOLITH] Found entry price: 0.5723 for ADAUSDT
+2025-11-03 12:16:51,069 | exchange.exits | DEBUG | [MONOLITH] Calculated TP quantities: [603.6, 528.15, 377.25] from shares [0.4, 0.35, 0.25]
+2025-11-03 12:16:51,070 | exchange.orders | INFO | [EXIT_SETUP] ADAUSDT: position.is_long=True, side=SELL
+2025-11-03 12:16:51,070 | exchange.orders | INFO | [EXIT_SETUP] ADAUSDT: entry=0.5723, sl=0.561246, tps=[0.5878275200076001, 0.5953912800114001, 0.6029550400152]
+2025-11-03 12:16:51,397 | exchange.orders | DEBUG | [CANCEL_ORDER] Order ADAUSDT 415995144 already filled/cancelled (APIError -2011)
+2025-11-03 12:16:52,044 | exchange.orders | INFO | Setup stop loss for ADAUSDT @ 0.5612
+2025-11-03 12:16:52,385 | exchange.orders | INFO | [TP_SETUP] Position verified: 1509.0 ADAUSDT (BUY)
+2025-11-03 12:16:52,385 | exchange.orders | INFO | [TP_DEBUG] Input side=SELL, prices=[0.5878275200076001, 0.5953912800114001, 0.6029550400152], quantities=[603.6, 528.15, 377.25]
+2025-11-03 12:16:52,711 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150612411, Local: 1762150612711, Offset: -300ms
+2025-11-03 12:16:53,532 | exchange.orders | DEBUG | [CANCEL_ORDER] Order ADAUSDT 415995352 already filled/cancelled (APIError -2011)
+2025-11-03 12:16:54,367 | exchange.orders | DEBUG | [CANCEL_ORDER] Order ADAUSDT 415995369 already filled/cancelled (APIError -2011)
+2025-11-03 12:16:54,694 | exchange.orders | DEBUG | [CANCEL_ORDER] Order ADAUSDT 415995439 already filled/cancelled (APIError -2011)
+2025-11-03 12:16:54,694 | exchange.orders | INFO | [TP_DEBUG] Normalized side=SELL
+2025-11-03 12:16:54,694 | exchange.orders | INFO | [TP_PLACE] Level 1: SELL 603.0 @ 0.5878 (orig: 0.5878275200076001)
+2025-11-03 12:16:55,014 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150614719, Local: 1762150615014, Offset: -295ms
+2025-11-03 12:16:55,354 | exchange.orders | INFO | [TP_PLACE] Level 2: SELL 528.0 @ 0.5953 (orig: 0.5953912800114001)
+2025-11-03 12:16:55,753 | exchange.orders | INFO | [TP_PLACE] Level 3: SELL 377.0 @ 0.6029 (orig: 0.6029550400152)
+2025-11-03 12:16:56,087 | exchange.orders | INFO | [TP_SUCCESS] Setup 3 take profit orders for ADAUSDT
+2025-11-03 12:16:56,087 | exchange.orders | DEBUG | [TP_ORDER] Level 1: 603.0 @ 0.5878
+2025-11-03 12:16:56,087 | exchange.orders | DEBUG | [TP_ORDER] Level 2: 528.0 @ 0.5953
+2025-11-03 12:16:56,087 | exchange.orders | DEBUG | [TP_ORDER] Level 3: 377.0 @ 0.6029
+2025-11-03 12:16:56,087 | exchange.exits | INFO | [MONOLITH] Combined exits setup successful for ADAUSDT
+2025-11-03 12:16:56,088 | runner.live | INFO | [ADVANCED_TP_SL] Monolith exit setup successful
+2025-11-03 12:16:56,088 | runner.live | INFO | [TP_SL] Setup complete for ADAUSDT: 3 TP levels, SL at 0.56
+2025-11-03 12:16:56,088 | exchange.trailing_stop | INFO | [TRAIL_SL] Registered position for ADAUSDT: entry=0.5727, side=BUY, TPs=3, initial_sl=0.5612
+2025-11-03 12:16:56,088 | runner.live | INFO | [TRAIL_SL] Position registered for ADAUSDT
+2025-11-03 12:16:56,088 | runner.live | INFO | 🧠 [ML_RECORD] Storing ML predictions: PnL +2.40%, Win prob 68%
+2025-11-03 12:16:56,088 | strategy.enhanced_adaptive_learning | INFO | 📝 [ENHANCED_RECORD] ADAUSDT BUY: Entry @ $0.57, Qty: 1509.0
+2025-11-03 12:16:56,088 | runner.live | INFO | 🧠 [ENHANCED_ML] ✅ Trade recorded with ML context
+2025-11-03 12:16:56,089 | runner.live | INFO | 🧠 [ENHANCED_LEARNING] ✅ Trade recorded in advanced ML system: BUY 1509.000 @ 0.5727
+2025-11-03 12:16:56,089 | runner.live | INFO | [ORDER_SUCCESS] ✅ BUY position opened: 1509.000 ADAUSDT
+2025-11-03 12:16:56,089 | strategy.dca | WARNING | DCA position already active for ADAUSDT
+2025-11-03 12:16:56,089 | runner.live | INFO | [DCA] Started DCA position for ADAUSDT
+2025-11-03 12:16:56,089 | exchange.market_data | DEBUG | [GET_CANDLES] Requesting XRPUSDT 30m limit=250
+2025-11-03 12:16:56,089 | exchange.market_data | DEBUG | [GET_CANDLES] XRPUSDT: HTTP fallback to https://testnet.binancefuture.com/fapi/v1/klines?symbol=XRPUSDT&interval=30m&limit=250
+2025-11-03 12:16:56,844 | exchange.market_data | INFO | [GET_CANDLES] XRPUSDT: Got 250 candles via HTTP fallback
+2025-11-03 12:16:56,844 | exchange.market_data | INFO | [GET_CANDLES] XRPUSDT: Range 2025-10-29 07:30:00 → 2025-11-03 12:00:00
+2025-11-03 12:16:56,844 | exchange.market_data | INFO | [GET_CANDLES] XRPUSDT: Latest OHLC: 2.4294/2.4306/2.4142/2.4161
+2025-11-03 12:16:56,844 | strategy.signals | DEBUG | [SIGNAL_DATA] XRPUSDT: Received 250 candles, latest close: 2.4161
+2025-11-03 12:16:56,844 | strategy.signals | DEBUG | [IMBA_THRESHOLD] XRPUSDT: Using min_confidence=1.2 (config.bt_conf_min=1.2)
+2025-11-03 12:16:56,844 | strategy.signals | DEBUG | Converting list of 250 candle dicts to DataFrame for IMBA
+2025-11-03 12:16:56,847 | strategy.signals | DEBUG | ✅ Converted to DataFrame: 250 candles, range: 2025-11-03 12:16:56.844355 → 2025-11-03 12:16:56.844355
+2025-11-03 12:16:56,849 | strategy.signals | DEBUG | IMBA using cached+new data: 1200 total candles for XRPUSDT
+2025-11-03 12:16:56,849 | strategy.imba_integration | DEBUG | [IMBA_DATA] XRPUSDT: Using 1200 candles
+2025-11-03 12:16:56,849 | strategy.imba_integration | DEBUG | [IMBA_DATA] XRPUSDT: Range 2025-11-03 05:51:32.304443 → 2025-11-03 12:16:56.844355
+2025-11-03 12:16:56,849 | strategy.imba_integration | DEBUG | [IMBA_DATA] XRPUSDT: Latest OHLC: 2.43/2.43/2.41/2.42
+2025-11-03 12:16:56,849 | strategy.regime | INFO | Regime detected: flat (ADX=0.00, BBW=0.0000, confidence=0.90)
+2025-11-03 12:16:56,924 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 2-3 (str:0.9)
+2025-11-03 12:16:56,926 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 2-2 (str:0.7)
+2025-11-03 12:16:56,926 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 2-3 (str:0.9)
+2025-11-03 12:16:56,926 | strategy.fvg_signal | DEBUG | [FVG] 🟢 Bullish gap: 2-3 (str:0.9)
+2025-11-03 12:16:56,926 | strategy.fvg_signal | DEBUG | [FVG] 🧹 Cleaned up: 234 expired, 9 filled → 15 active
+2025-11-03 12:16:56,934 | strategy.imba_integration | DEBUG | [IMBA_VOTES] XRPUSDT: BUY=1.10, SELL=0.00
+2025-11-03 12:16:56,934 | strategy.imba_integration | DEBUG | [IMBA_SIGNALS] XRPUSDT: bb_squeeze(wait), vwap_pullback(wait), vwap_bands_mr(wait), breakout_retest(wait), atr_momentum(wait)...
+2025-11-03 12:16:56,936 | strategy.imba_integration | INFO | [BTC_DOMINANCE] XRPUSDT: confidence adjusted: 0.00 → 0.00 (BTC.D: 57.89267281652039%, extreme_btc, trend: stable)
+2025-11-03 12:16:56,936 | utils.exchange_prices | DEBUG | Fetching prices for XRPUSDT from multiple sources...
+2025-11-03 12:16:59,732 | strategy.imba_integration | DEBUG | [SPREAD_DEBUG] XRPUSDT: Collected 3 spot prices: {'bybit': 2.4173, 'okx': 2.4177, 'kraken': 2.4178}
+2025-11-03 12:16:59,732 | strategy.imba_integration | INFO | [SPREAD_CHECK_START] XRPUSDT: Checking spread with 3 spot exchanges
+2025-11-03 12:16:59,732 | strategy.spread_filter | INFO | [SPREAD_CHECK] XRPUSDT: -0.07% (futures=$2.42, spot=$2.42) - Below 3.0% threshold, no signal
+2025-11-03 12:16:59,732 | strategy.imba_integration | DEBUG | [SPREAD_RESULT] XRPUSDT: spread_signal=None
+2025-11-03 12:16:59,732 | strategy.imba_integration | INFO |
+
+
+
+
+
+5-11-03 12:21:46,757 | strategy.imba_integration | DEBUG | [IMBA_VOTES] AVAXUSDT: BUY=1.91, SELL=0.00
+2025-11-03 12:21:46,757 | strategy.imba_integration | DEBUG | [IMBA_SIGNALS] AVAXUSDT: bb_squeeze(wait), vwap_pullback(wait), vwap_bands_mr(wait), breakout_retest(wait), atr_momentum(wait)...
+2025-11-03 12:21:46,757 | strategy.imba_integration | INFO | [FEAR_GREED] AVAXUSDT: BUY confidence adjusted: 1.91 → 2.10 (Fear & Greed: 42/100, fear)
+2025-11-03 12:21:46,757 | strategy.imba_integration | INFO | [BTC_DOMINANCE] AVAXUSDT: confidence adjusted: 2.10 → 1.89 (BTC.D: 57.89267281652039%, extreme_btc, trend: stable)
+2025-11-03 12:21:46,757 | utils.exchange_prices | DEBUG | Using cached prices for AVAXUSDT (age: 51.4s)
+2025-11-03 12:21:46,758 | strategy.imba_integration | DEBUG | [SPREAD_DEBUG] AVAXUSDT: Collected 3 spot prices: {'bybit': 17.42, 'okx': 17.42, 'kraken': 17.41}
+2025-11-03 12:21:46,758 | strategy.imba_integration | INFO | [SPREAD_CHECK_START] AVAXUSDT: Checking spread with 3 spot exchanges
+2025-11-03 12:21:46,758 | strategy.spread_filter | INFO | [SPREAD_CHECK] AVAXUSDT: -0.15% (futures=$17.39, spot=$17.42) - Below 3.0% threshold, no signal
+2025-11-03 12:21:46,758 | strategy.imba_integration | DEBUG | [SPREAD_RESULT] AVAXUSDT: spread_signal=None
+2025-11-03 12:21:46,758 | strategy.imba_integration | INFO |
+================================================================================
+🟢 IMBA SIGNAL ANALYSIS: AVAXUSDT 🟢
+================================================================================
+📊 REGIME: FLAT
+  ├─ ADX: 0.00
+  ├─ BBW: 0.0000
+  └─ Confidence: 0.90
+
+🗳️  VOTING RESULTS:
+  ├─ BUY votes:  1.906 🟢
+  ├─ SELL votes: 0.000 ⚪
+  ├─ Base confidence: 1.906
+  ├─ After Fear & Greed (×1.10): 2.096
+  ├─ After BTC.D (×0.90): 1.887
+  └─ Final confidence: 1.887 ✅
+
+🔍 SIGNAL BREAKDOWN (12 indicators):
+  ├─ 1️⃣  bb_squeeze      │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 2️⃣  vwap_pullback   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 3️⃣  vwap_bands_mr   │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 4️⃣  breakout_retest │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 5️⃣  atr_momentum    │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 6️⃣  rsi_mr          │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 7️⃣  sfp             │ 🟢 BUY      │ Vote: 0.55×1.3×1.1=0.80
+  ├─ 8️⃣  ema_pinch       │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 9️⃣  cvd             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 10️⃣  fvg             │ ⏸️  WAIT   │ Vote: 0.00
+  ├─ 11️⃣  volume_profile  │ 🟢 BUY      │ Vote: 0.85×1.3×1.0=1.10
+
+📊 CURRENT PRICE: $17.39 (Binance Futures)
+💱 SPOT EXCHANGES:
+  └─ Bybit $17.42 (+0.16%) | Okx $17.42 (+0.16%) | Kraken $17.41 (+0.10%)
+
+😱 Fear & Greed: 42/100 (Fear) → BUY+10%
+📊 BTC.D: 57.9% (Extreme Btc, → stable) → ALT-9%
+
+🎯 FINAL DECISION: BUY 🟢
+  ├─ Signal Strength: 1.887 / 1.2 (157%)
+  ├─ Confidence Threshold: ✅ MET
+  ├─ Filters Passed: ✅ YES
+  └─ Trade Action: 🚀 EXECUTE
+================================================================================
+
+2025-11-03 12:21:46,758 | strategy.signals | INFO | ⚡ COOLDOWN BYPASSED for AVAXUSDT: High confidence 1.89 >= 1.20
+2025-11-03 12:21:46,759 | strategy.signals | INFO | IMBA BUY signal for AVAXUSDT (confidence: 1.89, regime: unknown)
+2025-11-03 12:21:48,390 | strategy.enhanced_ml_system | INFO | 📊 [CANDLES_CACHE] Updated AVAXUSDT: 250 candles
+2025-11-03 12:21:48,392 | strategy.enhanced_ml_system | DEBUG | 📊 [CANDLES_DEBUG] AVAXUSDT latest: OHLC=17.46/17.37/17.39
+2025-11-03 12:21:48,394 | strategy.enhanced_ml_system | INFO | ✅ [TECHNICAL] Extracted 22 real indicators for AVAXUSDT
+2025-11-03 12:21:48,394 | strategy.enhanced_ml_system | DEBUG | 📊 [TECHNICAL_SAMPLE] AVAXUSDT: RSI=19.2, MACD=-0.2593, Vol=0.024
+2025-11-03 12:21:48,394 | strategy.enhanced_ml_system | ERROR | ❌ [FEATURE_EXTRACTION] Error: 'MarketContext' object has no attribute 'ema_200'
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model xgboost_pnl failed: need to call fit or load_model beforehand
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model lightgbm_pnl failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model random_forest failed: This RandomForestRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model gradient_boost failed: This GradientBoostingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model neural_network failed: This MLPRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model ensemble_voting failed: This VotingRegressor instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model volatility_predictor failed: need to call fit or load_model beforehand
+2025-11-03 12:21:48,398 | strategy.enhanced_ml_system | WARNING | ⚠️ [PREDICTION] Model sentiment_model failed: Estimator not fitted, call fit before exploiting the model.
+2025-11-03 12:21:48,398 | runner.live | INFO | 🚀 [ADVANCED_ML] AVAXUSDT: ENSEMBLE prediction from 0 models | Expected: +2.40% PnL | Win: 68% | Confidence: 0.50 | Source: historical_enhanced
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 🧠 [AI_PREDICTION] #339 - AVAXUSDT
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 📈 Expected PnL: +2.40%
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 🟢 Win Probability: 68%
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ✨ ML Confidence: 0.50
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 🛡️ Risk Level: UNKNOWN
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ✅ Decision: TRADE
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ⚡ Processing: 7.95ms
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | ================================================================================
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 🎯 [AI_DECISION] APPROVED for trading (Total: 231)
+2025-11-03 12:21:48,398 | strategy.ai_status_monitor | INFO | 📊 [AI_STATS] Approval Rate: 68.1% (231/339)
+2025-11-03 12:21:48,402 | runner.live | INFO | 🧠 [ML_ANALYSIS] AVAXUSDT: Expected PnL +2.40% | Win Prob 68% | Risk medium | Confidence 0.50
+2025-11-03 12:21:48,402 | runner.live | INFO | 🎯 [TRADING_DECISION] No reasoning
+2025-11-03 12:21:48,402 | runner.live | INFO | 📊 [ML_SIZING] Signal strength: 1.89 → 1.89 (ML multiplier: 1.00)
+2025-11-03 12:21:48,402 | strategy.ai_status_monitor | INFO | 🎛️ [ML_SIZING] ➡️ UNCHANGED position size:
+2025-11-03 12:21:48,402 | strategy.ai_status_monitor | INFO |     Signal: 1.89 → 1.89 (ML × 1.00)
+2025-11-03 12:21:48,402 | strategy.ai_status_monitor | INFO |     Total adjustments: 231
+2025-11-03 12:21:48,402 | runner.live | INFO | [POSITION_SIZE] Equity=1000.00, Risk=1.73%, Strength=1.89 (clamped=1.00), Value=864.00 (max=2000.00), Qty=49.666590
+2025-11-03 12:21:48,402 | runner.live | INFO | [SIGNAL] BUY AVAXUSDT @ 17.40 (strength=1.89) -> qty=49.666590 [DRY-RUN=False]
+2025-11-03 12:21:48,724 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150908422, Local: 1762150908724, Offset: -302ms
+2025-11-03 12:21:49,375 | runner.live | INFO | [ORDER] Placing BUY order: 50 AVAXUSDT @ 17.40 (notional: 864.00 USDT)
+2025-11-03 12:21:49,702 | runner.live | INFO | [ORDER_PRICE] Signal: $17.3960, Market: $17.3980, Limit: $17.4200
+2025-11-03 12:21:50,527 | runner.live | INFO | [ORDER_RESULT] BUY order 101179176: status=NEW, executed=0.000/50.000
+2025-11-03 12:21:50,527 | runner.live | INFO | [ORDER_DEBUG] status='NEW', executed_qty=0.0 (type: <class 'float'>), zero_check=True
+2025-11-03 12:21:50,529 | runner.live | INFO | [ORDER_WAIT] Market order placed, waiting for execution...
+2025-11-03 12:21:51,354 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150911052, Local: 1762150911354, Offset: -302ms
+2025-11-03 12:21:52,005 | runner.live | DEBUG | [ORDER_CHECK] Attempt 1: status=FILLED, executed=50.000
+2025-11-03 12:21:52,912 | runner.live | INFO | [POSITION_VERIFY] ✅ Position confirmed: 50.000 AVAXUSDT (BUY)
+2025-11-03 12:21:52,912 | runner.live | INFO | [ADVANCED_TP_SL] Using monolith exit management system
+2025-11-03 12:21:52,913 | exchange.exits | INFO | [MONOLITH] Setting up exits for AVAXUSDT: qty=50.0, sl=17.04808, tps=3 levels
+2025-11-03 12:21:53,408 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150913096, Local: 1762150913408, Offset: -312ms
+2025-11-03 12:21:53,733 | exchange.exits | DEBUG | [MONOLITH] Found entry price: 17.40196 for AVAXUSDT
+2025-11-03 12:21:53,733 | exchange.exits | DEBUG | [MONOLITH] Calculated TP quantities: [20.0, 17.5, 12.5] from shares [0.4, 0.35, 0.25]
+2025-11-03 12:21:53,733 | exchange.orders | INFO | [EXIT_SETUP] AVAXUSDT: position.is_long=True, side=SELL
+2025-11-03 12:21:53,733 | exchange.orders | INFO | [EXIT_SETUP] AVAXUSDT: entry=17.40196, sl=17.04808, tps=[17.855504693648, 18.085257040472, 18.315009387295998]
+2025-11-03 12:21:54,065 | exchange.orders | DEBUG | [CANCEL_ORDER] Order AVAXUSDT 100822916 already filled/cancelled (APIError -2011)
+2025-11-03 12:21:54,739 | exchange.orders | INFO | Setup stop loss for AVAXUSDT @ 17.048
+2025-11-03 12:21:55,566 | exchange.orders | INFO | [TP_SETUP] Position verified: 50.0 AVAXUSDT (BUY)
+2025-11-03 12:21:55,566 | exchange.orders | INFO | [TP_DEBUG] Input side=SELL, prices=[17.855504693648, 18.085257040472, 18.315009387295998], quantities=[20.0, 17.5, 12.5]
+2025-11-03 12:21:55,955 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150915587, Local: 1762150915955, Offset: -368ms
+2025-11-03 12:21:56,852 | exchange.orders | DEBUG | [CANCEL_ORDER] Order AVAXUSDT 100823128 already filled/cancelled (APIError -2011)
+2025-11-03 12:21:57,186 | exchange.orders | DEBUG | [CANCEL_ORDER] Order AVAXUSDT 100823151 already filled/cancelled (APIError -2011)
+2025-11-03 12:21:57,517 | exchange.orders | DEBUG | [CANCEL_ORDER] Order AVAXUSDT 100823172 already filled/cancelled (APIError -2011)
+2025-11-03 12:21:57,517 | exchange.orders | INFO | [TP_DEBUG] Normalized side=SELL
+2025-11-03 12:21:57,517 | exchange.orders | INFO | [TP_PLACE] Level 1: SELL 20.0 @ 17.855 (orig: 17.855504693648)
+2025-11-03 12:21:57,847 | exchange.orders | INFO | [TP_PLACE] Level 2: SELL 17.0 @ 18.085 (orig: 18.085257040472)
+2025-11-03 12:21:58,175 | exchange.client | DEBUG | [TIME_SYNC] Server: 1762150917866, Local: 1762150918175, Offset: -309ms
+2025-11-03 12:21:58,502 | exchange.orders | INFO | [TP_PLACE] Level 3: SELL 12.0 @ 18.315 (orig: 18.315009387295998)
+2025-11-03 12:21:59,325 | exchange.orders | INFO | [TP_SUCCESS] Setup 3 take profit orders for AVAXUSDT
+2025-11-03 12:21:59,325 | exchange.orders | DEBUG | [TP_ORDER] Level 1: 20.0 @ 17.855
+2025-11-03 12:21:59,325 | exchange.orders | DEBUG | [TP_ORDER] Level 2: 17.0 @ 18.085
+2025-11-03 12:21:59,325 | exchange.orders | DEBUG | [TP_ORDER] Level 3: 12.0 @ 18.315
+2025-11-03 12:21:59,325 | exchange.exits | INFO | [MONOLITH] Combined exits setup successful for AVAXUSDT
+2025-11-03 12:21:59,326 | runner.live | INFO | [ADVANCED_TP_SL] Monolith exit setup successful
+2025-11-03 12:21:59,326 | runner.live | INFO | [TP_SL] Setup complete for AVAXUSDT: 3 TP levels, SL at 17.05
+2025-11-03 12:21:59,326 | exchange.trailing_stop | INFO | [TRAIL_SL] Registered position for AVAXUSDT: entry=17.3960, side=BUY, TPs=3, initial_sl=17.0481
+2025-11-03 12:21:59,326 | runner.live | INFO | [TRAIL_SL] Position registered for AVAXUSDT
+2025-11-03 12:21:59,326 | runner.live | INFO | 🧠 [ML_RECORD] Storing ML predictions: PnL +2.40%, Win prob 68%
+2025-11-03 12:21:59,326 | strategy.enhanced_adaptive_learning | INFO | 📝 [ENHANCED_RECORD] AVAXUSDT BUY: Entry @ $17.40, Qty: 50.0
+2025-11-03 12:21:59,326 | runner.live | INFO | 🧠 [ENHANCED_ML] ✅ Trade recorded with ML context
+2025-11-03 12:21:59,326 | runner.live | INFO | 🧠 [ENHANCED_LEARNING] ✅ Trade recorded in advanced ML system: BUY 50.000 @ 17.3960
+2025-11-03 12:21:59,326 | runner.live | INFO | [ORDER_SUCCESS] ✅ BUY position opened: 50.000 AVAXUSDT
+2025-11-03 12:21:59,327 | strategy.dca | WARNING | DCA position already active for AVAXUSDT
+2025-11-03 12:21:59,327 | runner.live | INFO | [DCA] Started DCA position for AVAXUSDT
