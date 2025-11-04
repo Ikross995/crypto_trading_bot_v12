@@ -186,12 +186,12 @@
         <div class="header">
             <h1>🚀 AI Trading Bot - Enhanced Dashboard</h1>
             <p>Advanced Real-time Analytics & Performance Monitoring</p>
-            <p><span class="live-indicator"></span> Live • Last Update: 2025-11-02 14:38:28 UTC • Iteration: 30</p>
+            <p><span class="live-indicator"></span> Live • Last Update: 2025-11-04 09:54:35 UTC • Iteration: 0</p>
         </div>
         
         <div class="status-bar">
             <div class="status-item">
-                <div class="status-value">Running</div>
+                <div class="status-value">Standby</div>
                 <div class="status-label">Bot Status</div>
             </div>
             <div class="status-item">
@@ -217,7 +217,7 @@
                 <h3>💰 Account Overview</h3>
                 <div class="metric">
                     <span class="metric-label">💵 Account Balance</span>
-                    <span class="metric-value">$1,809.76</span>
+                    <span class="metric-value">$1,000.00</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">⚡ Unrealized PnL</span>
@@ -225,15 +225,15 @@
                 </div>
                 <div class="metric">
                     <span class="metric-label">💎 Total Equity</span>
-                    <span class="metric-value">$1,809.76</span>
+                    <span class="metric-value">$1,000.00</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">🛡️ Margin Used</span>
-                    <span class="metric-value">$788.86</span>
+                    <span class="metric-value">$0.00</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">📊 Margin Ratio</span>
-                    <span class="metric-value neutral">43.6%</span>
+                    <span class="metric-value neutral">0.0%</span>
                 </div>
             </div>
             
@@ -312,8 +312,8 @@
     <script>
         // PnL Chart
         var pnlData = [{
-            x: ["'14:27:22'", "'14:38:28'"],
-            y: [0.0, 0.0],
+            x: ["'09:54:35'"],
+            y: [0.0],
             type: 'scatter',
             mode: 'lines+markers',
             name: 'Cumulative PnL',
@@ -338,16 +338,16 @@
         // Parameters Chart
         var paramData = [
             {
-                x: ["'14:27:22'", "'14:38:28'"],
-                y: [1.2, 1.2],
+                x: ["'09:54:35'"],
+                y: [1.2],
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Confidence Threshold',
                 line: {color: '#667eea', width: 2}
             },
             {
-                x: ["'14:27:22'", "'14:38:28'"],
-                y: [1.0, 1.0],
+                x: ["'09:54:35'"],
+                y: [1.0],
                 type: 'scatter',
                 mode: 'lines+markers',
                 name: 'Position Multiplier',
@@ -378,16 +378,16 @@
         // Performance Dashboard
         var performanceData = [
             {
-                x: ["'14:27:22'", "'14:38:28'"],
-                y: [0.0, 0.0],
+                x: ["'09:54:35'"],
+                y: [0.0],
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Win Rate (%)',
                 line: {color: '#00ff88', width: 2}
             },
             {
-                x: ["'14:27:22'", "'14:38:28'"],
-                y: [1.0, 1.0],  // Cap at 5 for better visualization
+                x: ["'09:54:35'"],
+                y: [1.0],  // Cap at 5 for better visualization
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Profit Factor',
@@ -395,8 +395,8 @@
                 line: {color: '#ffa502', width: 2}
             },
             {
-                x: ["'14:27:22'", "'14:38:28'"],
-                y: [1000.0, 1809.76357322],
+                x: ["'09:54:35'"],
+                y: [1000.0],
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Account Equity',
