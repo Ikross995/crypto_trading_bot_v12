@@ -2,6 +2,11 @@
 Example: Train and use GRU model for price prediction
 """
 
+# Fix imports for Windows/standalone execution
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import asyncio
 import pandas as pd
 import numpy as np
@@ -9,7 +14,7 @@ from datetime import datetime, timedelta
 import logging
 
 from models.gru_predictor import GRUPricePredictor
-from data.indicators import calculate_technical_indicators  # Your indicators function
+# from data.indicators import calculate_technical_indicators  # Your indicators function
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
