@@ -80,14 +80,16 @@ async def train_gru_model():
     df = await prepare_training_data(symbol='BTCUSDT', days=365)
 
     # 2. Select features
+    # NOTE: 'close' is the target, so we DON'T include it in features!
     feature_columns = [
-        'open', 'high', 'low', 'close', 'volume',
+        'open', 'high', 'low', 'volume',  # OHLCV without close
         'rsi', 'macd', 'sma_20', 'ema_50',
         'bb_upper', 'bb_lower', 'volume_sma'
     ]
 
     # Ensure all features exist
-    df_features = df[feature_columns]
+    # We need to include 'close' in the dataframe but it will be used as target, not feature
+    df_features = df[feature_columns + ['close']]
 
     # 3. Initialize GRU model
     predictor = GRUPricePredictor(
@@ -145,8 +147,9 @@ async def use_trained_model():
     # Prepare recent data (last 60 candles)
     df = await prepare_training_data(symbol='BTCUSDT', days=7)
 
+    # NOTE: Same features as training (without 'close')
     feature_columns = [
-        'open', 'high', 'low', 'close', 'volume',
+        'open', 'high', 'low', 'volume',
         'rsi', 'macd', 'sma_20', 'ema_50',
         'bb_upper', 'bb_lower', 'volume_sma'
     ]
