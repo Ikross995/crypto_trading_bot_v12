@@ -19,6 +19,11 @@ Expected improvements:
 - 40-50% fewer premature stop-outs
 """
 
+# Fix imports for Windows/standalone execution
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import asyncio
 import pandas as pd
 import numpy as np
