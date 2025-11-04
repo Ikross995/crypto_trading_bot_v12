@@ -1,13 +1,25 @@
 """
 Machine learning models for AI Trading Bot.
 
-Provides LSTM and GPT integration for price prediction and decision making.
+Provides LSTM, GRU and optional GPT integration for price prediction and decision making.
 """
 
 from .lstm import LSTMPredictor
-from .gpt import GPTIntegration
+
+# Optional GPT integration
+try:
+    from .gpt import GPTIntegration
+except ImportError:
+    GPTIntegration = None
+
+# Optional GRU predictor
+try:
+    from .gru_predictor import GRUPricePredictor
+except ImportError:
+    GRUPricePredictor = None
 
 __all__ = [
     "LSTMPredictor",
-    "GPTIntegration"
+    "GPTIntegration",
+    "GRUPricePredictor"
 ]
