@@ -420,7 +420,7 @@ class LiveTradingEngine:
                 self.rate_limiter = AdaptiveRateLimiter(
                     max_calls=1200,
                     time_window=60,
-                    adaptive=True
+                    enable_adaptive=True
                 )
                 self.logger.info("⏱️  [PHASE 1] Adaptive rate limiter initialized (1200 req/min)")
             except Exception as e:
@@ -747,6 +747,11 @@ class LiveTradingEngine:
             return None
 
         try:
+            # Convert to DataFrame if needed
+            import pandas as pd
+            if isinstance(candles_df, list):
+                candles_df = pd.DataFrame(candles_df)
+
             regime_result = await self.regime_detector.detect_regime(candles_df)
 
             if regime_result and hasattr(regime_result, 'regime'):
