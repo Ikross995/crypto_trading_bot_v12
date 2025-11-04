@@ -86,49 +86,6 @@ try:
 except Exception:  # pragma: no cover
     LSTMPredictor = None  # type: ignore
 
-# ==================== PHASE 1-4 INTEGRATIONS ====================
-
-# Phase 1: Critical Fixes
-try:
-    from utils.concurrency import get_global_safe_state  # type: ignore
-except Exception:  # pragma: no cover
-    get_global_safe_state = None  # type: ignore
-
-try:
-    from utils.rate_limiter import AdaptiveRateLimiter  # type: ignore
-except Exception:  # pragma: no cover
-    AdaptiveRateLimiter = None  # type: ignore
-
-# Phase 2: GRU Model
-try:
-    from models.gru_predictor import GRUPricePredictor  # type: ignore
-except Exception:  # pragma: no cover
-    GRUPricePredictor = None  # type: ignore
-
-# Phase 3: Adaptive Strategy
-try:
-    from strategy.regime_detector import MarketRegimeDetector  # type: ignore
-except Exception:  # pragma: no cover
-    MarketRegimeDetector = None  # type: ignore
-
-try:
-    from strategy.adaptive_strategy import AdaptiveStrategyManager  # type: ignore
-except Exception:  # pragma: no cover
-    AdaptiveStrategyManager = None  # type: ignore
-
-# Phase 4: Risk Management
-try:
-    from strategy.kelly_criterion import KellyCriterionCalculator  # type: ignore
-except Exception:  # pragma: no cover
-    KellyCriterionCalculator = None  # type: ignore
-
-try:
-    from strategy.dynamic_stops import DynamicStopLossManager  # type: ignore
-except Exception:  # pragma: no cover
-    DynamicStopLossManager = None  # type: ignore
-
-# ================================================================
-
 logger = logging.getLogger(__name__)
 
 
@@ -402,90 +359,8 @@ class LiveTradingEngine:
         else:
             self.logger.info("📊 [DASHBOARD] Dashboard disabled or not available")
 
-        # ==================== PHASE 1-4 INITIALIZATION ====================
-
-        # Phase 1: Concurrency Protection & Rate Limiting
-        self.safe_state = None
-        if get_global_safe_state:
-            try:
-                self.safe_state = get_global_safe_state()
-                self.logger.info("🔒 [PHASE 1] Concurrency protection initialized")
-            except Exception as e:
-                self.logger.warning("🔒 [PHASE 1] Failed to initialize concurrency: %s", e)
-
-        self.rate_limiter = None
-        if AdaptiveRateLimiter:
-            try:
-                # Binance limits: 1200 requests/min, 50 orders/10s
-                self.rate_limiter = AdaptiveRateLimiter(
-                    max_calls=1200,
-                    time_window=60,
-                    adaptive=True
-                )
-                self.logger.info("⏱️  [PHASE 1] Adaptive rate limiter initialized (1200 req/min)")
-            except Exception as e:
-                self.logger.warning("⏱️  [PHASE 1] Failed to initialize rate limiter: %s", e)
-
-        # Phase 2: GRU Price Predictor
-        self.gru_predictor = None
-        if GRUPricePredictor and getattr(config, "gru_enable", False):
-            try:
-                self.gru_predictor = GRUPricePredictor(
-                    input_features=getattr(config, "gru_input_features", 10),
-                    sequence_length=getattr(config, "gru_sequence_length", 60)
-                )
-                self.logger.info("🧠 [PHASE 2] GRU price predictor initialized (MAPE ~3.54%)")
-            except Exception as e:
-                self.logger.warning("🧠 [PHASE 2] Failed to initialize GRU: %s", e)
-
-        # Phase 3: Market Regime Detection & Adaptive Strategy
-        self.regime_detector = None
-        if MarketRegimeDetector:
-            try:
-                self.regime_detector = MarketRegimeDetector()
-                self.logger.info("📊 [PHASE 3] Market regime detector initialized (5 regimes)")
-            except Exception as e:
-                self.logger.warning("📊 [PHASE 3] Failed to initialize regime detector: %s", e)
-
-        self.adaptive_strategy = None
-        if AdaptiveStrategyManager:
-            try:
-                self.adaptive_strategy = AdaptiveStrategyManager()
-                self.logger.info("🎯 [PHASE 3] Adaptive strategy manager initialized")
-            except Exception as e:
-                self.logger.warning("🎯 [PHASE 3] Failed to initialize adaptive strategy: %s", e)
-
-        # Phase 4: Kelly Criterion & Dynamic Stops
-        self.kelly_calculator = None
-        if KellyCriterionCalculator:
-            try:
-                fractional_kelly = getattr(config, "kelly_fractional", 0.25)
-                self.kelly_calculator = KellyCriterionCalculator(
-                    use_fractional=fractional_kelly
-                )
-                self.logger.info(f"💰 [PHASE 4] Kelly Criterion initialized (fractional={fractional_kelly})")
-            except Exception as e:
-                self.logger.warning("💰 [PHASE 4] Failed to initialize Kelly: %s", e)
-
-        self.dynamic_stops = None
-        if DynamicStopLossManager:
-            try:
-                self.dynamic_stops = DynamicStopLossManager()
-                self.logger.info("🛡️  [PHASE 4] Dynamic stop-loss manager initialized (ATR-based)")
-            except Exception as e:
-                self.logger.warning("🛡️  [PHASE 4] Failed to initialize dynamic stops: %s", e)
-
-        # Trade history for Kelly Criterion calculation
-        self.trade_history: List[Dict] = []
-        self.max_trade_history = getattr(config, "kelly_lookback_trades", 50)
-
-        # Position extremes for trailing stops
-        self.position_extremes: Dict[str, Dict] = {}
-
-        # ================================================================
-
         self.logger.info(
-            "Live trading engine initialized with DCA, LSTM, Dashboard and Phase 1-4 improvements"
+            "Live trading engine initialized with DCA, LSTM and Dashboard support"
         )
     
     def _get_market_session(self) -> str:
@@ -654,281 +529,6 @@ class LiveTradingEngine:
         )
 
         return qty
-
-    async def _position_size_qty_adaptive(
-        self,
-        price: Optional[float],
-        strength: float = 0.5,
-        symbol: str = "UNKNOWN",
-        regime: Optional[str] = None
-    ) -> Optional[float]:
-        """
-        PHASE 4: Enhanced position sizing using Kelly Criterion and adaptive strategy.
-        Falls back to legacy method if Kelly is not available.
-        """
-        # Fallback to legacy method if Kelly not initialized
-        if not self.kelly_calculator or not self.trade_history:
-            return self._position_size_qty(price, strength)
-
-        p = _to_float(price)
-        if not p or p <= 0:
-            return None
-
-        equity = float(self.equity_usdt)
-
-        try:
-            # Calculate Kelly-optimal size
-            kelly_result = await self.kelly_calculator.calculate_kelly_size(
-                trade_history=self.trade_history,
-                regime=regime
-            )
-
-            if not kelly_result.is_valid or kelly_result.recommended_size_pct <= 0:
-                self.logger.warning(
-                    "[KELLY] Invalid result, falling back to legacy sizing"
-                )
-                return self._position_size_qty(price, strength)
-
-            # Base position size from Kelly
-            kelly_pct = kelly_result.recommended_size_pct  # Already fractional (e.g., 2.5%)
-            base_position_value = equity * (kelly_pct / 100.0)
-
-            # Apply regime-based multiplier if adaptive strategy is available
-            regime_multiplier = 1.0
-            if self.adaptive_strategy and regime:
-                params = await self.adaptive_strategy.get_strategy_parameters(regime)
-                regime_multiplier = params.position_size_multiplier
-
-            # Apply signal strength multiplier
-            strength_clamped = min(1.0, max(0.5, strength))
-
-            # Final position value
-            position_value = base_position_value * regime_multiplier * strength_clamped
-
-            # Ensure minimum notional
-            final_value = max(self.min_notional, position_value)
-
-            # SAFETY: Cap maximum position to 30% of equity
-            max_position = equity * 0.3 * self.leverage
-            final_value = min(final_value, max_position)
-
-            # Convert to quantity
-            qty = final_value / p
-
-            if qty <= 0:
-                return None
-
-            self.logger.info(
-                "[KELLY_SIZE] Symbol=%s, Kelly=%.2f%%, Regime=%s (×%.2f), Strength=%.2f (×%.2f), Value=%.2f, Qty=%.6f",
-                symbol,
-                kelly_pct,
-                regime or "UNKNOWN",
-                regime_multiplier,
-                strength,
-                strength_clamped,
-                final_value,
-                qty,
-            )
-
-            return qty
-
-        except Exception as e:
-            self.logger.warning(
-                "[KELLY] Error calculating adaptive size: %s, falling back to legacy", e
-            )
-            return self._position_size_qty(price, strength)
-
-    async def _detect_market_regime(self, symbol: str, candles_df: Any) -> Optional[str]:
-        """
-        PHASE 3: Detect current market regime for adaptive strategy.
-        Returns regime string (e.g., 'STRONG_TREND', 'CHOPPY') or None.
-        """
-        if not self.regime_detector:
-            return None
-
-        try:
-            regime_result = await self.regime_detector.detect_regime(candles_df)
-
-            if regime_result and hasattr(regime_result, 'regime'):
-                regime_str = str(regime_result.regime.value) if hasattr(regime_result.regime, 'value') else str(regime_result.regime)
-
-                self.logger.info(
-                    "[REGIME] Symbol=%s, Regime=%s, ADX=%.2f, Confidence=%.2f",
-                    symbol,
-                    regime_str,
-                    getattr(regime_result, 'adx', 0),
-                    getattr(regime_result, 'confidence', 0)
-                )
-
-                return regime_str
-
-            return None
-
-        except Exception as e:
-            self.logger.warning("[REGIME] Error detecting regime for %s: %s", symbol, e)
-            return None
-
-    async def _get_gru_prediction(self, symbol: str, candles_df: Any) -> Optional[Dict]:
-        """
-        PHASE 2: Get GRU model price prediction.
-        Returns dict with 'predicted_price', 'direction', 'confidence' or None.
-        """
-        if not self.gru_predictor:
-            return None
-
-        try:
-            # Check if model is trained
-            if not hasattr(self.gru_predictor, 'model') or self.gru_predictor.model is None:
-                return None
-
-            prediction = await self.gru_predictor.predict(candles_df)
-
-            if prediction:
-                self.logger.info(
-                    "[GRU] Symbol=%s, Predicted=%.2f, Direction=%s, Confidence=%.2f%%",
-                    symbol,
-                    prediction.get('predicted_price', 0),
-                    prediction.get('direction', 'UNKNOWN'),
-                    prediction.get('confidence', 0) * 100
-                )
-
-                return prediction
-
-            return None
-
-        except Exception as e:
-            self.logger.debug("[GRU] Prediction not available for %s: %s", symbol, e)
-            return None
-
-    async def _calculate_dynamic_stops(
-        self,
-        symbol: str,
-        entry_price: float,
-        side: str,
-        market_data: Dict,
-        regime: Optional[str] = None
-    ) -> Dict[str, float]:
-        """
-        PHASE 4: Calculate dynamic ATR-based stop loss and take profit levels.
-        Returns dict with 'stop_loss', 'take_profit', 'breakeven_trigger'.
-        """
-        if not self.dynamic_stops:
-            # Fallback to fixed percentages
-            sl_pct = getattr(self.config, 'sl_pct', 2.0) / 100.0
-            tp_pct = getattr(self.config, 'tp_pct', 4.0) / 100.0
-
-            if side == 'BUY':
-                return {
-                    'stop_loss': entry_price * (1 - sl_pct),
-                    'take_profit': entry_price * (1 + tp_pct),
-                    'breakeven_trigger': entry_price * (1 + tp_pct / 2)
-                }
-            else:
-                return {
-                    'stop_loss': entry_price * (1 + sl_pct),
-                    'take_profit': entry_price * (1 - tp_pct),
-                    'breakeven_trigger': entry_price * (1 - tp_pct / 2)
-                }
-
-        try:
-            # Calculate initial stop with ATR
-            stop_result = await self.dynamic_stops.calculate_initial_stop(
-                entry_price=entry_price,
-                side=side,
-                market_data=market_data,
-                regime=regime
-            )
-
-            # Calculate take profit levels
-            tp_result = await self.dynamic_stops.calculate_take_profit_levels(
-                entry_price=entry_price,
-                side=side,
-                stop_loss=stop_result.stop_price,
-                market_data=market_data
-            )
-
-            result = {
-                'stop_loss': stop_result.stop_price,
-                'take_profit': tp_result.primary_target if tp_result else entry_price * 1.02,
-                'breakeven_trigger': entry_price * (1.015 if side == 'BUY' else 0.985),
-                'atr_multiplier': stop_result.atr_multiplier,
-                'stop_distance_pct': stop_result.distance_pct
-            }
-
-            self.logger.info(
-                "[DYNAMIC_STOPS] Symbol=%s, Side=%s, Entry=%.2f, SL=%.2f (%.2f%% / %.2fx ATR), TP=%.2f",
-                symbol,
-                side,
-                entry_price,
-                result['stop_loss'],
-                result['stop_distance_pct'],
-                result['atr_multiplier'],
-                result['take_profit']
-            )
-
-            return result
-
-        except Exception as e:
-            self.logger.warning(
-                "[DYNAMIC_STOPS] Error calculating stops for %s: %s, using fallback", symbol, e
-            )
-            # Fallback to fixed percentages
-            sl_pct = 0.02
-            tp_pct = 0.04
-            if side == 'BUY':
-                return {
-                    'stop_loss': entry_price * (1 - sl_pct),
-                    'take_profit': entry_price * (1 + tp_pct),
-                    'breakeven_trigger': entry_price * 1.015
-                }
-            else:
-                return {
-                    'stop_loss': entry_price * (1 + sl_pct),
-                    'take_profit': entry_price * (1 - tp_pct),
-                    'breakeven_trigger': entry_price * 0.985
-                }
-
-    def _record_trade_for_kelly(
-        self,
-        symbol: str,
-        side: str,
-        entry_price: float,
-        exit_price: float,
-        quantity: float,
-        pnl: float,
-        regime: Optional[str] = None
-    ) -> None:
-        """
-        PHASE 4: Record completed trade for Kelly Criterion calculation.
-        Maintains a sliding window of recent trades.
-        """
-        trade_record = {
-            'symbol': symbol,
-            'side': side,
-            'entry_price': entry_price,
-            'exit_price': exit_price,
-            'quantity': quantity,
-            'pnl': pnl,
-            'pnl_pct': (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0,
-            'regime': regime,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-
-        self.trade_history.append(trade_record)
-
-        # Maintain sliding window
-        if len(self.trade_history) > self.max_trade_history:
-            self.trade_history = self.trade_history[-self.max_trade_history:]
-
-        self.logger.info(
-            "[KELLY_RECORD] Trade recorded: %s %s, PnL=$%.2f (%.2f%%), Regime=%s, History size=%d",
-            side,
-            symbol,
-            pnl,
-            trade_record['pnl_pct'],
-            regime or 'UNKNOWN',
-            len(self.trade_history)
-        )
 
     async def start(self) -> None:
         if callable(setup_structured_logging):
@@ -1659,16 +1259,6 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.debug("get_candles(%s) error: %s", symbol, e)
 
-        # ==================== PHASE 3: REGIME DETECTION ====================
-        current_regime = None
-        if md is not None:
-            current_regime = await self._detect_market_regime(symbol, md)
-
-        # ==================== PHASE 2: GRU PREDICTION ====================
-        gru_prediction = None
-        if md is not None:
-            gru_prediction = await self._get_gru_prediction(symbol, md)
-
         raw = await self._produce_raw_signal(symbol, md)
         sig = normalize_signal_obj(raw, symbol_default=symbol)
         if not sig:
@@ -1816,14 +1406,8 @@ class LiveTradingEngine:
                 self.logger.warning("🧠 [ML_ANALYSIS] Error in ML analysis: %s", ml_e)
                 enhanced_analysis = None
         
-        # ==================== PHASE 4: ADAPTIVE POSITION SIZING ====================
-        # Use Kelly Criterion + regime-adaptive sizing if available
-        qty = await self._position_size_qty_adaptive(
-            price=price,
-            strength=sig.strength,
-            symbol=symbol,
-            regime=current_regime
-        )
+        # Calculate position size with potentially ML-adjusted strength
+        qty = self._position_size_qty(price, sig.strength)
         if not qty:
             self.logger.debug(
                 "Skip %s: missing qty (price=%s strength=%s)", symbol, price, sig.strength
@@ -1910,16 +1494,7 @@ class LiveTradingEngine:
                     )
                     return
 
-                # Pass regime and market data for dynamic stops
-                await self._place_order(
-                    symbol,
-                    sig.side,
-                    qty,
-                    price,
-                    sig.strength,
-                    regime=current_regime,
-                    market_data=md
-                )
+                await self._place_order(symbol, sig.side, qty, price, sig.strength)
 
                 # Update active positions for DCA tracking
                 if symbol not in self.active_positions:
@@ -1978,19 +1553,9 @@ class LiveTradingEngine:
                 self.logger.debug("ExitManager.on_new_signal error: %s", e)
 
     async def _place_order(
-        self,
-        symbol: str,
-        side: str,
-        qty: float,
-        price: float,
-        strength: float,
-        regime: Optional[str] = None,
-        market_data: Optional[Any] = None
+        self, symbol: str, side: str, qty: float, price: float, strength: float
     ) -> None:
-        """
-        Place a real order on the exchange.
-        PHASE 3-4: Now accepts regime and market_data for dynamic stops.
-        """
+        """Place a real order on the exchange."""
         try:
             # Initialize Binance client if not already done
             if not hasattr(self, "_binance_client") or not self._binance_client:
@@ -2069,11 +1634,6 @@ class LiveTradingEngine:
                     # This prevents 2.77 from being sent as 2.770 to Binance
                     api_quantity = float(f"{rounded_qty:.{decimal_places}f}")
 
-                    # ==================== PHASE 1: RATE LIMITING ====================
-                    # Apply rate limiting before API calls
-                    if self.rate_limiter:
-                        await self.rate_limiter.acquire(weight=1)
-
                     # Get current bid/ask to calculate expected execution price
                     try:
                         ticker = self.client.get_ticker_price(symbol)
@@ -2117,51 +1677,24 @@ class LiveTradingEngine:
                         )
                         limit_price = None
 
-                    # ==================== PHASE 1: RATE LIMITING FOR ORDERS ====================
-                    # Apply rate limiting before order placement (weight=2 for order)
-                    if self.rate_limiter:
-                        await self.rate_limiter.acquire(weight=2)
-
-                    # ==================== PHASE 1: CONCURRENCY PROTECTION ====================
-                    # Wrap order placement in atomic operation to prevent race conditions
-                    if self.safe_state:
-                        async with self.safe_state.atomic_trade_operation():
-                            # Place order with better execution strategy
-                            if limit_price:
-                                order_result = self.client.place_order(
-                                    symbol=symbol,
-                                    side=order_side,
-                                    type="LIMIT",
-                                    quantity=api_quantity,
-                                    price=limit_price,
-                                    timeInForce="IOC",  # Immediate or Cancel - fills immediately or cancels
-                                )
-                            else:
-                                # Fallback to market order
-                                order_result = self.client.place_order(
-                                    symbol=symbol,
-                                    side=order_side,
-                                    type="MARKET",
-                                    quantity=api_quantity,
-                                )
+                    # Place order with better execution strategy
+                    if limit_price:
+                        order_result = self.client.place_order(
+                            symbol=symbol,
+                            side=order_side,
+                            type="LIMIT",
+                            quantity=api_quantity,
+                            price=limit_price,
+                            timeInForce="IOC",  # Immediate or Cancel - fills immediately or cancels
+                        )
                     else:
-                        # Fallback: no concurrency protection
-                        if limit_price:
-                            order_result = self.client.place_order(
-                                symbol=symbol,
-                                side=order_side,
-                                type="LIMIT",
-                                quantity=api_quantity,
-                                price=limit_price,
-                                timeInForce="IOC",
-                            )
-                        else:
-                            order_result = self.client.place_order(
-                                symbol=symbol,
-                                side=order_side,
-                                type="MARKET",
-                                quantity=api_quantity,
-                            )
+                        # Fallback to market order
+                        order_result = self.client.place_order(
+                            symbol=symbol,
+                            side=order_side,
+                            type="MARKET",
+                            quantity=api_quantity,
+                        )
 
                     # CRITICAL: Verify order was actually filled!
                     order_id = order_result.get("orderId", "N/A")
@@ -2277,15 +1810,8 @@ class LiveTradingEngine:
                         )
 
                         # Setup Take Profit and Stop Loss orders with actual fill data
-                        # PHASE 4: Pass regime and market_data for dynamic stops
                         await self._setup_tp_sl_orders(
-                            symbol,
-                            order_side,
-                            executed_qty,
-                            avg_fill_price,
-                            strength,
-                            regime=regime,
-                            market_data=market_data
+                            symbol, order_side, executed_qty, avg_fill_price, strength
                         )
 
                         # Register TP/SL orders with Exit Tracker if available
@@ -2959,84 +2485,14 @@ class LiveTradingEngine:
             self._binance_client = None
 
     async def _setup_tp_sl_orders(
-        self,
-        symbol: str,
-        side: str,
-        qty: float,
-        entry_price: float,
-        strength: float,
-        regime: Optional[str] = None,
-        market_data: Optional[Any] = None
+        self, symbol: str, side: str, qty: float, entry_price: float, strength: float
     ) -> None:
-        """
-        Setup comprehensive Take Profit and Stop Loss orders.
-        PHASE 4: Now uses dynamic ATR-based stops when available.
-        """
+        """Setup comprehensive Take Profit and Stop Loss orders with advanced monolith logic."""
         try:
-            # ==================== PHASE 4: DYNAMIC STOPS ====================
-            # Try to use dynamic ATR-based stops first
-            sl_level = None
-            tp_levels = []
-
-            if self.dynamic_stops and market_data is not None:
-                try:
-                    # Prepare market data dict with required indicators
-                    import pandas as pd
-                    if hasattr(market_data, 'close'):
-                        # Convert to dict format
-                        market_dict = {
-                            'close': float(market_data.close.iloc[-1]) if hasattr(market_data.close, 'iloc') else float(market_data.close[-1]),
-                            'atr_14': float(market_data.atr_14.iloc[-1]) if hasattr(market_data, 'atr_14') and hasattr(market_data.atr_14, 'iloc') else None,
-                        }
-                    else:
-                        market_dict = {'close': entry_price}
-
-                    # Calculate dynamic stops
-                    dynamic_result = await self._calculate_dynamic_stops(
-                        symbol=symbol,
-                        entry_price=entry_price,
-                        side=side,
-                        market_data=market_dict,
-                        regime=regime
-                    )
-
-                    sl_level = dynamic_result.get('stop_loss')
-                    primary_tp = dynamic_result.get('take_profit')
-
-                    # Create 3-level TP structure
-                    if primary_tp:
-                        if side == 'BUY':
-                            tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,  # 60% to target
-                                primary_tp,  # 100% to target
-                                primary_tp * 1.2 - entry_price * 0.2   # 120% to target
-                            ]
-                        else:  # SELL
-                            tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,
-                                primary_tp,
-                                entry_price * 1.2 - primary_tp * 0.2
-                            ]
-
-                    self.logger.info(
-                        "[DYNAMIC_TP_SL] %s: Using ATR-based stops (regime=%s)",
-                        symbol,
-                        regime or "UNKNOWN"
-                    )
-
-                except Exception as dynamic_e:
-                    self.logger.warning(
-                        "[DYNAMIC_TP_SL] Failed to calculate dynamic stops: %s, falling back to legacy",
-                        dynamic_e
-                    )
-                    sl_level = None
-                    tp_levels = []
-
-            # Fallback to legacy calculation if dynamic stops not available
-            if not sl_level or not tp_levels:
-                tp_levels, sl_level = self._calculate_tp_sl_levels(
-                    entry_price, side, strength
-                )
+            # Calculate TP/SL levels based on signal strength and market conditions
+            tp_levels, sl_level = self._calculate_tp_sl_levels(
+                entry_price, side, strength
+            )
 
             if not tp_levels and not sl_level:
                 self.logger.info("[TP_SL] No TP/SL levels calculated for %s", symbol)
