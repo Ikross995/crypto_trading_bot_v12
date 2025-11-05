@@ -283,10 +283,19 @@ class BinanceDataDownloader:
 def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Рассчитать технические индикаторы для обучения модели.
+
+    Includes:
+    - Price indicators: RSI, MACD, BB, SMA, EMA, ATR
+    - Volume indicators: Volume Delta, OBV, Volume Ratio, Spike, MFI, CVD, VWAP Distance
+    Total: 22 features
     """
     logger.info("📊 Calculating technical indicators...")
 
     df = df.copy()
+
+    # ============================================
+    # PRICE INDICATORS
+    # ============================================
 
     # RSI (14)
     delta = df['close'].diff()
@@ -315,9 +324,6 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # EMA
     df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
 
-    # Volume indicators
-    df['volume_sma'] = df['volume'].rolling(window=20).mean()
-
     # ATR (14) - Average True Range
     high_low = df['high'] - df['low']
     high_close = np.abs(df['high'] - df['close'].shift())
@@ -326,10 +332,62 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     true_range = np.max(ranges, axis=1)
     df['atr'] = true_range.rolling(14).mean()
 
+    # ============================================
+    # VOLUME INDICATORS (7 new features!)
+    # ============================================
+
+    logger.info("📊 Calculating advanced volume indicators...")
+
+    # Volume SMA (baseline)
+    df['volume_sma'] = df['volume'].rolling(window=20).mean()
+
+    # 1. Volume Delta - Buy/Sell pressure (simplified)
+    df['volume_delta'] = df['volume'] * np.where(
+        df['close'] > df['open'], 1, -1
+    )
+
+    # 2. OBV (On-Balance Volume) - Cumulative volume
+    obv = []
+    obv_val = 0
+    for i in range(len(df)):
+        if i == 0:
+            obv.append(0)
+        else:
+            if df['close'].iloc[i] > df['close'].iloc[i-1]:
+                obv_val += df['volume'].iloc[i]
+            elif df['close'].iloc[i] < df['close'].iloc[i-1]:
+                obv_val -= df['volume'].iloc[i]
+            obv.append(obv_val)
+    df['obv'] = obv
+
+    # 3. Volume Ratio - Current volume vs average
+    df['volume_ratio'] = df['volume'] / (df['volume_sma'] + 1e-10)
+
+    # 4. Volume Spike - Binary flag for anomalous volume
+    df['volume_spike'] = (df['volume_ratio'] > 2.0).astype(float)
+
+    # 5. MFI (Money Flow Index) - RSI with volume
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    money_flow = typical_price * df['volume']
+
+    positive_flow = money_flow.where(df['close'] > df['close'].shift(1), 0).rolling(14).sum()
+    negative_flow = money_flow.where(df['close'] <= df['close'].shift(1), 0).rolling(14).sum()
+
+    mfi_ratio = positive_flow / (negative_flow + 1e-10)
+    df['mfi'] = 100 - (100 / (1 + mfi_ratio))
+
+    # 6. CVD (Cumulative Volume Delta) - Accumulated delta
+    df['cvd'] = df['volume_delta'].cumsum()
+
+    # 7. VWAP Distance - Distance from volume-weighted average price
+    df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / df['volume'].cumsum()
+    df['vwap_distance'] = (df['close'] - df['vwap']) / df['vwap']
+
     # Удаляем NaN
     df = df.dropna()
 
-    logger.info(f"✅ Indicators calculated, {len(df):,} samples remaining")
+    logger.info(f"✅ All indicators calculated: 15 price + 7 volume = 22 features")
+    logger.info(f"✅ Samples remaining: {len(df):,}")
 
     return df
 
@@ -661,16 +719,29 @@ async def train_gru_on_real_data(
     else:
         logger.info(f"✅ Using cached dataset: {len(combined_df):,} samples")
 
-    # Список фичей (15 indicators)
+    # Список фичей (22 indicators: 15 price + 7 volume)
     feature_columns = [
+        # Price features (4)
         'open', 'high', 'low', 'volume',
+        # Technical indicators (11)
         'rsi', 'macd', 'macd_signal',
         'bb_upper', 'bb_mid', 'bb_lower',
         'sma_20', 'sma_50', 'ema_50',
-        'volume_sma', 'atr'
+        'volume_sma', 'atr',
+        # Volume indicators (7) - NEW!
+        'volume_delta',    # Buy/sell pressure
+        'obv',             # On-Balance Volume
+        'volume_ratio',    # Volume vs average
+        'volume_spike',    # Anomaly detection
+        'mfi',             # Money Flow Index
+        'cvd',             # Cumulative Volume Delta
+        'vwap_distance'    # Distance from VWAP
     ]
 
-    logger.info(f"📊 Features: {len(feature_columns)} ({', '.join(feature_columns[:5])}...)")
+    logger.info(f"📊 Features: {len(feature_columns)} total")
+    logger.info(f"   - Price features: 15 (open, high, low, volume, rsi, macd, bb, sma, ema, atr)")
+    logger.info(f"   - Volume features: 7 (volume_delta, obv, ratio, spike, mfi, cvd, vwap)")
+    logger.info(f"🔥 Enhanced model with advanced volume analysis!")
 
     # Подготовка последовательностей с нормализацией
     X, y, feature_scaler, target_scaler = prepare_sequences(combined_df, feature_columns, sequence_length)
