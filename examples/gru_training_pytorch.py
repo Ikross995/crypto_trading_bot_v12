@@ -544,6 +544,10 @@ def train_model(
     logger.info(f"   Epochs: {epochs}")
     logger.info(f"   Learning rate: {learning_rate}")
     logger.info(f"   Device: {device}")
+    logger.info(f"   Batch size: {len(next(iter(train_loader))[0])}")
+    logger.info(f"   Batches per epoch: {len(train_loader):,}")
+    if device.type == 'cuda':
+        logger.info(f"   ⚡ GPU Acceleration ENABLED")
 
     # Оптимизатор и функция потерь
     criterion = nn.MSELoss()
@@ -577,6 +581,10 @@ def train_model(
 
             # Backward pass
             loss.backward()
+
+            # Gradient clipping - предотвращает взрывы градиентов
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optimizer.step()
 
             # Метрики
@@ -754,12 +762,28 @@ async def train_gru_on_real_data(
     logger.info(f"📊 Train samples: {len(X_train):,}")
     logger.info(f"📊 Test samples: {len(X_test):,}")
 
-    # Создаём DataLoaders
+    # Создаём DataLoaders с многопоточной загрузкой
     train_dataset = PriceDataset(X_train, y_train)
     test_dataset = PriceDataset(X_test, y_test)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=8,  # Многопоточная загрузка данных (16 CPU threads / 2)
+        pin_memory=True,  # Ускорение переноса на GPU
+        persistent_workers=True,  # Держать workers alive между эпохами
+        prefetch_factor=4  # Каждый worker подготавливает 4 батча заранее
+    )
+    val_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4
+    )
 
     # Создаём модель
     logger.info("🧠 Building GRU model...")
