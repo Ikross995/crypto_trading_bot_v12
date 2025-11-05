@@ -33,9 +33,11 @@ try:
     import torch.nn as nn
     import torch.optim as optim
     from torch.utils.data import Dataset, DataLoader
+    from sklearn.preprocessing import MinMaxScaler
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("Install PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121")
+    print("Install scikit-learn: pip install scikit-learn")
     sys.exit(1)
 
 # Настройка логирования
@@ -424,9 +426,9 @@ def prepare_sequences(
     df: pd.DataFrame,
     feature_columns: List[str],
     sequence_length: int = 60
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler, MinMaxScaler]:
     """
-    Подготовить последовательности для обучения GRU.
+    Подготовить последовательности для обучения GRU с нормализацией.
 
     Args:
         df: DataFrame с features и close
@@ -434,20 +436,30 @@ def prepare_sequences(
         sequence_length: Длина последовательности
 
     Returns:
-        X: (samples, sequence_length, features)
-        y: (samples,) - predicted price
+        X: (samples, sequence_length, features) - нормализованные
+        y: (samples,) - нормализованные predicted price
+        feature_scaler: Scaler для features
+        target_scaler: Scaler для target (close)
     """
     logger.info(f"📦 Preparing sequences (length={sequence_length})...")
 
-    # Извлекаем features и target
-    features = df[feature_columns].values
-    target = df['close'].values
+    # Нормализация features (0-1)
+    logger.info("🔄 Normalizing features to 0-1 range...")
+    feature_scaler = MinMaxScaler()
+    features_normalized = feature_scaler.fit_transform(df[feature_columns])
+
+    # Нормализация target (close) отдельно
+    target_scaler = MinMaxScaler()
+    target_normalized = target_scaler.fit_transform(df[['close']]).flatten()
+
+    logger.info(f"   Feature range: {features_normalized.min():.4f} - {features_normalized.max():.4f}")
+    logger.info(f"   Target range: {target_normalized.min():.4f} - {target_normalized.max():.4f}")
 
     X, y = [], []
 
     for i in range(len(df) - sequence_length):
-        X.append(features[i:i + sequence_length])
-        y.append(target[i + sequence_length])
+        X.append(features_normalized[i:i + sequence_length])
+        y.append(target_normalized[i + sequence_length])
 
     X = np.array(X)
     y = np.array(y)
@@ -456,7 +468,7 @@ def prepare_sequences(
     logger.info(f"   X shape: {X.shape}")
     logger.info(f"   y shape: {y.shape}")
 
-    return X, y
+    return X, y, feature_scaler, target_scaler
 
 
 def train_model(
@@ -660,8 +672,8 @@ async def train_gru_on_real_data(
 
     logger.info(f"📊 Features: {len(feature_columns)} ({', '.join(feature_columns[:5])}...)")
 
-    # Подготовка последовательностей
-    X, y = prepare_sequences(combined_df, feature_columns, sequence_length)
+    # Подготовка последовательностей с нормализацией
+    X, y, feature_scaler, target_scaler = prepare_sequences(combined_df, feature_columns, sequence_length)
 
     # Train/Test split (80/20)
     split_idx = int(len(X) * 0.8)
@@ -723,16 +735,28 @@ async def train_gru_on_real_data(
     test_predictions = np.array(test_predictions).flatten()
     test_targets = np.array(test_targets)
 
-    # Метрики
-    mse = np.mean((test_predictions - test_targets) ** 2)
-    mae = np.mean(np.abs(test_predictions - test_targets))
-    mape = np.mean(np.abs((test_targets - test_predictions) / test_targets)) * 100
+    # Денормализация обратно в реальные цены
+    logger.info("🔄 Denormalizing predictions back to real prices...")
+    test_predictions_real = target_scaler.inverse_transform(test_predictions.reshape(-1, 1)).flatten()
+    test_targets_real = target_scaler.inverse_transform(test_targets.reshape(-1, 1)).flatten()
+
+    # Метрики на нормализованных данных (0-1)
+    mse_normalized = np.mean((test_predictions - test_targets) ** 2)
+    mae_normalized = np.mean(np.abs(test_predictions - test_targets))
+
+    # Метрики на реальных ценах (в долларах)
+    mse = np.mean((test_predictions_real - test_targets_real) ** 2)
+    mae = np.mean(np.abs(test_predictions_real - test_targets_real))
+    mape = np.mean(np.abs((test_targets_real - test_predictions_real) / test_targets_real)) * 100
 
     logger.info("=" * 80)
-    logger.info("📊 Final metrics:")
-    logger.info(f"   - MSE: {mse:.6f}")
-    logger.info(f"   - MAE: {mae:.2f}")
+    logger.info("📊 Final metrics (REAL PRICES):")
+    logger.info(f"   - MSE: {mse:.2f}")
+    logger.info(f"   - MAE: ${mae:.2f}")
     logger.info(f"   - MAPE: {mape:.2f}%")
+    logger.info(f"📊 Normalized metrics (0-1 range):")
+    logger.info(f"   - MSE: {mse_normalized:.6f}")
+    logger.info(f"   - MAE: {mae_normalized:.6f}")
     logger.info("=" * 80)
 
     # Сохранение модели
@@ -746,11 +770,17 @@ async def train_gru_on_real_data(
             'sequence_length': sequence_length,
             'feature_columns': feature_columns
         },
+        'scalers': {
+            'feature_scaler': feature_scaler,
+            'target_scaler': target_scaler
+        },
         'training_history': history,
         'final_metrics': {
             'mse': mse,
             'mae': mae,
-            'mape': mape
+            'mape': mape,
+            'mse_normalized': mse_normalized,
+            'mae_normalized': mae_normalized
         }
     }, save_path)
 
