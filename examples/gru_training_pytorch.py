@@ -770,17 +770,19 @@ async def train_gru_on_real_data(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,  # Многопоточная загрузка данных
+        num_workers=8,  # Многопоточная загрузка данных (16 CPU threads / 2)
         pin_memory=True,  # Ускорение переноса на GPU
-        persistent_workers=True  # Держать workers alive между эпохами
+        persistent_workers=True,  # Держать workers alive между эпохами
+        prefetch_factor=4  # Каждый worker подготавливает 4 батча заранее
     )
     val_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=2,
+        num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=4
     )
 
     # Создаём модель
