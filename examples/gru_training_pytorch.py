@@ -591,7 +591,7 @@ async def train_gru_on_real_data(
         symbols = [
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
             'ADAUSDT', 'XRPUSDT', 'DOGEUSDT', 'AVAXUSDT',
-            'LINKUSDT', 'MATICUSDT'
+            'LINKUSDT', 'APTUSDT'  # Заменил MATICUSDT на APTUSDT
         ]
 
     logger.info("=" * 80)

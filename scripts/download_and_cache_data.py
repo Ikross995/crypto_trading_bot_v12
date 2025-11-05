@@ -203,7 +203,7 @@ async def download_and_cache(
         symbols = [
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
             'ADAUSDT', 'XRPUSDT', 'DOGEUSDT', 'AVAXUSDT',
-            'LINKUSDT', 'MATICUSDT'
+            'LINKUSDT', 'APTUSDT'  # Заменил MATICUSDT на APTUSDT
         ]
 
     logger.info("=" * 80)
