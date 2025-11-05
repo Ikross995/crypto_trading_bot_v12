@@ -571,7 +571,8 @@ async def train_gru_on_real_data(
     sequence_length: int = 60,
     epochs: int = 20,
     batch_size: int = 32,
-    save_path: str = "models/checkpoints/gru_model_pytorch.pt"
+    save_path: str = "models/checkpoints/gru_model_pytorch.pt",
+    use_cache: bool = False
 ):
     """
     Обучить GRU модель на реальных данных Binance (PyTorch версия).
@@ -590,7 +591,7 @@ async def train_gru_on_real_data(
         symbols = [
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT',
             'ADAUSDT', 'XRPUSDT', 'DOGEUSDT', 'AVAXUSDT',
-            'LINKUSDT', 'MATICUSDT'
+            'LINKUSDT', 'APTUSDT'  # Заменил MATICUSDT на APTUSDT
         ]
 
     logger.info("=" * 80)
@@ -608,24 +609,45 @@ async def train_gru_on_real_data(
     # Настройка GPU
     device = configure_gpu()
 
-    # Загрузка данных
-    downloader = BinanceDataDownloader()
-    all_data = []
+    # Загрузка данных (с кэшированием)
+    combined_df = None
 
-    for i, symbol in enumerate(symbols, 1):
-        logger.info(f"📥 Downloading {symbol} ({i}/{len(symbols)})...")
-        df = await downloader.download_historical_data(symbol, interval, days)
+    if use_cache:
+        try:
+            from scripts.download_and_cache_data import load_cached_data, save_cached_data
+            logger.info("📂 Trying to load cached data...")
+            combined_df = load_cached_data(symbols, days, interval)
+        except ImportError:
+            logger.warning("⚠️  Cache module not found, downloading fresh data")
 
-        if len(df) > 0:
-            df = calculate_technical_indicators(df)
-            all_data.append(df)
-        else:
-            logger.warning(f"⚠️  Skipping {symbol} - no data")
+    if combined_df is None:
+        downloader = BinanceDataDownloader()
+        all_data = []
 
-    # Объединяем данные
-    logger.info("🔗 Combining data from all symbols...")
-    combined_df = pd.concat(all_data, ignore_index=True)
-    logger.info(f"✅ Combined dataset: {len(combined_df):,} samples")
+        for i, symbol in enumerate(symbols, 1):
+            logger.info(f"📥 Downloading {symbol} ({i}/{len(symbols)})...")
+            df = await downloader.download_historical_data(symbol, interval, days)
+
+            if len(df) > 0:
+                df = calculate_technical_indicators(df)
+                all_data.append(df)
+            else:
+                logger.warning(f"⚠️  Skipping {symbol} - no data")
+
+        # Объединяем данные
+        logger.info("🔗 Combining data from all symbols...")
+        combined_df = pd.concat(all_data, ignore_index=True)
+        logger.info(f"✅ Combined dataset: {len(combined_df):,} samples")
+
+        # Сохраняем в кэш для следующего раза
+        try:
+            from scripts.download_and_cache_data import save_cached_data
+            logger.info("💾 Saving data to cache...")
+            save_cached_data(combined_df, symbols, days, interval)
+        except:
+            logger.warning("⚠️  Could not cache data")
+    else:
+        logger.info(f"✅ Using cached dataset: {len(combined_df):,} samples")
 
     # Список фичей (15 indicators)
     feature_columns = [
@@ -750,8 +772,26 @@ async def train_gru_on_real_data(
 # ==========================================
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train GRU model on real Binance data")
+    parser.add_argument('--days', type=int, default=365,
+                        help='Days of historical data (default: 365)')
+    parser.add_argument('--epochs', type=int, default=20,
+                        help='Number of training epochs (default: 20)')
+    parser.add_argument('--batch-size', type=int, default=16,
+                        help='Batch size (default: 16, lower if GPU OOM)')
+    parser.add_argument('--use-cache', action='store_true',
+                        help='Use cached data if available')
+    parser.add_argument('--symbols', type=str, nargs='+',
+                        help='Symbols to train on (default: top 10)')
+
+    args = parser.parse_args()
+
     asyncio.run(train_gru_on_real_data(
-        days=365,  # 1 год данных
-        epochs=20,
-        batch_size=32
+        symbols=args.symbols,
+        days=args.days,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        use_cache=args.use_cache
     ))
