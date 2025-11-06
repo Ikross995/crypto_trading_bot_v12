@@ -782,18 +782,25 @@ class LiveTradingEngine:
         Returns dict with 'predicted_price', 'direction', 'confidence' or None.
         """
         if not self.gru_predictor:
+            self.logger.warning("🧠 [GRU_DEBUG] %s: GRU predictor not initialized", symbol)
             return None
 
         try:
             # Check if model is loaded
             if not hasattr(self.gru_predictor, 'model') or self.gru_predictor.model is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: GRU model not loaded", symbol)
                 return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
 
             # Get prediction (returns float)
             predicted_price = self.gru_predictor.predict(candles_df)
 
             if predicted_price is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: Prediction returned None", symbol)
                 return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Prediction successful: $%.2f", symbol, predicted_price)
 
             # Get current price
             current_price = float(candles_df['close'].iloc[-1])
@@ -833,7 +840,10 @@ class LiveTradingEngine:
             return result
 
         except Exception as e:
-            self.logger.debug("[GRU] Prediction error for %s: %s", symbol, e)
+            # Changed from debug to warning to see errors!
+            self.logger.warning("🧠 [GRU_ERROR] %s: Prediction failed: %s", symbol, str(e))
+            import traceback
+            self.logger.warning("🧠 [GRU_ERROR] Traceback:\n%s", traceback.format_exc())
             return None
 
     async def _calculate_dynamic_stops(
