@@ -544,10 +544,11 @@ def train_model(
     logger.info(f"   Epochs: {epochs}")
     logger.info(f"   Learning rate: {learning_rate}")
     logger.info(f"   Device: {device}")
-    logger.info(f"   Batch size: {len(next(iter(train_loader))[0])}")
+    logger.info(f"   Batch size: {train_loader.batch_size}")
     logger.info(f"   Batches per epoch: {len(train_loader):,}")
     if device.type == 'cuda':
         logger.info(f"   ⚡ GPU Acceleration ENABLED")
+        logger.info(f"   💡 TIP: Use larger batch_size (128-256) for best GPU utilization")
 
     # Оптимизатор и функция потерь
     criterion = nn.MSELoss()
@@ -762,7 +763,9 @@ async def train_gru_on_real_data(
     logger.info(f"📊 Train samples: {len(X_train):,}")
     logger.info(f"📊 Test samples: {len(X_test):,}")
 
-    # Создаём DataLoaders с многопоточной загрузкой
+    # Создаём DataLoaders
+    # NOTE: Windows не поддерживает num_workers > 0 (shared memory issue)
+    # Компенсируем однопоточностью БОЛЬШИМ batch_size (128-256)
     train_dataset = PriceDataset(X_train, y_train)
     test_dataset = PriceDataset(X_test, y_test)
 
@@ -770,19 +773,15 @@ async def train_gru_on_real_data(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=8,  # Многопоточная загрузка данных (16 CPU threads / 2)
-        pin_memory=True,  # Ускорение переноса на GPU
-        persistent_workers=True,  # Держать workers alive между эпохами
-        prefetch_factor=4  # Каждый worker подготавливает 4 батча заранее
+        num_workers=0,  # Windows multiprocessing fix
+        pin_memory=True  # Ускорение переноса на GPU
     )
     val_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=4
+        num_workers=0,
+        pin_memory=True
     )
 
     # Создаём модель
