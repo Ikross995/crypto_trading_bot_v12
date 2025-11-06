@@ -65,7 +65,10 @@ logger = logging.getLogger(__name__)
 
 # Импортируем существующий код из старого файла
 try:
-    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), globals())
+    # 🔥 Pass __SKIP_MAIN__ flag to prevent old script's argparse from running
+    _old_globals = globals()
+    _old_globals['__SKIP_MAIN__'] = True
+    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), _old_globals)
     logger.info("✅ Imported existing training components")
 except Exception as e:
     logger.error(f"❌ Failed to import base training script: {e}")
