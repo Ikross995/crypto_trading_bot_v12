@@ -29,7 +29,8 @@ RECOMMENDED BATCH SIZES:
 # Весь код из gru_training_pytorch_v2_percentage.py
 # + замена GRUPriceModel на EnhancedGRUModel
 
-exec(open('examples/gru_training_pytorch_v2_percentage.py').read())
+# 🔥 ИСПРАВЛЕНИЕ: Windows encoding issue
+exec(open('examples/gru_training_pytorch_v2_percentage.py', encoding='utf-8').read())
 
 # Импорт усиленной модели
 from models.gru_model_enhanced import EnhancedGRUModel
