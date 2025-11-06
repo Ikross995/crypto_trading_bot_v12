@@ -398,6 +398,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train GRU model on % changes (v2)")
     parser.add_argument('--days', type=int, default=180,
                         help='Days of historical data (default: 180 = 6 months fresh data)')
+    parser.add_argument('--interval', type=str, default='30m',
+                        help='Timeframe: 1m, 5m, 15m, 30m, 1h, 4h (default: 30m)')
+    parser.add_argument('--sequence-length', type=int, default=60,
+                        help='Sequence length for LSTM/GRU (default: 60)')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Number of training epochs (default: 30)')
     parser.add_argument('--batch-size', type=int, default=1024,
@@ -410,6 +414,8 @@ if __name__ == "__main__":
     asyncio.run(train_gru_percentage_model(
         symbols=args.symbols,
         days=args.days,
+        interval=args.interval,
+        sequence_length=args.sequence_length,
         epochs=args.epochs,
         batch_size=args.batch_size
     ))
