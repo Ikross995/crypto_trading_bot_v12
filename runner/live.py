@@ -870,8 +870,41 @@ class LiveTradingEngine:
             # Get current price
             current_price = float(candles_df['close'].iloc[-1])
 
+            # 🛡️ CRITICAL: Check for invalid predictions
+            if predicted_price is None or predicted_price <= 0:
+                self.logger.error(
+                    "🚨 [GRU_INVALID] %s: Invalid prediction: $%.2f - MODEL NEEDS RETRAINING!",
+                    symbol, predicted_price
+                )
+                return None
+
             # Calculate direction and confidence
             price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+            # 🛡️ SANITY CHECK: Limit extreme predictions
+            # For 30m timeframe, realistic max change is ~5%
+            # For 1h timeframe, realistic max change is ~8%
+            #
+            # NOTE: If GRU consistently gives extreme predictions, it needs retraining
+            # on more recent data. Old training data may not reflect current price ranges.
+            max_change_pct = 5.0  # Conservative limit
+
+            if abs(price_change_pct) > max_change_pct:
+                original_prediction = predicted_price
+                original_change = price_change_pct
+
+                # Clamp prediction to realistic range
+                if price_change_pct > 0:
+                    predicted_price = current_price * (1 + max_change_pct / 100)
+                else:
+                    predicted_price = current_price * (1 - max_change_pct / 100)
+
+                price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+                self.logger.warning(
+                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%)",
+                    symbol, original_prediction, original_change, predicted_price, price_change_pct
+                )
 
             if abs(price_change_pct) < 0.1:
                 direction = "NEUTRAL"
