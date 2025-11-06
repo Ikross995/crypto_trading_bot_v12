@@ -170,6 +170,12 @@ class GRUPredictorPyTorch:
         self.feature_scaler = checkpoint['scalers']['feature_scaler']
         self.target_scaler = checkpoint['scalers']['target_scaler']
 
+        # Log scaler ranges (important for debugging!)
+        if hasattr(self.target_scaler, 'data_min_') and hasattr(self.target_scaler, 'data_max_'):
+            logger.info(f"🎯 Target scaler range: ${self.target_scaler.data_min_[0]:.2f} - ${self.target_scaler.data_max_[0]:.2f}")
+        else:
+            logger.warning("⚠️ Target scaler doesn't have data_min_/data_max_ attributes")
+
         # Log info
         total_params = sum(p.numel() for p in self.model.parameters())
         logger.info("✅ Model loaded successfully!")
@@ -323,10 +329,17 @@ class GRUPredictorPyTorch:
         with torch.no_grad():
             prediction_normalized = self.model(X).cpu().numpy()
 
+        # Debug: Log normalized prediction
+        logger.debug(f"🔢 Normalized prediction: {prediction_normalized[0, 0]:.6f}")
+
         # Denormalize
         prediction = self.target_scaler.inverse_transform(
             prediction_normalized.reshape(-1, 1)
         )[0, 0]
+
+        # Debug: Log denormalized prediction
+        current_price = float(df_recent['close'].iloc[-1])
+        logger.debug(f"🔢 Denormalized prediction: ${prediction:.2f} (current: ${current_price:.2f})")
 
         return float(prediction)
 

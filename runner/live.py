@@ -858,6 +858,27 @@ class LiveTradingEngine:
 
             self.logger.info("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
 
+            # Debug: Check data order and range
+            if 'close' in candles_df.columns:
+                first_price = float(candles_df['close'].iloc[0])
+                last_price = float(candles_df['close'].iloc[-1])
+                min_price = float(candles_df['close'].min())
+                max_price = float(candles_df['close'].max())
+
+                self.logger.info(
+                    "🧠 [GRU_DATA_CHECK] %s: First=$%.4f, Last=$%.4f, Range=$%.4f-$%.4f",
+                    symbol, first_price, last_price, min_price, max_price
+                )
+
+                # Check if timestamps are in correct order
+                if 'timestamp' in candles_df.columns:
+                    first_time = candles_df['timestamp'].iloc[0]
+                    last_time = candles_df['timestamp'].iloc[-1]
+                    self.logger.info(
+                        "🧠 [GRU_TIME_CHECK] %s: First=%s, Last=%s",
+                        symbol, first_time, last_time
+                    )
+
             # Get prediction (returns float)
             predicted_price = self.gru_predictor.predict(candles_df)
 
