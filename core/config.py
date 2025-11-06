@@ -76,10 +76,16 @@ class Config(BaseModel):
     exits_ensure_interval: int = Field(default=12, ge=5, le=60)
 
     # ML Models
-    lstm_enable: bool = Field(default=True)  # FIXED: Enable LSTM by default for enhanced predictions
+    lstm_enable: bool = Field(default=False)  # DISABLED: Use PyTorch GRU instead
     lstm_input: int = Field(default=16, ge=1, le=100)
     seq_len: int = Field(default=30, ge=10, le=200)
     lstm_signal_threshold: float = Field(default=0.0015, ge=0.0001, le=0.01)
+
+    # GRU Model (PyTorch) - PHASE 2
+    gru_enable: bool = Field(default=True)
+    gru_model_path: str = Field(default="models/checkpoints/gru_model_pytorch.pt")
+    gru_input_features: int = Field(default=22, ge=1, le=100)
+    gru_sequence_length: int = Field(default=60, ge=10, le=200)
 
     gpt_enable: bool = Field(default=False)
     
@@ -314,6 +320,12 @@ class Config(BaseModel):
             'lstm_input': int(os.getenv('LSTM_INPUT', '16')),
             'seq_len': int(os.getenv('SEQ_LEN', '30')),
             'lstm_signal_threshold': float(os.getenv('LSTM_SIGNAL_THRESHOLD', '0.0015')),
+
+            # GRU Model (PyTorch) - PHASE 2
+            'gru_enable': os.getenv('GRU_ENABLE', 'true').lower() == 'true',
+            'gru_model_path': os.getenv('GRU_MODEL_PATH', 'models/checkpoints/gru_model_pytorch.pt'),
+            'gru_input_features': int(os.getenv('GRU_INPUT_FEATURES', '22')),
+            'gru_sequence_length': int(os.getenv('GRU_SEQUENCE_LENGTH', '60')),
 
             'gpt_enable': os.getenv('GPT_ENABLE', 'false').lower() == 'true',
             'gpt_api_url': os.getenv('GPT_API_URL', 'http://127.0.0.1:1234'),

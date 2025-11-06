@@ -1,10 +1,12 @@
 """
 Machine learning models for AI Trading Bot.
 
-Provides LSTM, GRU and optional GPT integration for price prediction and decision making.
+Provides PyTorch GRU and optional GPT integration for price prediction and decision making.
 """
 
-from .lstm import LSTMPredictor
+# LSTM disabled - use PyTorch GRU instead
+# from .lstm import LSTMPredictor
+LSTMPredictor = None
 
 # Optional GPT integration
 try:
@@ -12,14 +14,21 @@ try:
 except ImportError:
     GPTIntegration = None
 
-# Optional GRU predictor
+# PyTorch GRU predictor (NEW!)
 try:
-    from .gru_predictor import GRUPricePredictor
+    from .gru_predictor_pytorch import GRUPredictorPyTorch
 except ImportError:
-    GRUPricePredictor = None
+    GRUPredictorPyTorch = None
+
+# Old TensorFlow GRU (deprecated)
+# try:
+#     from .gru_predictor import GRUPricePredictor
+# except ImportError:
+GRUPricePredictor = None
 
 __all__ = [
     "LSTMPredictor",
     "GPTIntegration",
+    "GRUPredictorPyTorch",
     "GRUPricePredictor"
 ]

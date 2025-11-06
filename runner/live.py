@@ -81,10 +81,11 @@ try:
 except Exception:  # pragma: no cover
     DCAManager = None  # type: ignore
 
-try:
-    from models.lstm import LSTMPredictor  # type: ignore
-except Exception:  # pragma: no cover
-    LSTMPredictor = None  # type: ignore
+# LSTM disabled - use PyTorch GRU instead
+# try:
+#     from models.lstm import LSTMPredictor  # type: ignore
+# except Exception:  # pragma: no cover
+LSTMPredictor = None  # type: ignore
 
 # ==================== PHASE 1-4 INTEGRATIONS ====================
 
@@ -1719,6 +1720,49 @@ class LiveTradingEngine:
             self.logger.debug("Skip %s: missing price", symbol)
             return
 
+        # ==================== PHASE 2: GRU SIGNAL INTEGRATION ====================
+        # Apply GRU prediction to adjust signal strength
+        if gru_prediction:
+            gru_direction = gru_prediction.get('direction', 'NEUTRAL')
+            gru_confidence = gru_prediction.get('confidence', 0.0)
+            gru_price_change = gru_prediction.get('price_change_pct', 0.0)
+
+            # Check if GRU agrees with IMBA signal
+            signal_direction = sig.side  # "BUY" or "SELL"
+            gru_agrees = (
+                (signal_direction == "BUY" and gru_direction == "LONG") or
+                (signal_direction == "SELL" and gru_direction == "SHORT")
+            )
+
+            if gru_agrees:
+                # GRU confirms signal - boost strength
+                gru_boost = 1.0 + (gru_confidence * 0.3)  # Up to +30% boost
+                original_strength = sig.strength
+                sig.strength = min(2.0, sig.strength * gru_boost)
+
+                self.logger.info(
+                    "🧠 [GRU_BOOST] %s: GRU agrees (%s %.1f%% confidence) - Signal %.2f → %.2f",
+                    symbol, gru_direction, gru_confidence * 100,
+                    original_strength, sig.strength
+                )
+            elif gru_direction != "NEUTRAL":
+                # GRU disagrees - reduce strength
+                gru_penalty = 1.0 - (gru_confidence * 0.4)  # Up to -40% penalty
+                original_strength = sig.strength
+                sig.strength = max(0.1, sig.strength * gru_penalty)
+
+                self.logger.warning(
+                    "🧠 [GRU_CONFLICT] %s: GRU disagrees (predicts %s with %.1f%% conf) - Signal %.2f → %.2f",
+                    symbol, gru_direction, gru_confidence * 100,
+                    original_strength, sig.strength
+                )
+            else:
+                # GRU neutral - no adjustment
+                self.logger.info(
+                    "🧠 [GRU_NEUTRAL] %s: GRU prediction neutral - No signal adjustment",
+                    symbol
+                )
+
         # 🧠 NEW: Enhanced ML Analysis of Signal Context
         enhanced_analysis = None
         if self.enhanced_ai and md is not None:
@@ -1762,9 +1806,14 @@ class LiveTradingEngine:
                             'timeframe': self.timeframe,
                             'iteration': self.iteration,
                             'market_session': self._get_market_session(),
-                            'volatility_factor': getattr(self.config, 'volatility_factor', 1.0)
+                            'volatility_factor': getattr(self.config, 'volatility_factor', 1.0),
+                            'gru_prediction': gru_prediction  # Add GRU prediction to ML context
                         }
                     )
+
+                    # Add GRU prediction to enhanced_analysis for recording
+                    if enhanced_analysis and gru_prediction:
+                        enhanced_analysis['gru_prediction'] = gru_prediction
                     
                     processing_time = time.time() - start_time
                     
@@ -1793,7 +1842,8 @@ class LiveTradingEngine:
                         ai_rec = enhanced_analysis.get('ai_recommendations', {})
                         trading_decision = enhanced_analysis.get('trading_decision', {})
                         risk_assessment = enhanced_analysis.get('risk_assessment', {})
-                        
+                        gru_pred = enhanced_analysis.get('gru_prediction', {})
+
                         self.logger.info(
                             "🧠 [ML_ANALYSIS] %s: Expected PnL %+.2f%% | Win Prob %.0f%% | Risk %s | Confidence %.2f",
                             symbol,
@@ -1802,6 +1852,17 @@ class LiveTradingEngine:
                             risk_assessment.get('risk_level', 'unknown'),
                             ml_pred.get('prediction_confidence', 0)
                         )
+
+                        # Log GRU prediction if available
+                        if gru_pred:
+                            self.logger.info(
+                                "🧠 [GRU_IN_ML] %s: Predicted $%.2f (%+.2f%%) | Direction: %s | Confidence: %.1f%%",
+                                symbol,
+                                gru_pred.get('predicted_price', 0),
+                                gru_pred.get('price_change_pct', 0),
+                                gru_pred.get('direction', 'UNKNOWN'),
+                                gru_pred.get('confidence', 0) * 100
+                            )
                         
                         self.logger.info("🎯 [TRADING_DECISION] %s", trading_decision.get('reasoning', 'No reasoning'))
                         
@@ -1945,7 +2006,7 @@ class LiveTradingEngine:
                     )
                     return
 
-                # Pass regime and market data for dynamic stops
+                # Pass regime, market data, and enhanced ML analysis
                 await self._place_order(
                     symbol,
                     sig.side,
@@ -1953,7 +2014,8 @@ class LiveTradingEngine:
                     price,
                     sig.strength,
                     regime=current_regime,
-                    market_data=md
+                    market_data=md,
+                    enhanced_analysis=enhanced_analysis
                 )
 
                 # Update active positions for DCA tracking
@@ -2020,11 +2082,13 @@ class LiveTradingEngine:
         price: float,
         strength: float,
         regime: Optional[str] = None,
-        market_data: Optional[Any] = None
+        market_data: Optional[Any] = None,
+        enhanced_analysis: Optional[Dict] = None
     ) -> None:
         """
         Place a real order on the exchange.
         PHASE 3-4: Now accepts regime and market_data for dynamic stops.
+        PHASE 2: Now accepts enhanced_analysis with ML predictions.
         """
         try:
             # Initialize Binance client if not already done
@@ -2160,7 +2224,7 @@ class LiveTradingEngine:
                     # ==================== PHASE 1: CONCURRENCY PROTECTION ====================
                     # Wrap order placement in atomic operation to prevent race conditions
                     if self.safe_state:
-                        async with self.safe_state.atomic_trade_operation():
+                        async with self.safe_state.atomic_order_update():
                             # Place order with better execution strategy
                             if limit_price:
                                 order_result = self.client.place_order(
@@ -3618,7 +3682,8 @@ class LiveTradingEngine:
 
             # Place DCA order (same side as original position to average down/up)
             await self._place_order(
-                symbol, side, dca_qty, current_price, 0.8
+                symbol, side, dca_qty, current_price, 0.8,
+                regime=None, market_data=None, enhanced_analysis=None
             )  # Lower strength for DCA
 
             # Update position tracking
