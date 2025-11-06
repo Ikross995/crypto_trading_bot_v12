@@ -73,19 +73,25 @@ if __name__ == "__main__":
     )
     parser.add_argument('--days', type=int, default=180,
                         help='Days of historical data (default: 180)')
+    parser.add_argument('--interval', type=str, default='30m',
+                        help='Timeframe: 1m, 5m, 15m, 30m, 1h, 4h (default: 30m)')
+    parser.add_argument('--sequence-length', type=int, default=60,
+                        help='Sequence length for LSTM/GRU (default: 60)')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Epochs (default: 30)')
     parser.add_argument('--batch-size', type=int, default=1024,
                         help='Batch size (default: 1024 for RTX 5070 Ti - MAX SPEED!)')
     parser.add_argument('--symbols', type=str, nargs='+',
                         help='Symbols (default: top 10)')
-    
+
     args = parser.parse_args()
-    
+
     import asyncio
     asyncio.run(train_gru_final(
         symbols=args.symbols,
         days=args.days,
+        interval=args.interval,
+        sequence_length=args.sequence_length,
         epochs=args.epochs,
         batch_size=args.batch_size
     ))
