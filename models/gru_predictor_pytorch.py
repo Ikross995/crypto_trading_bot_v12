@@ -148,8 +148,8 @@ class GRUPredictorPyTorch:
 
         logger.info(f"📂 Loading model from: {model_path}")
 
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location=self.device)
+        # Load checkpoint (weights_only=False to allow sklearn scalers)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
 
         # Extract config
         self.config = checkpoint['model_config']
