@@ -155,11 +155,32 @@ class GRUPredictorPyTorch:
         self.config = checkpoint['model_config']
         self.feature_columns = self.config['feature_columns']
 
-        # Build model
-        self.model = GRUPriceModel(
-            input_features=self.config['input_features'],
-            sequence_length=self.config['sequence_length']
-        )
+        # 🔥 Check model version and load appropriate architecture
+        model_version = self.config.get('model_version', 'v1_absolute')
+        target_type = self.config.get('target_type', 'absolute_price')
+
+        if model_version == 'v2_percentage' or target_type == 'percentage_change':
+            # 🔥 NEW MODEL: Enhanced architecture
+            logger.info("🔥 Loading ENHANCED GRU model (% change prediction)")
+            try:
+                from models.gru_model_enhanced import EnhancedGRUModel
+                self.model = EnhancedGRUModel(
+                    input_features=self.config['input_features'],
+                    sequence_length=self.config['sequence_length']
+                )
+            except ImportError:
+                logger.warning("⚠️ EnhancedGRUModel not found, using default")
+                self.model = GRUPriceModel(
+                    input_features=self.config['input_features'],
+                    sequence_length=self.config['sequence_length']
+                )
+        else:
+            # 🔴 OLD MODEL: Original architecture
+            logger.info("📊 Loading standard GRU model (absolute price prediction)")
+            self.model = GRUPriceModel(
+                input_features=self.config['input_features'],
+                sequence_length=self.config['sequence_length']
+            )
 
         # Load weights
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -172,13 +193,18 @@ class GRUPredictorPyTorch:
 
         # Log scaler ranges (important for debugging!)
         if hasattr(self.target_scaler, 'data_min_') and hasattr(self.target_scaler, 'data_max_'):
-            logger.info(f"🎯 Target scaler range: ${self.target_scaler.data_min_[0]:.2f} - ${self.target_scaler.data_max_[0]:.2f}")
+            if target_type == 'percentage_change':
+                logger.info(f"🎯 Target scaler range: {self.target_scaler.data_min_[0]:.2f}% - {self.target_scaler.data_max_[0]:.2f}%")
+            else:
+                logger.info(f"🎯 Target scaler range: ${self.target_scaler.data_min_[0]:.2f} - ${self.target_scaler.data_max_[0]:.2f}")
         else:
             logger.warning("⚠️ Target scaler doesn't have data_min_/data_max_ attributes")
 
         # Log info
         total_params = sum(p.numel() for p in self.model.parameters())
         logger.info("✅ Model loaded successfully!")
+        logger.info(f"   Model version: {model_version}")
+        logger.info(f"   Target type: {target_type}")
         logger.info(f"   Input features: {self.config['input_features']}")
         logger.info(f"   Sequence length: {self.config['sequence_length']}")
         logger.info(f"   Total parameters: {total_params:,}")
@@ -333,15 +359,31 @@ class GRUPredictorPyTorch:
         logger.debug(f"🔢 Normalized prediction: {prediction_normalized[0, 0]:.6f}")
 
         # Denormalize
-        prediction = self.target_scaler.inverse_transform(
+        prediction_or_pct = self.target_scaler.inverse_transform(
             prediction_normalized.reshape(-1, 1)
         )[0, 0]
 
-        # Debug: Log denormalized prediction
+        # 🔥 Check model version
         current_price = float(df_recent['close'].iloc[-1])
-        logger.debug(f"🔢 Denormalized prediction: ${prediction:.2f} (current: ${current_price:.2f})")
+        model_version = self.config.get('model_version', 'v1_absolute')
+        target_type = self.config.get('target_type', 'absolute_price')
 
-        return float(prediction)
+        if target_type == 'percentage_change' or model_version == 'v2_percentage':
+            # 🔥 NEW MODEL: Prediction is % change
+            pct_change = prediction_or_pct
+            predicted_price = current_price * (1 + pct_change / 100)
+
+            logger.debug(f"🔢 Denormalized % change: {pct_change:+.2f}%")
+            logger.debug(f"🔢 Predicted price: ${predicted_price:.2f} (current: ${current_price:.2f})")
+
+            return float(predicted_price)
+        else:
+            # 🔴 OLD MODEL: Prediction is absolute price
+            predicted_price = prediction_or_pct
+
+            logger.debug(f"🔢 Denormalized prediction: ${predicted_price:.2f} (current: ${current_price:.2f})")
+
+            return float(predicted_price)
 
     def predict_batch(self, df_list: List[pd.DataFrame]) -> List[float]:
         """

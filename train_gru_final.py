@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""
+🔥 FINAL GRU Training Script - PERCENTAGE CHANGE + ENHANCED MODEL
+==================================================================
+
+ВСЕ ИСПРАВЛЕНИЯ:
+✅ Предсказываем % изменение (не абсолютную цену)
+✅ Усиленная архитектура (400K параметров)
+✅ 3 GRU слоя + BatchNorm
+✅ Свежие данные (180 дней)
+✅ 30m таймфрейм (для trading)
+
+USAGE:
+    python train_gru_final.py --days 180 --epochs 30 --batch-size 128
+
+EXPECTED RESULTS:
+- Direction Accuracy: >55% (хорошо)
+- MAE: <1.5% (отлично)
+- Обучение: ~2-3 часа на RTX 5070 Ti
+
+"""
+
+# Весь код из gru_training_pytorch_v2_percentage.py
+# + замена GRUPriceModel на EnhancedGRUModel
+
+exec(open('examples/gru_training_pytorch_v2_percentage.py').read())
+
+# Импорт усиленной модели
+from models.gru_model_enhanced import EnhancedGRUModel
+
+# Override создание модели
+original_train = train_gru_percentage_model
+
+async def train_gru_final(*args, **kwargs):
+    """Wrapper с усиленной моделью"""
+    
+    # Патчим глобальную переменную
+    import sys
+    current_module = sys.modules[__name__]
+    
+    # Подменяем класс модели
+    original_model = current_module.GRUPriceModel if hasattr(current_module, 'GRUPriceModel') else None
+    current_module.GRUPriceModel = EnhancedGRUModel
+    
+    logger.info("🔥 Using ENHANCED GRU Model (400K params)")
+    
+    # Меняем путь сохранения
+    if 'save_path' not in kwargs:
+        kwargs['save_path'] = "models/checkpoints/gru_model_final.pt"
+    
+    # Запускаем обучение
+    result = await original_train(*args, **kwargs)
+    
+    # Восстанавливаем
+    if original_model:
+        current_module.GRUPriceModel = original_model
+    
+    return result
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="🔥 Train FINAL GRU model (% change + enhanced architecture)"
+    )
+    parser.add_argument('--days', type=int, default=180,
+                        help='Days of historical data (default: 180)')
+    parser.add_argument('--epochs', type=int, default=30,
+                        help='Epochs (default: 30)')
+    parser.add_argument('--batch-size', type=int, default=128,
+                        help='Batch size (default: 128 for GPU)')
+    parser.add_argument('--symbols', type=str, nargs='+',
+                        help='Symbols (default: top 10)')
+    
+    args = parser.parse_args()
+    
+    import asyncio
+    asyncio.run(train_gru_final(
+        symbols=args.symbols,
+        days=args.days,
+        epochs=args.epochs,
+        batch_size=args.batch_size
+    ))
