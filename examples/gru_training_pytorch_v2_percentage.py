@@ -13,7 +13,13 @@
 - ✅ Универсальность
 
 Использование:
-    python examples/gru_training_pytorch_v2_percentage.py --days 180 --epochs 30 --batch-size 128
+    python examples/gru_training_pytorch_v2_percentage.py --days 180 --epochs 30 --batch-size 1024
+
+BATCH SIZE для GPU:
+- RTX 5070 Ti (16GB): 1024-2048 ⚡
+- RTX 4090 (24GB): 2048-4096 ⚡⚡
+- RTX 3080 (10GB): 512-1024
+- GTX 1080 (8GB): 256-512
 
 Автор: Claude + User
 Дата: 2025-11-06
@@ -175,7 +181,7 @@ async def train_gru_percentage_model(
     interval: str = "30m",  # 30-минутный таймфрейм
     sequence_length: int = 60,
     epochs: int = 30,
-    batch_size: int = 128,  # Больше для GPU
+    batch_size: int = 1024,  # 🔥 ОГРОМНЫЙ для RTX 5070 Ti - MAX SPEED!
     save_path: str = "models/checkpoints/gru_model_pytorch_v2_percentage.pt",
     use_cache: bool = False
 ):
@@ -394,8 +400,8 @@ if __name__ == "__main__":
                         help='Days of historical data (default: 180 = 6 months fresh data)')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Number of training epochs (default: 30)')
-    parser.add_argument('--batch-size', type=int, default=128,
-                        help='Batch size (default: 128 for GPU)')
+    parser.add_argument('--batch-size', type=int, default=1024,
+                        help='Batch size (default: 1024 for RTX 5070 Ti - MAX SPEED!)')
     parser.add_argument('--symbols', type=str, nargs='+',
                         help='Symbols to train on (default: top 10)')
 
