@@ -776,30 +776,156 @@ class LiveTradingEngine:
             self.logger.warning("[REGIME] Error detecting regime for %s: %s", symbol, e)
             return None
 
+    async def _fetch_real_mainnet_data(self, symbol: str, timeframe: str, limit: int = 250) -> Optional[Any]:
+        """
+        Fetch REAL market data from Binance MAINNET (not testnet).
+        Used for GRU predictions to ensure accurate price data.
+        """
+        try:
+            import aiohttp
+            import pandas as pd
+            from datetime import datetime
+
+            # Binance MAINNET API (not testnet!)
+            base_url = "https://fapi.binance.com"
+            endpoint = f"{base_url}/fapi/v1/klines"
+
+            params = {
+                'symbol': symbol,
+                'interval': timeframe,
+                'limit': limit
+            }
+
+            self.logger.info("🌐 [REAL_DATA] Fetching %d candles for %s from Binance MAINNET", limit, symbol)
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Convert to DataFrame
+                        df = pd.DataFrame(data, columns=[
+                            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                            'taker_buy_quote', 'ignore'
+                        ])
+
+                        # Convert types
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                        df['open'] = df['open'].astype(float)
+                        df['high'] = df['high'].astype(float)
+                        df['low'] = df['low'].astype(float)
+                        df['close'] = df['close'].astype(float)
+                        df['volume'] = df['volume'].astype(float)
+
+                        # Keep only needed columns
+                        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+
+                        self.logger.info(
+                            "🌐 [REAL_DATA] ✅ Loaded %d candles: $%.2f → $%.2f (Latest: $%.2f)",
+                            len(df),
+                            df['close'].iloc[0],
+                            df['close'].iloc[-1],
+                            df['close'].iloc[-1]
+                        )
+
+                        return df
+                    else:
+                        self.logger.warning(
+                            "🌐 [REAL_DATA] ❌ HTTP %d from Binance mainnet",
+                            response.status
+                        )
+                        return None
+
+        except Exception as e:
+            self.logger.warning("🌐 [REAL_DATA] ❌ Error fetching mainnet data: %s", str(e))
+            return None
+
     async def _get_gru_prediction(self, symbol: str, candles_df: Any) -> Optional[Dict]:
         """
         PHASE 2: Get GRU model price prediction (PyTorch).
         Returns dict with 'predicted_price', 'direction', 'confidence' or None.
         """
         if not self.gru_predictor:
+            self.logger.warning("🧠 [GRU_DEBUG] %s: GRU predictor not initialized", symbol)
             return None
 
         try:
             # Check if model is loaded
             if not hasattr(self.gru_predictor, 'model') or self.gru_predictor.model is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: GRU model not loaded", symbol)
                 return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
+
+            # Debug: Check data order and range
+            if 'close' in candles_df.columns:
+                first_price = float(candles_df['close'].iloc[0])
+                last_price = float(candles_df['close'].iloc[-1])
+                min_price = float(candles_df['close'].min())
+                max_price = float(candles_df['close'].max())
+
+                self.logger.info(
+                    "🧠 [GRU_DATA_CHECK] %s: First=$%.4f, Last=$%.4f, Range=$%.4f-$%.4f",
+                    symbol, first_price, last_price, min_price, max_price
+                )
+
+                # Check if timestamps are in correct order
+                if 'timestamp' in candles_df.columns:
+                    first_time = candles_df['timestamp'].iloc[0]
+                    last_time = candles_df['timestamp'].iloc[-1]
+                    self.logger.info(
+                        "🧠 [GRU_TIME_CHECK] %s: First=%s, Last=%s",
+                        symbol, first_time, last_time
+                    )
 
             # Get prediction (returns float)
             predicted_price = self.gru_predictor.predict(candles_df)
 
             if predicted_price is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: Prediction returned None", symbol)
                 return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Prediction successful: $%.2f", symbol, predicted_price)
 
             # Get current price
             current_price = float(candles_df['close'].iloc[-1])
 
+            # 🛡️ CRITICAL: Check for invalid predictions
+            if predicted_price is None or predicted_price <= 0:
+                self.logger.error(
+                    "🚨 [GRU_INVALID] %s: Invalid prediction: $%.2f - MODEL NEEDS RETRAINING!",
+                    symbol, predicted_price
+                )
+                return None
+
             # Calculate direction and confidence
             price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+            # 🛡️ SANITY CHECK: Limit extreme predictions
+            # For 30m timeframe, realistic max change is ~5%
+            # For 1h timeframe, realistic max change is ~8%
+            #
+            # NOTE: If GRU consistently gives extreme predictions, it needs retraining
+            # on more recent data. Old training data may not reflect current price ranges.
+            max_change_pct = 5.0  # Conservative limit
+
+            if abs(price_change_pct) > max_change_pct:
+                original_prediction = predicted_price
+                original_change = price_change_pct
+
+                # Clamp prediction to realistic range
+                if price_change_pct > 0:
+                    predicted_price = current_price * (1 + max_change_pct / 100)
+                else:
+                    predicted_price = current_price * (1 - max_change_pct / 100)
+
+                price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+                self.logger.warning(
+                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%)",
+                    symbol, original_prediction, original_change, predicted_price, price_change_pct
+                )
 
             if abs(price_change_pct) < 0.1:
                 direction = "NEUTRAL"
@@ -833,7 +959,10 @@ class LiveTradingEngine:
             return result
 
         except Exception as e:
-            self.logger.debug("[GRU] Prediction error for %s: %s", symbol, e)
+            # Changed from debug to warning to see errors!
+            self.logger.warning("🧠 [GRU_ERROR] %s: Prediction failed: %s", symbol, str(e))
+            import traceback
+            self.logger.warning("🧠 [GRU_ERROR] Traceback:\n%s", traceback.format_exc())
             return None
 
     async def _calculate_dynamic_stops(
@@ -1703,7 +1832,40 @@ class LiveTradingEngine:
         # ==================== PHASE 2: GRU PREDICTION ====================
         gru_prediction = None
         if md is not None:
-            gru_prediction = await self._get_gru_prediction(symbol, md)
+            # 🌐 ALWAYS fetch REAL mainnet data for GRU predictions
+            # Even if bot is running on testnet, GRU needs accurate prices
+            try:
+                import pandas as pd
+
+                # Fetch real Binance mainnet data for GRU
+                real_candles = await self._fetch_real_mainnet_data(symbol, self.timeframe, limit=250)
+
+                if real_candles is not None:
+                    # Convert to DataFrame for GRU
+                    if isinstance(real_candles, list):
+                        df_candles = pd.DataFrame(real_candles)
+                    elif isinstance(real_candles, pd.DataFrame):
+                        df_candles = real_candles
+                    else:
+                        # Try to convert from market data object
+                        df_candles = pd.DataFrame({
+                            'timestamp': real_candles.timestamp if hasattr(real_candles, 'timestamp') else [],
+                            'open': real_candles.open if hasattr(real_candles, 'open') else [],
+                            'high': real_candles.high if hasattr(real_candles, 'high') else [],
+                            'low': real_candles.low if hasattr(real_candles, 'low') else [],
+                            'close': real_candles.close if hasattr(real_candles, 'close') else [],
+                            'volume': real_candles.volume if hasattr(real_candles, 'volume') else [],
+                        })
+
+                    if len(df_candles) >= 60:  # GRU needs at least 60 candles
+                        gru_prediction = await self._get_gru_prediction(symbol, df_candles)
+                    else:
+                        self.logger.warning("🧠 [GRU_DATA] %s: Not enough real data (%d candles)", symbol, len(df_candles))
+                else:
+                    self.logger.warning("🧠 [GRU_DATA] %s: Failed to fetch real mainnet data", symbol)
+
+            except Exception as e:
+                self.logger.warning("🧠 [GRU_DATA] %s: Error fetching real data: %s", symbol, e)
 
         raw = await self._produce_raw_signal(symbol, md)
         sig = normalize_signal_obj(raw, symbol_default=symbol)
