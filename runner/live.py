@@ -81,10 +81,11 @@ try:
 except Exception:  # pragma: no cover
     DCAManager = None  # type: ignore
 
-try:
-    from models.lstm import LSTMPredictor  # type: ignore
-except Exception:  # pragma: no cover
-    LSTMPredictor = None  # type: ignore
+# LSTM disabled - use PyTorch GRU instead
+# try:
+#     from models.lstm import LSTMPredictor  # type: ignore
+# except Exception:  # pragma: no cover
+LSTMPredictor = None  # type: ignore
 
 # ==================== PHASE 1-4 INTEGRATIONS ====================
 
@@ -2160,7 +2161,7 @@ class LiveTradingEngine:
                     # ==================== PHASE 1: CONCURRENCY PROTECTION ====================
                     # Wrap order placement in atomic operation to prevent race conditions
                     if self.safe_state:
-                        async with self.safe_state.atomic_trade_operation():
+                        async with self.safe_state.atomic_order_update():
                             # Place order with better execution strategy
                             if limit_price:
                                 order_result = self.client.place_order(
