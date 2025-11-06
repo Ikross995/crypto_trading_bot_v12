@@ -29,6 +29,9 @@ RECOMMENDED BATCH SIZES:
 # Весь код из gru_training_pytorch_v2_percentage.py
 # + замена GRUPriceModel на EnhancedGRUModel
 
+# 🔥 Set flag to prevent base script's __main__ block from running
+__SKIP_MAIN__ = True
+
 # 🔥 ИСПРАВЛЕНИЕ: Windows encoding issue
 exec(open('examples/gru_training_pytorch_v2_percentage.py', encoding='utf-8').read())
 
