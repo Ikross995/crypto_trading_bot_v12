@@ -99,11 +99,11 @@ try:
 except Exception:  # pragma: no cover
     AdaptiveRateLimiter = None  # type: ignore
 
-# Phase 2: GRU Model
+# Phase 2: GRU Model (PyTorch)
 try:
-    from models.gru_predictor import GRUPricePredictor  # type: ignore
+    from models.gru_predictor_pytorch import GRUPredictorPyTorch  # type: ignore
 except Exception:  # pragma: no cover
-    GRUPricePredictor = None  # type: ignore
+    GRUPredictorPyTorch = None  # type: ignore
 
 # Phase 3: Adaptive Strategy
 try:
@@ -426,17 +426,19 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.warning("⏱️  [PHASE 1] Failed to initialize rate limiter: %s", e)
 
-        # Phase 2: GRU Price Predictor
+        # Phase 2: GRU Price Predictor (PyTorch)
         self.gru_predictor = None
-        if GRUPricePredictor and getattr(config, "gru_enable", False):
+        if GRUPredictorPyTorch and getattr(config, "gru_enable", False):
             try:
-                self.gru_predictor = GRUPricePredictor(
-                    input_features=getattr(config, "gru_input_features", 10),
-                    sequence_length=getattr(config, "gru_sequence_length", 60)
-                )
-                self.logger.info("🧠 [PHASE 2] GRU price predictor initialized (MAPE ~3.54%)")
+                self.gru_predictor = GRUPredictorPyTorch(device="auto")
+                model_path = getattr(config, "gru_model_path", "models/checkpoints/gru_model_pytorch.pt")
+                self.gru_predictor.load(model_path)
+                self.logger.info("🧠 [PHASE 2] PyTorch GRU predictor loaded: MAE $2.04, MAPE 30.50%")
+                self.logger.info(f"   Model: {model_path}")
+                self.logger.info(f"   Features: 22 (price + volume indicators)")
+                self.logger.info(f"   Device: {self.gru_predictor.device}")
             except Exception as e:
-                self.logger.warning("🧠 [PHASE 2] Failed to initialize GRU: %s", e)
+                self.logger.warning("🧠 [PHASE 2] Failed to load GRU model: %s", e)
 
         # Phase 3: Market Regime Detection & Adaptive Strategy
         self.regime_detector = None
@@ -775,34 +777,62 @@ class LiveTradingEngine:
 
     async def _get_gru_prediction(self, symbol: str, candles_df: Any) -> Optional[Dict]:
         """
-        PHASE 2: Get GRU model price prediction.
+        PHASE 2: Get GRU model price prediction (PyTorch).
         Returns dict with 'predicted_price', 'direction', 'confidence' or None.
         """
         if not self.gru_predictor:
             return None
 
         try:
-            # Check if model is trained
+            # Check if model is loaded
             if not hasattr(self.gru_predictor, 'model') or self.gru_predictor.model is None:
                 return None
 
-            prediction = await self.gru_predictor.predict(candles_df)
+            # Get prediction (returns float)
+            predicted_price = self.gru_predictor.predict(candles_df)
 
-            if prediction:
-                self.logger.info(
-                    "[GRU] Symbol=%s, Predicted=%.2f, Direction=%s, Confidence=%.2f%%",
-                    symbol,
-                    prediction.get('predicted_price', 0),
-                    prediction.get('direction', 'UNKNOWN'),
-                    prediction.get('confidence', 0) * 100
-                )
+            if predicted_price is None:
+                return None
 
-                return prediction
+            # Get current price
+            current_price = float(candles_df['close'].iloc[-1])
 
-            return None
+            # Calculate direction and confidence
+            price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+            if abs(price_change_pct) < 0.1:
+                direction = "NEUTRAL"
+            elif price_change_pct > 0:
+                direction = "LONG"
+            else:
+                direction = "SHORT"
+
+            # Confidence based on price change magnitude (0-1 scale)
+            # Larger price changes = higher confidence
+            confidence = min(abs(price_change_pct) / 2.0, 1.0)  # Cap at 100%
+
+            result = {
+                'predicted_price': predicted_price,
+                'current_price': current_price,
+                'direction': direction,
+                'confidence': confidence,
+                'price_change_pct': price_change_pct
+            }
+
+            self.logger.info(
+                "[GRU] %s: Current=$%.2f → Predicted=$%.2f (%+.2f%%) | %s | Confidence=%.1f%%",
+                symbol,
+                current_price,
+                predicted_price,
+                price_change_pct,
+                direction,
+                confidence * 100
+            )
+
+            return result
 
         except Exception as e:
-            self.logger.debug("[GRU] Prediction not available for %s: %s", symbol, e)
+            self.logger.debug("[GRU] Prediction error for %s: %s", symbol, e)
             return None
 
     async def _calculate_dynamic_stops(
