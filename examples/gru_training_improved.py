@@ -357,7 +357,6 @@ def train_improved_model(
         mode='min',
         factor=0.5,  # Уменьшаем LR в 2 раза
         patience=3,
-        verbose=True,
         min_lr=1e-6
     )
 
