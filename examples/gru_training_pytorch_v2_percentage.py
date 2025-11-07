@@ -63,9 +63,13 @@ logger = logging.getLogger(__name__)
 # 🔥 IMPORT EXISTING COMPONENTS
 # ==========================================
 
-# Импортируем существующий код из старого файла
+# Импортируем существующий код из старого файла (без запуска main)
 try:
-    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), globals())
+    # Создаём namespace где __name__ != "__main__" чтобы не запустить main блок
+    namespace = {'__name__': '__imported__'}
+    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), namespace)
+    # Копируем нужные компоненты в текущий namespace
+    globals().update({k: v for k, v in namespace.items() if not k.startswith('__')})
     logger.info("✅ Imported existing training components")
 except Exception as e:
     logger.error(f"❌ Failed to import base training script: {e}")
