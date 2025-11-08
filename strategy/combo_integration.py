@@ -327,7 +327,7 @@ class COMBOSignalIntegration:
         Генерация торгового сигнала используя COMBO модели.
 
         Args:
-            df: DataFrame с OHLCV + индикаторами
+            df: DataFrame с OHLCV + индикаторами (или list of dicts)
             symbol: Торговый символ
 
         Returns:
@@ -342,6 +342,10 @@ class COMBOSignalIntegration:
                 'metadata': dict
             }
         """
+        # Конвертируем list в DataFrame если нужно
+        if isinstance(df, list):
+            df = pd.DataFrame(df)
+
         # Загружаем модели если не загружены
         if symbol not in self.models:
             if not self.load_models_for_symbol(symbol):
