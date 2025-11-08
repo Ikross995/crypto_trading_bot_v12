@@ -895,7 +895,7 @@ async def train_gru_on_real_data(
 # 🚀 MAIN
 # ==========================================
 
-if __name__ == "__main__":
+if __name__ == "__main__" and not globals().get('__SKIP_MAIN__'):
     import argparse
 
     parser = argparse.ArgumentParser(description="Train GRU model on real Binance data")

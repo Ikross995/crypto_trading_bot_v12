@@ -65,11 +65,10 @@ logger = logging.getLogger(__name__)
 
 # Импортируем существующий код из старого файла (без запуска main)
 try:
-    # Создаём namespace где __name__ != "__main__" чтобы не запустить main блок
-    namespace = {'__name__': '__imported__'}
-    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), namespace)
-    # Копируем нужные компоненты в текущий namespace
-    globals().update({k: v for k, v in namespace.items() if not k.startswith('__')})
+    # 🔥 Pass __SKIP_MAIN__ flag to prevent old script's argparse from running
+    _old_globals = globals()
+    _old_globals['__SKIP_MAIN__'] = True
+    exec(open('examples/gru_training_pytorch.py', encoding='utf-8').read(), _old_globals)
     logger.info("✅ Imported existing training components")
 except Exception as e:
     logger.error(f"❌ Failed to import base training script: {e}")
@@ -396,7 +395,8 @@ async def train_gru_percentage_model(
 # 🚀 MAIN
 # ==========================================
 
-if __name__ == "__main__":
+# 🔥 Only run if NOT being imported by train_gru_final.py
+if __name__ == "__main__" and not globals().get('__SKIP_MAIN__'):
     import argparse
 
     parser = argparse.ArgumentParser(description="Train GRU model on % changes (v2)")
