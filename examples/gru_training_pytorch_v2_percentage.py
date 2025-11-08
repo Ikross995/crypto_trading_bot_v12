@@ -396,7 +396,8 @@ async def train_gru_percentage_model(
 # 🚀 MAIN
 # ==========================================
 
-if __name__ == "__main__":
+# 🔥 Only run if NOT being imported by train_gru_final.py
+if __name__ == "__main__" and not globals().get('__SKIP_MAIN__'):
     import argparse
 
     parser = argparse.ArgumentParser(description="Train GRU model on % changes (v2)")
