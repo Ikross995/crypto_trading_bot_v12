@@ -152,7 +152,7 @@ class COMBOSignalIntegration:
         - 2 balance features: total_return, num_trades
 
         Args:
-            df: DataFrame с OHLCV + индикаторами
+            df: DataFrame с OHLCV (индикаторы будут добавлены если отсутствуют)
             symbol: Торговый символ
 
         Returns:
@@ -162,6 +162,14 @@ class COMBOSignalIntegration:
             if len(df) < 100:
                 logger.warning(f"Not enough data for state preparation: {len(df)} < 100")
                 return None
+
+            # Добавляем индикаторы, если их нет
+            from utils.indicators import add_technical_indicators
+
+            # Проверяем, есть ли индикаторы
+            required_indicators = ['rsi', 'macd', 'bb_upper', 'sma_20', 'sma_50']
+            if not all(col in df.columns for col in required_indicators):
+                df = add_technical_indicators(df)
 
             # Последняя свеча
             latest = df.iloc[-1]
@@ -223,7 +231,7 @@ class COMBOSignalIntegration:
         Получить предсказание от Ensemble моделей.
 
         Args:
-            df: DataFrame с данными
+            df: DataFrame с данными (OHLCV)
             symbol: Торговый символ
 
         Returns:
@@ -234,6 +242,21 @@ class COMBOSignalIntegration:
                 return None
 
             ensemble = self.models[symbol]['ensemble']
+
+            # Берем последние 100 свечей
+            if len(df) < 100:
+                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < 100")
+                return None
+
+            recent_df = df.iloc[-100:].copy()
+
+            # Добавляем индикаторы, если их нет
+            from utils.indicators import add_technical_indicators
+
+            # Проверяем, есть ли индикаторы
+            required_indicators = ['rsi', 'macd', 'bb_upper']
+            if not all(col in recent_df.columns for col in required_indicators):
+                recent_df = add_technical_indicators(recent_df)
 
             # Подготовка последовательности (как в обучении)
             from examples.gru_training_improved import prepare_sequences_no_leakage
@@ -247,13 +270,6 @@ class COMBOSignalIntegration:
                 'volume_delta', 'obv', 'volume_ratio',
                 'volume_spike', 'mfi', 'cvd', 'vwap_distance'
             ]
-
-            # Берем последние 60 свечей для последовательности
-            if len(df) < 60:
-                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < 60")
-                return None
-
-            recent_df = df.iloc[-100:].copy()  # Берем больше для скейлера
 
             X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
                 prepare_sequences_no_leakage(
