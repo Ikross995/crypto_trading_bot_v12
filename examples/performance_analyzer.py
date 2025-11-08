@@ -488,8 +488,29 @@ class PerformanceAnalyzer:
 
     def save_analysis(self, results: Dict, path: str):
         """Сохранить результаты анализа"""
+
+        def convert_to_json_serializable(obj):
+            """Конвертирует numpy типы в JSON-сериализуемые типы"""
+            if isinstance(obj, dict):
+                return {key: convert_to_json_serializable(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_to_json_serializable(item) for item in obj]
+            elif isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            else:
+                return obj
+
+        # Конвертируем результаты
+        serializable_results = convert_to_json_serializable(results)
+
         with open(path, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(serializable_results, f, indent=2)
         logger.info(f"💾 Analysis saved to {path}")
 
     def plot_analysis(self, save_path: str = None):
