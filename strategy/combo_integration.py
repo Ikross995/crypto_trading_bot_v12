@@ -243,12 +243,13 @@ class COMBOSignalIntegration:
 
             ensemble = self.models[symbol]['ensemble']
 
-            # Берем последние 100 свечей
-            if len(df) < 100:
-                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < 100")
+            # Берем достаточно свечей для sequence (60) + нормализации
+            min_required = 100  # Для rolling нормализации
+            if len(df) < min_required:
+                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < {min_required}")
                 return None
 
-            recent_df = df.iloc[-100:].copy()
+            recent_df = df.iloc[-min_required:].copy()
 
             # Добавляем индикаторы, если их нет
             from examples.adaptive_trading_integration import add_technical_indicators
@@ -258,11 +259,7 @@ class COMBOSignalIntegration:
             if not all(col in recent_df.columns for col in required_indicators):
                 recent_df = add_technical_indicators(recent_df)
 
-            # Подготовка последовательности (как в обучении)
-            from examples.gru_training_improved import prepare_sequences_no_leakage
-
             # Используем только индикаторы, которые добавляет add_technical_indicators()
-            # bb_middle (не bb_mid!), нет volume_delta, obv, volume_spike, mfi, cvd, vwap_distance
             feature_columns = [
                 'open', 'high', 'low', 'volume',
                 'rsi', 'macd', 'macd_signal',
@@ -271,28 +268,44 @@ class COMBOSignalIntegration:
                 'volume_sma', 'atr', 'volume_ratio'
             ]
 
-            X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
-                prepare_sequences_no_leakage(
-                    recent_df,
-                    feature_columns,
-                    sequence_length=60,
-                    train_ratio=0.7,
-                    val_ratio=0.15
-                )
+            # Для inference: используем простую подготовку без split
+            # Нормализация и создание последовательности вручную
+            from sklearn.preprocessing import RobustScaler
 
-            # Берем последнюю последовательность
-            if len(X_test) > 0:
-                last_sequence = X_test[-1:]
-            elif len(X_val) > 0:
-                last_sequence = X_val[-1:]
-            else:
-                last_sequence = X_train[-1:]
+            # Подготовка features и target
+            df_features = recent_df[feature_columns].copy()
+            df_target = recent_df['close'].pct_change().shift(-1) * 100  # % change
 
-            # Конвертируем в torch
-            X_tensor = torch.FloatTensor(last_sequence).to(self.device)
+            # Удаляем NaN
+            df_features = df_features.dropna()
+            df_target = df_target.dropna()
 
-            # Предсказание от ансамбля
-            prediction = ensemble.predict(X_tensor)
+            # Выравниваем длины
+            min_len = min(len(df_features), len(df_target))
+            df_features = df_features.iloc[:min_len]
+            df_target = df_target.iloc[:min_len]
+
+            if len(df_features) < 60:
+                logger.warning(f"Not enough clean data after indicators: {len(df_features)} < 60")
+                return None
+
+            # Нормализация
+            feature_scaler = RobustScaler()
+            target_scaler = RobustScaler()
+
+            features_scaled = feature_scaler.fit_transform(df_features)
+            target_scaled = target_scaler.fit_transform(df_target.values.reshape(-1, 1))
+
+            # Создаем последнюю последовательность (60 timesteps)
+            sequence_length = 60
+            last_sequence = features_scaled[-sequence_length:].reshape(1, sequence_length, -1)
+
+            # Конвертируем в numpy для ensemble.predict()
+            # ensemble.predict() сам конвертирует в torch tensor
+            last_sequence_np = last_sequence  # Уже numpy array
+
+            # Предсказание от ансамбля (передаем numpy array)
+            prediction = ensemble.predict(last_sequence_np)
 
             # Обратное преобразование
             prediction_original = target_scaler.inverse_transform(prediction.reshape(-1, 1))[0][0]
