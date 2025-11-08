@@ -337,6 +337,16 @@ class LiveTradingEngine:
                 "🎯 [TRAIL_SL] Trailing stop loss enabled - will initialize with Binance client"
             )
 
+        # RL Position Advisor - Intelligent position management with RL Agent
+        self.rl_position_advisor = None
+        if getattr(config, "use_combo_signals", False):
+            try:
+                from strategy.rl_position_advisor import RLPositionAdvisor
+                self.rl_position_advisor = RLPositionAdvisor(config)
+                self.logger.info("🤖 [RL_ADVISOR] RL Position Advisor initialized")
+            except Exception as e:
+                self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
+
         # Telegram Notifications
         self.telegram = None
         try:
@@ -1754,6 +1764,13 @@ class LiveTradingEngine:
                 if self.iteration % 10 == 0:
                     await self._update_all_positions_pnl()
 
+                # Monitor TP fills for RL Position Advisor (every 5 iterations ~ 5 seconds)
+                if self.rl_position_advisor and self.iteration % 5 == 0:
+                    try:
+                        await self._monitor_tp_fills()
+                    except Exception as tp_e:
+                        self.logger.debug("🤖 [TP_MONITOR] Error: %s", tp_e)
+
                 # Advanced AI periodic learning and optimization (every 20 iterations ~ 20 seconds)
                 if self.adaptive_learning and self.iteration % 20 == 0:
                     try:
@@ -1823,6 +1840,70 @@ class LiveTradingEngine:
                 
             except Exception as e:
                 self.logger.debug("get_candles(%s) error: %s", symbol, e)
+
+        # 🤖 RL POSITION ADVISOR: Monitor existing positions
+        if self.rl_position_advisor and md is not None:
+            try:
+                # Get current price
+                current_price = await self._latest_price(symbol)
+                if current_price:
+                    # Get advice from RL Agent
+                    advice = self.rl_position_advisor.update_and_advise(
+                        symbol=symbol,
+                        current_price=current_price,
+                        market_data=md
+                    )
+
+                    # Execute RL Agent's advice
+                    action = advice.get('action', 'hold')
+                    confidence = advice.get('confidence', 0.0)
+                    reason = advice.get('reason', '')
+
+                    if action == 'close':
+                        # RL Agent recommends closing position early
+                        self.logger.warning(
+                            "🤖 [RL_CLOSE] %s: RL Agent recommends CLOSE (conf=%.0f%%) - %s",
+                            symbol, confidence * 100, reason
+                        )
+                        # Close position via market order
+                        if not self.dry_run and hasattr(self, 'client') and self.client:
+                            try:
+                                # Get current position to determine close side
+                                position = await self.client.get_position(symbol)
+                                if position:
+                                    pos_amt = float(position.get('positionAmt', 0))
+                                    if abs(pos_amt) > 0:
+                                        close_side = 'SELL' if pos_amt > 0 else 'BUY'
+                                        close_qty = abs(pos_amt)
+                                        # Place market close order
+                                        self.client.place_order(
+                                            symbol=symbol,
+                                            side=close_side,
+                                            type='MARKET',
+                                            quantity=self._round_quantity(close_qty, symbol),
+                                            reduceOnly='true'
+                                        )
+                                        self.logger.info("🤖 [RL_CLOSE] ✅ Position closed per RL advice")
+                                        # Remove from tracking
+                                        self.rl_position_advisor.remove_position(symbol)
+                                        if symbol in self.active_positions:
+                                            del self.active_positions[symbol]
+                            except Exception as close_e:
+                                self.logger.error("🤖 [RL_CLOSE] Failed to close: %s", close_e)
+
+                    elif action == 'update_stop':
+                        # RL Agent moved trailing stop
+                        new_stop = advice.get('new_stop')
+                        if new_stop:
+                            self.logger.info(
+                                "🤖 [RL_TRAIL] %s: Trailing stop updated to $%.2f - %s",
+                                symbol, new_stop, reason
+                            )
+                            # Update stop loss order (implementation depends on your stop management)
+                            # This could integrate with trailing_stop_manager or update orders directly
+
+            except Exception as rl_e:
+                self.logger.debug("🤖 [RL_ADVISOR] Error monitoring %s: %s", symbol, rl_e)
 
         # ==================== PHASE 3: REGIME DETECTION ====================
         current_regime = None
@@ -2672,6 +2753,27 @@ class LiveTradingEngine:
                             executed_qty,
                             symbol,
                         )
+
+                        # 🤖 Register position with RL Position Advisor
+                        if self.rl_position_advisor:
+                            try:
+                                # Calculate TP/SL to get initial stop
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Register position for RL monitoring
+                                self.rl_position_advisor.register_position(
+                                    symbol=symbol,
+                                    side=order_side,
+                                    entry_price=avg_fill_price,
+                                    position_size=executed_qty,
+                                    initial_stop=sl_price
+                                )
+                                self.logger.info("🤖 [RL_ADVISOR] Position registered for intelligent monitoring")
+                            except Exception as rl_e:
+                                self.logger.warning("🤖 [RL_ADVISOR] Failed to register position: %s", rl_e)
+
                     else:
                         # CRITICAL: If order still not filled, cancel it and exit
                         if order_status in ["NEW", "PARTIALLY_FILLED"]:
@@ -2953,6 +3055,49 @@ class LiveTradingEngine:
 
         except Exception as e:
             self.logger.debug("[PNL_UPDATE_ALL] Error updating all positions: %s", e)
+
+    async def _monitor_tp_fills(self) -> None:
+        """Monitor take-profit order fills and notify RL Position Advisor."""
+        try:
+            if not self.rl_position_advisor:
+                return
+
+            # Check each symbol with RL-tracked positions
+            for symbol in list(self.rl_position_advisor.positions.keys()):
+                try:
+                    # Get all orders for this symbol
+                    if hasattr(self, 'client') and self.client:
+                        all_orders = self.client.get_all_orders(symbol=symbol, limit=10)
+
+                        # Find recently filled TP orders
+                        for order in all_orders:
+                            if order.get('status') == 'FILLED' and order.get('type') in ['LIMIT', 'TAKE_PROFIT_MARKET', 'TAKE_PROFIT']:
+                                # Check if this is a TP order (reduce only)
+                                if order.get('reduceOnly'):
+                                    # Get position to determine which TP this was
+                                    position = self.rl_position_advisor.positions.get(symbol)
+                                    if position:
+                                        fill_price = float(order.get('avgPrice', 0))
+
+                                        # Determine which TP level was hit based on price
+                                        if position.side == 'LONG':
+                                            # For LONG: TP prices are above entry
+                                            price_pct = (fill_price - position.entry_price) / position.entry_price * 100
+                                        else:
+                                            # For SHORT: TP prices are below entry
+                                            price_pct = (position.entry_price - fill_price) / position.entry_price * 100
+
+                                        # Estimate TP level based on profit percentage
+                                        if not position.tp1_hit and price_pct >= 1.0:  # ~TP1 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 1)
+                                        elif position.tp1_hit and not position.tp2_hit and price_pct >= 2.5:  # ~TP2 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 2)
+
+                except Exception as sym_e:
+                    self.logger.debug("🤖 [TP_MONITOR] Error checking %s: %s", symbol, sym_e)
+
+        except Exception as e:
+            self.logger.debug("🤖 [TP_MONITOR] Error monitoring TP fills: %s", e)
 
     async def _run_ai_optimization_cycle(self) -> None:
         """Run AI optimization and learning cycle periodically."""
