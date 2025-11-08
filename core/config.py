@@ -138,6 +138,9 @@ class Config(BaseModel):
     # IMBA Integration
     use_imba_signals: bool = Field(default=True)  # Enable IMBA signals by default
 
+    # COMBO ML System Integration (Ensemble + RL Agent + Meta-Learner)
+    use_combo_signals: bool = Field(default=False)  # Enable COMBO ML models
+
     # Notifications
     tg_bot_token: str = Field(default="")
     tg_chat_id: str = Field(default="")

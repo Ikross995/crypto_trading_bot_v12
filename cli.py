@@ -460,6 +460,9 @@ def live(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
@@ -488,6 +491,17 @@ def live(
         console.print("[cyan]   - 9 advanced trading signals[/cyan]")
         console.print("[cyan]   - Market regime detection[/cyan]")
         console.print("[cyan]   - Smart signal filtering[/cyan]")
+
+    # Enable COMBO ML models if requested
+    if use_combo:
+        config.use_combo_signals = True
+        config.use_imba_signals = False  # Disable IMBA when using COMBO
+        console.print("[cyan]🚀 COMBO ML System ENABLED[/cyan]")
+        console.print("[cyan]   - Ensemble of 5 GRU models[/cyan]")
+        console.print("[cyan]   - RL Agent (Deep Q-Network)[/cyan]")
+        console.print("[cyan]   - Meta-Learner strategy selection[/cyan]")
+        console.print("[yellow]⚠️  Note: Models must be trained first![/yellow]")
+        console.print("[yellow]   Run: python run_full_combo_system_multi.py --symbols <SYMBOL>[/yellow]")
 
     # Handle both --symbol and --symbols
     if symbol:
@@ -543,6 +557,9 @@ def paper(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
@@ -567,6 +584,13 @@ def paper(
     if use_imba:
         config.use_imba_signals = True
         console.print("[cyan]🎯 IMBA Research Signals ENABLED[/cyan]")
+
+    # Enable COMBO ML models if requested
+    if use_combo:
+        config.use_combo_signals = True
+        config.use_imba_signals = False
+        console.print("[cyan]🚀 COMBO ML System ENABLED[/cyan]")
+        console.print("[cyan]   - Ensemble + RL Agent + Meta-Learner[/cyan]")
 
     # Handle both --symbol and --symbols
     if symbol:
@@ -603,6 +627,9 @@ def backtest(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     self_learning: bool = typer.Option(
         False, "--self-learning", help="Enable self-learning system (trade journal + adaptive optimizer)"
     ),
@@ -635,7 +662,14 @@ def backtest(
     if use_imba:
         config.use_imba_signals = True
         console.print("[cyan]IMBA Research Signals ENABLED for backtest[/cyan]")
-    
+
+    # Enable COMBO ML models if requested
+    if use_combo:
+        config.use_combo_signals = True
+        config.use_imba_signals = False
+        console.print("[cyan]🚀 COMBO ML System ENABLED for backtest[/cyan]")
+        console.print("[cyan]   - Ensemble + RL Agent + Meta-Learner[/cyan]")
+
     # Enable self-learning if requested
     if self_learning:
         config.enable_trade_journal = True
