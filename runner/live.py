@@ -2008,6 +2008,8 @@ class LiveTradingEngine:
 
         # 🤖 RL AGENT SIGNAL VALIDATION (COMBO RL Position Advisor)
         # If COMBO is enabled, use RL Agent to validate/filter IMBA signals
+        rl_signal = None  # Save RL prediction for ML learning
+
         if self.config.use_combo_signals and md is not None:
             try:
                 # Import COMBO integration
@@ -2038,7 +2040,7 @@ class LiveTradingEngine:
                     df_for_rl = None
 
                 if df_for_rl is not None and len(df_for_rl) >= 250:
-                    # Get RL Agent's opinion
+                    # Get RL Agent's opinion (save for ML learning)
                     rl_signal = self._combo_signal_checker.generate_signal_from_df(df_for_rl, symbol)
 
                     if rl_signal:
@@ -2153,13 +2155,17 @@ class LiveTradingEngine:
                             'iteration': self.iteration,
                             'market_session': self._get_market_session(),
                             'volatility_factor': getattr(self.config, 'volatility_factor', 1.0),
-                            'gru_prediction': gru_prediction  # Add GRU prediction to ML context
+                            'gru_prediction': gru_prediction,  # GRU prediction for ML context
+                            'rl_prediction': rl_signal  # RL Agent prediction for ML learning
                         }
                     )
 
-                    # Add GRU prediction to enhanced_analysis for recording
-                    if enhanced_analysis and gru_prediction:
-                        enhanced_analysis['gru_prediction'] = gru_prediction
+                    # Add GRU and RL predictions to enhanced_analysis for recording
+                    if enhanced_analysis:
+                        if gru_prediction:
+                            enhanced_analysis['gru_prediction'] = gru_prediction
+                        if rl_signal:
+                            enhanced_analysis['rl_prediction'] = rl_signal
                     
                     processing_time = time.time() - start_time
                     

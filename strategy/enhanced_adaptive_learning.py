@@ -561,18 +561,17 @@ class EnhancedAdaptiveLearningSystem:
             
             # 🎯 EXPLORATION PHASE - Первые 50 сделок
             if total_samples < 50:
-                logger.info(f"🧠 [COLD_START] Exploration mode: {total_samples}/50 samples")
+                logger.info(f"🧠 [COLD_START] Learning mode: {total_samples}/50 samples - ML не блокирует")
 
-                # В начале торгуем на основе ТОЛЬКО сигналов IMBA (не ML)
-                # Порог понижен для работы с RL фильтром (который может снижать сигнал)
-                exploration_threshold = 1.0  # Было 1.4, понижено для RL совместимости
-                
-                if signal_strength >= exploration_threshold:
-                    logger.info(f"🚀 [EXPLORATION] TRADE: Signal {signal_strength:.2f} >= {exploration_threshold}")
-                    return True
-                else:
-                    logger.info(f"🚫 [EXPLORATION] SKIP: Signal {signal_strength:.2f} < {exploration_threshold}")
-                    return False
+                # 📚 КОНЦЕПЦИЯ:
+                # - RL Agent уже обучен на исторических данных
+                # - ML Learning System учится на РЕАЛЬНЫХ сделках
+                # - Первые 50 сделок: ML только ЗАПОМИНАЕТ результаты
+                # - RL фильтрует сигналы, ML сравнивает его предсказания с фактом
+                # - После 50 сделок: ML начинает использовать свой опыт для фильтрации
+
+                logger.info(f"📚 [LEARNING_MODE] Пропускаем сигнал {signal_strength:.2f} - ML учится на реальных данных")
+                return True  # Всегда пропускаем - учимся на всех сделках!
             
             # 🧠 LEARNING PHASE - 50-200 сделок (постепенно добавляем ML)
             elif total_samples < 200:
