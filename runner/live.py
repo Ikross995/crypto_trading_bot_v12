@@ -2006,6 +2006,109 @@ class LiveTradingEngine:
                     symbol
                 )
 
+        # 🤖 RL AGENT SIGNAL VALIDATION (COMBO RL Position Advisor)
+        # If COMBO is enabled, use RL Agent to validate/filter IMBA signals
+        if self.config.use_combo_signals and md is not None:
+            try:
+                # Import COMBO integration
+                from strategy.combo_integration import COMBOSignalIntegration
+
+                # Initialize if not already initialized
+                if not hasattr(self, '_combo_signal_checker'):
+                    self._combo_signal_checker = COMBOSignalIntegration(self.config)
+                    self.logger.info("🤖 [RL_FILTER] COMBO RL Agent signal filter initialized")
+
+                # Convert market data to DataFrame
+                import pandas as pd
+
+                if hasattr(md, 'close'):
+                    df_for_rl = pd.DataFrame({
+                        'timestamp': md.timestamp,
+                        'open': md.open,
+                        'high': md.high,
+                        'low': md.low,
+                        'close': md.close,
+                        'volume': md.volume
+                    })
+                elif isinstance(md, list) and len(md) > 0 and isinstance(md[0], dict):
+                    df_for_rl = pd.DataFrame(md)
+                elif isinstance(md, pd.DataFrame):
+                    df_for_rl = md
+                else:
+                    df_for_rl = None
+
+                if df_for_rl is not None and len(df_for_rl) >= 250:
+                    # Get RL Agent's opinion
+                    rl_signal = self._combo_signal_checker.generate_signal_from_df(df_for_rl, symbol)
+
+                    if rl_signal:
+                        rl_direction = rl_signal.get('direction', 'wait')
+                        rl_confidence = rl_signal.get('confidence', 0.0)
+
+                        # Map IMBA signal to RL direction format
+                        imba_direction = 'buy' if sig.side == 'BUY' else 'sell'
+
+                        # Check agreement between IMBA and RL
+                        signals_agree = (imba_direction == rl_direction)
+
+                        if signals_agree and rl_confidence >= 0.75:
+                            # Strong agreement - boost signal
+                            boost = 1.0 + (rl_confidence - 0.75) * 0.8  # Up to +20% boost
+                            original_strength = sig.strength
+                            sig.strength = min(2.0, sig.strength * boost)
+
+                            self.logger.info(
+                                "🤖 [RL_BOOST] %s: RL agrees with IMBA (%.0f%% conf) - Signal %.2f → %.2f ✅",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif signals_agree and rl_confidence >= 0.50:
+                            # Moderate agreement - no change
+                            self.logger.info(
+                                "🤖 [RL_CONFIRM] %s: RL confirms IMBA (%.0f%% conf) - Signal unchanged ✓",
+                                symbol, rl_confidence * 100
+                            )
+
+                        elif signals_agree and rl_confidence < 0.50:
+                            # Weak agreement - reduce signal
+                            penalty = 0.7  # -30% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_WEAK] %s: RL low confidence (%.0f%%) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif not signals_agree and rl_confidence >= 0.75:
+                            # Strong disagreement - REJECT signal
+                            self.logger.warning(
+                                "🤖 [RL_REJECT] %s: RL strongly disagrees (wants %s, %.0f%% conf) - Signal REJECTED ❌",
+                                symbol, rl_direction.upper(), rl_confidence * 100
+                            )
+                            return  # Skip this signal
+
+                        elif not signals_agree:
+                            # Moderate disagreement - weaken signal significantly
+                            penalty = 0.5  # -50% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_CONFLICT] %s: RL disagrees (wants %s, %.0f%% conf) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_direction.upper(), rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        # Log RL details
+                        self.logger.debug(
+                            "🤖 [RL_DETAIL] %s: IMBA=%s, RL=%s, Conf=%.2f, Agree=%s",
+                            symbol, imba_direction.upper(), rl_direction.upper(),
+                            rl_confidence, signals_agree
+                        )
+
+            except Exception as rl_e:
+                self.logger.warning("🤖 [RL_FILTER] Error filtering signal with RL Agent: %s", rl_e)
+
         # 🧠 NEW: Enhanced ML Analysis of Signal Context
         enhanced_analysis = None
         if self.enhanced_ai and md is not None:
