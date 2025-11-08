@@ -304,7 +304,7 @@ async def run_full_combo_system(
     perf_results = analyzer.analyze()
 
     # Save
-    analyzer.save_analysis('data/combo_performance_analysis.json')
+    analyzer.save_analysis(perf_results, 'data/combo_performance_analysis.json')
 
     results['performance'] = {
         'total_trades': len(analyzer.trades),

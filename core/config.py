@@ -138,6 +138,14 @@ class Config(BaseModel):
     # IMBA Integration
     use_imba_signals: bool = Field(default=True)  # Enable IMBA signals by default
 
+    # COMBO ML System Integration (Ensemble + RL Agent + Meta-Learner)
+    use_combo_signals: bool = Field(default=False)  # Enable COMBO ML models
+
+    # RL Position Advisor Settings (works with COMBO RL Agent)
+    rl_close_confidence_min: float = Field(default=0.75, ge=0.5, le=1.0)  # Minimum confidence to close position early
+    rl_emergency_confidence: float = Field(default=0.95, ge=0.8, le=1.0)  # Emergency close confidence threshold
+    rl_trailing_distance_pct: float = Field(default=3.0, ge=1.0, le=10.0)  # Trailing stop distance from peak (%)
+
     # Notifications
     tg_bot_token: str = Field(default="")
     tg_chat_id: str = Field(default="")

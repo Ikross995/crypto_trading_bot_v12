@@ -337,6 +337,16 @@ class LiveTradingEngine:
                 "🎯 [TRAIL_SL] Trailing stop loss enabled - will initialize with Binance client"
             )
 
+        # RL Position Advisor - Intelligent position management with RL Agent
+        self.rl_position_advisor = None
+        if getattr(config, "use_combo_signals", False):
+            try:
+                from strategy.rl_position_advisor import RLPositionAdvisor
+                self.rl_position_advisor = RLPositionAdvisor(config)
+                self.logger.info("🤖 [RL_ADVISOR] RL Position Advisor initialized")
+            except Exception as e:
+                self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
+
         # Telegram Notifications
         self.telegram = None
         try:
@@ -1754,6 +1764,13 @@ class LiveTradingEngine:
                 if self.iteration % 10 == 0:
                     await self._update_all_positions_pnl()
 
+                # Monitor TP fills for RL Position Advisor (every 5 iterations ~ 5 seconds)
+                if self.rl_position_advisor and self.iteration % 5 == 0:
+                    try:
+                        await self._monitor_tp_fills()
+                    except Exception as tp_e:
+                        self.logger.debug("🤖 [TP_MONITOR] Error: %s", tp_e)
+
                 # Advanced AI periodic learning and optimization (every 20 iterations ~ 20 seconds)
                 if self.adaptive_learning and self.iteration % 20 == 0:
                     try:
@@ -1823,6 +1840,70 @@ class LiveTradingEngine:
                 
             except Exception as e:
                 self.logger.debug("get_candles(%s) error: %s", symbol, e)
+
+        # 🤖 RL POSITION ADVISOR: Monitor existing positions
+        if self.rl_position_advisor and md is not None:
+            try:
+                # Get current price
+                current_price = await self._latest_price(symbol)
+                if current_price:
+                    # Get advice from RL Agent
+                    advice = self.rl_position_advisor.update_and_advise(
+                        symbol=symbol,
+                        current_price=current_price,
+                        market_data=md
+                    )
+
+                    # Execute RL Agent's advice
+                    action = advice.get('action', 'hold')
+                    confidence = advice.get('confidence', 0.0)
+                    reason = advice.get('reason', '')
+
+                    if action == 'close':
+                        # RL Agent recommends closing position early
+                        self.logger.warning(
+                            "🤖 [RL_CLOSE] %s: RL Agent recommends CLOSE (conf=%.0f%%) - %s",
+                            symbol, confidence * 100, reason
+                        )
+                        # Close position via market order
+                        if not self.dry_run and hasattr(self, 'client') and self.client:
+                            try:
+                                # Get current position to determine close side
+                                position = await self.client.get_position(symbol)
+                                if position:
+                                    pos_amt = float(position.get('positionAmt', 0))
+                                    if abs(pos_amt) > 0:
+                                        close_side = 'SELL' if pos_amt > 0 else 'BUY'
+                                        close_qty = abs(pos_amt)
+                                        # Place market close order
+                                        self.client.place_order(
+                                            symbol=symbol,
+                                            side=close_side,
+                                            type='MARKET',
+                                            quantity=self._round_quantity(close_qty, symbol),
+                                            reduceOnly='true'
+                                        )
+                                        self.logger.info("🤖 [RL_CLOSE] ✅ Position closed per RL advice")
+                                        # Remove from tracking
+                                        self.rl_position_advisor.remove_position(symbol)
+                                        if symbol in self.active_positions:
+                                            del self.active_positions[symbol]
+                            except Exception as close_e:
+                                self.logger.error("🤖 [RL_CLOSE] Failed to close: %s", close_e)
+
+                    elif action == 'update_stop':
+                        # RL Agent moved trailing stop
+                        new_stop = advice.get('new_stop')
+                        if new_stop:
+                            self.logger.info(
+                                "🤖 [RL_TRAIL] %s: Trailing stop updated to $%.2f - %s",
+                                symbol, new_stop, reason
+                            )
+                            # Update stop loss order (implementation depends on your stop management)
+                            # This could integrate with trailing_stop_manager or update orders directly
+
+            except Exception as rl_e:
+                self.logger.debug("🤖 [RL_ADVISOR] Error monitoring %s: %s", symbol, rl_e)
 
         # ==================== PHASE 3: REGIME DETECTION ====================
         current_regime = None
@@ -1924,6 +2005,109 @@ class LiveTradingEngine:
                     "🧠 [GRU_NEUTRAL] %s: GRU prediction neutral - No signal adjustment",
                     symbol
                 )
+
+        # 🤖 RL AGENT SIGNAL VALIDATION (COMBO RL Position Advisor)
+        # If COMBO is enabled, use RL Agent to validate/filter IMBA signals
+        if self.config.use_combo_signals and md is not None:
+            try:
+                # Import COMBO integration
+                from strategy.combo_integration import COMBOSignalIntegration
+
+                # Initialize if not already initialized
+                if not hasattr(self, '_combo_signal_checker'):
+                    self._combo_signal_checker = COMBOSignalIntegration(self.config)
+                    self.logger.info("🤖 [RL_FILTER] COMBO RL Agent signal filter initialized")
+
+                # Convert market data to DataFrame
+                import pandas as pd
+
+                if hasattr(md, 'close'):
+                    df_for_rl = pd.DataFrame({
+                        'timestamp': md.timestamp,
+                        'open': md.open,
+                        'high': md.high,
+                        'low': md.low,
+                        'close': md.close,
+                        'volume': md.volume
+                    })
+                elif isinstance(md, list) and len(md) > 0 and isinstance(md[0], dict):
+                    df_for_rl = pd.DataFrame(md)
+                elif isinstance(md, pd.DataFrame):
+                    df_for_rl = md
+                else:
+                    df_for_rl = None
+
+                if df_for_rl is not None and len(df_for_rl) >= 250:
+                    # Get RL Agent's opinion
+                    rl_signal = self._combo_signal_checker.generate_signal_from_df(df_for_rl, symbol)
+
+                    if rl_signal:
+                        rl_direction = rl_signal.get('direction', 'wait')
+                        rl_confidence = rl_signal.get('confidence', 0.0)
+
+                        # Map IMBA signal to RL direction format
+                        imba_direction = 'buy' if sig.side == 'BUY' else 'sell'
+
+                        # Check agreement between IMBA and RL
+                        signals_agree = (imba_direction == rl_direction)
+
+                        if signals_agree and rl_confidence >= 0.75:
+                            # Strong agreement - boost signal
+                            boost = 1.0 + (rl_confidence - 0.75) * 0.8  # Up to +20% boost
+                            original_strength = sig.strength
+                            sig.strength = min(2.0, sig.strength * boost)
+
+                            self.logger.info(
+                                "🤖 [RL_BOOST] %s: RL agrees with IMBA (%.0f%% conf) - Signal %.2f → %.2f ✅",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif signals_agree and rl_confidence >= 0.50:
+                            # Moderate agreement - no change
+                            self.logger.info(
+                                "🤖 [RL_CONFIRM] %s: RL confirms IMBA (%.0f%% conf) - Signal unchanged ✓",
+                                symbol, rl_confidence * 100
+                            )
+
+                        elif signals_agree and rl_confidence < 0.50:
+                            # Weak agreement - reduce signal
+                            penalty = 0.7  # -30% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_WEAK] %s: RL low confidence (%.0f%%) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif not signals_agree and rl_confidence >= 0.75:
+                            # Strong disagreement - REJECT signal
+                            self.logger.warning(
+                                "🤖 [RL_REJECT] %s: RL strongly disagrees (wants %s, %.0f%% conf) - Signal REJECTED ❌",
+                                symbol, rl_direction.upper(), rl_confidence * 100
+                            )
+                            return  # Skip this signal
+
+                        elif not signals_agree:
+                            # Moderate disagreement - weaken signal significantly
+                            penalty = 0.5  # -50% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_CONFLICT] %s: RL disagrees (wants %s, %.0f%% conf) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_direction.upper(), rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        # Log RL details
+                        self.logger.debug(
+                            "🤖 [RL_DETAIL] %s: IMBA=%s, RL=%s, Conf=%.2f, Agree=%s",
+                            symbol, imba_direction.upper(), rl_direction.upper(),
+                            rl_confidence, signals_agree
+                        )
+
+            except Exception as rl_e:
+                self.logger.warning("🤖 [RL_FILTER] Error filtering signal with RL Agent: %s", rl_e)
 
         # 🧠 NEW: Enhanced ML Analysis of Signal Context
         enhanced_analysis = None
@@ -2672,6 +2856,27 @@ class LiveTradingEngine:
                             executed_qty,
                             symbol,
                         )
+
+                        # 🤖 Register position with RL Position Advisor
+                        if self.rl_position_advisor:
+                            try:
+                                # Calculate TP/SL to get initial stop
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Register position for RL monitoring
+                                self.rl_position_advisor.register_position(
+                                    symbol=symbol,
+                                    side=order_side,
+                                    entry_price=avg_fill_price,
+                                    position_size=executed_qty,
+                                    initial_stop=sl_price
+                                )
+                                self.logger.info("🤖 [RL_ADVISOR] Position registered for intelligent monitoring")
+                            except Exception as rl_e:
+                                self.logger.warning("🤖 [RL_ADVISOR] Failed to register position: %s", rl_e)
+
                     else:
                         # CRITICAL: If order still not filled, cancel it and exit
                         if order_status in ["NEW", "PARTIALLY_FILLED"]:
@@ -2953,6 +3158,49 @@ class LiveTradingEngine:
 
         except Exception as e:
             self.logger.debug("[PNL_UPDATE_ALL] Error updating all positions: %s", e)
+
+    async def _monitor_tp_fills(self) -> None:
+        """Monitor take-profit order fills and notify RL Position Advisor."""
+        try:
+            if not self.rl_position_advisor:
+                return
+
+            # Check each symbol with RL-tracked positions
+            for symbol in list(self.rl_position_advisor.positions.keys()):
+                try:
+                    # Get all orders for this symbol
+                    if hasattr(self, 'client') and self.client:
+                        all_orders = self.client.get_all_orders(symbol=symbol, limit=10)
+
+                        # Find recently filled TP orders
+                        for order in all_orders:
+                            if order.get('status') == 'FILLED' and order.get('type') in ['LIMIT', 'TAKE_PROFIT_MARKET', 'TAKE_PROFIT']:
+                                # Check if this is a TP order (reduce only)
+                                if order.get('reduceOnly'):
+                                    # Get position to determine which TP this was
+                                    position = self.rl_position_advisor.positions.get(symbol)
+                                    if position:
+                                        fill_price = float(order.get('avgPrice', 0))
+
+                                        # Determine which TP level was hit based on price
+                                        if position.side == 'LONG':
+                                            # For LONG: TP prices are above entry
+                                            price_pct = (fill_price - position.entry_price) / position.entry_price * 100
+                                        else:
+                                            # For SHORT: TP prices are below entry
+                                            price_pct = (position.entry_price - fill_price) / position.entry_price * 100
+
+                                        # Estimate TP level based on profit percentage
+                                        if not position.tp1_hit and price_pct >= 1.0:  # ~TP1 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 1)
+                                        elif position.tp1_hit and not position.tp2_hit and price_pct >= 2.5:  # ~TP2 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 2)
+
+                except Exception as sym_e:
+                    self.logger.debug("🤖 [TP_MONITOR] Error checking %s: %s", symbol, sym_e)
+
+        except Exception as e:
+            self.logger.debug("🤖 [TP_MONITOR] Error monitoring TP fills: %s", e)
 
     async def _run_ai_optimization_cycle(self) -> None:
         """Run AI optimization and learning cycle periodically."""

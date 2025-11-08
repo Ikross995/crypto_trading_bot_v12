@@ -113,7 +113,7 @@ class SignalGenerator:
         # Check if IMBA signals should be used
         self.use_imba = getattr(config, "use_imba_signals", False)
         self.imba_integration = None
-        
+
         if self.use_imba:
             try:
                 from strategy.imba_integration import IMBASignalIntegration
@@ -124,7 +124,22 @@ class SignalGenerator:
             except Exception as e:
                 self.logger.error(f"Failed to initialize IMBA integration: {e}")
                 self.use_imba = False
-        
+
+        # Check if COMBO ML models should be used
+        self.use_combo = getattr(config, "use_combo_signals", False)
+        self.combo_integration = None
+
+        if self.use_combo:
+            try:
+                from strategy.combo_integration import COMBOSignalIntegration
+                self.combo_integration = COMBOSignalIntegration(config)
+                self.logger.info("🚀 COMBO ML System ENABLED")
+                self.logger.info(f"  Ensemble + RL Agent + Meta-Learner")
+                self.logger.info(f"  Min confidence: {config.bt_conf_min}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize COMBO integration: {e}")
+                self.use_combo = False
+
         # ULTRA AGGRESSIVE Signal parameters - GUARANTEED to generate signals
         self.fast_ma_period = 5      # Very fast MA
         self.slow_ma_period = 10     # Very slow MA  
@@ -190,18 +205,29 @@ class SignalGenerator:
         else:
             self.logger.debug(f"[SIGNAL_DATA] {symbol}: Received {type(market_data)}")
 
-        # 🎯 IMBA Signal Generation - if enabled, use advanced multi-signal aggregation
+        # 🎯 IMBA Signal Generation - HIGH PRIORITY for position opening
+        # When both IMBA and COMBO are enabled, IMBA opens positions and COMBO manages them
         if self.use_imba and self.imba_integration:
             try:
                 # DIAGNOSTIC: Log confidence threshold being used
                 aggregator = self.imba_integration.aggregator
                 actual_threshold = getattr(aggregator, 'min_confidence', 'unknown')
                 self.logger.debug(f"[IMBA_THRESHOLD] {symbol}: Using min_confidence={actual_threshold} (config.bt_conf_min={self.config.bt_conf_min})")
-                
+
                 return self._generate_imba_signal(symbol, market_data)
             except Exception as e:
                 self.logger.error(f"IMBA signal generation failed for {symbol}: {e}, falling back to default")
                 # Fall through to default signal generation
+
+        # 🚀 COMBO ML Signal Generation - ONLY if IMBA is not enabled
+        # Note: When both IMBA and COMBO are enabled, COMBO is used only for position management (RL Advisor)
+        # not for signal generation. This block only runs if COMBO is enabled WITHOUT IMBA.
+        if self.use_combo and self.combo_integration and not self.use_imba:
+            try:
+                self.logger.info(f"[COMBO_SOLO] Using COMBO ML for signal generation (IMBA disabled)")
+                return self._generate_combo_signal(symbol, market_data)
+            except Exception as e:
+                self.logger.error(f"COMBO signal generation failed for {symbol}: {e}, falling back to default")
 
         # ✅ Новый блок: обработка если пришел список
         if isinstance(market_data, list):
@@ -821,6 +847,135 @@ class SignalGenerator:
             
         except Exception as e:
             self.logger.error(f"IMBA signal generation error: {e}", exc_info=True)
+            return None
+
+    def _generate_combo_signal(self, symbol: str, market_data) -> Optional[TradingSignal]:
+        """
+        Generate COMBO ML trading signal using trained models.
+
+        Args:
+            symbol: Trading symbol (BTCUSDT, ETHUSDT, etc.)
+            market_data: Market data (DataFrame, dict, or MarketData object)
+
+        Returns TradingSignal compatible with existing engine.
+        """
+        try:
+            # Convert market_data to DataFrame if needed
+            import pandas as pd
+
+            df = None
+
+            # Convert incoming market_data to DataFrame (similar to IMBA)
+            if hasattr(market_data, 'close') and hasattr(market_data, 'timestamp'):
+                # MarketData object
+                df = pd.DataFrame({
+                    'timestamp': market_data.timestamp,
+                    'open': market_data.open,
+                    'high': market_data.high,
+                    'low': market_data.low,
+                    'close': market_data.close,
+                    'volume': market_data.volume
+                })
+                if not df.empty:
+                    df.set_index('timestamp', inplace=True)
+
+            elif isinstance(market_data, dict) and 'close' in market_data:
+                # Dictionary with OHLCV data
+                df = pd.DataFrame(market_data)
+                if not df.empty and 'timestamp' in df.columns:
+                    df.set_index('timestamp', inplace=True)
+
+            elif isinstance(market_data, list) and market_data and isinstance(market_data[0], dict):
+                # List of candle dictionaries
+                rows = []
+                for candle in market_data:
+                    if isinstance(candle, dict) and 'close' in candle:
+                        ts = candle.get('timestamp', candle.get('time', pd.Timestamp.now()))
+                        if isinstance(ts, (int, float)):
+                            ts = pd.to_datetime(ts, unit='ms' if ts > 1e10 else 's')
+                        elif isinstance(ts, str):
+                            ts = pd.to_datetime(ts)
+
+                        rows.append({
+                            'timestamp': ts,
+                            'open': float(candle.get('open', candle.get('close', 0))),
+                            'high': float(candle.get('high', candle.get('close', 0))),
+                            'low': float(candle.get('low', candle.get('close', 0))),
+                            'close': float(candle.get('close', 0)),
+                            'volume': float(candle.get('volume', 0))
+                        })
+
+                if rows:
+                    df = pd.DataFrame(rows)
+                    df.set_index('timestamp', inplace=True)
+                    df.sort_index(inplace=True)
+
+            elif isinstance(market_data, pd.DataFrame):
+                # Already a DataFrame
+                df = market_data
+
+            if df is None or df.empty:
+                self.logger.warning(f"No valid DataFrame for COMBO signal generation")
+                return None
+
+            # Add technical indicators (required by COMBO models)
+            from examples.gru_training_pytorch import calculate_technical_indicators
+            df = calculate_technical_indicators(df)
+
+            # Generate COMBO signal
+            combo_result = self.combo_integration.generate_signal_from_df(
+                df=df,
+                symbol=symbol
+            )
+
+            # Extract results
+            direction = combo_result.get('direction', 'wait')
+            confidence = combo_result.get('confidence', 0.0)
+
+            if direction == 'wait' or confidence < self.config.bt_conf_min:
+                self.logger.debug(f"COMBO signal rejected: direction={direction}, confidence={confidence:.3f}")
+                return None
+
+            # Check cooldown
+            now = datetime.now(timezone.utc)
+            if symbol in self._last_signal_time:
+                seconds_since_last = (now - self._last_signal_time[symbol]).total_seconds()
+                if seconds_since_last < self._signal_cooldown_seconds:
+                    self.logger.debug(f"COMBO signal in cooldown for {symbol}")
+                    return None
+
+            # Map direction to SignalType
+            if direction == 'buy':
+                signal_type = SignalType.BUY
+            elif direction == 'sell':
+                signal_type = SignalType.SELL
+            else:
+                return None
+
+            # Create TradingSignal
+            signal = TradingSignal(
+                symbol=symbol,
+                signal_type=signal_type,
+                strength=confidence,
+                timestamp=datetime.now(timezone.utc),
+                metadata={
+                    'combo': True,
+                    'regime': combo_result.get('regime', {}),
+                    'signals': combo_result.get('signals', []),
+                    'ml_models': combo_result.get('metadata', {})
+                }
+            )
+
+            # Update last signal time
+            self._last_signal_time[symbol] = now
+
+            self.logger.info(f"COMBO {signal_type.value} signal for {symbol} "
+                           f"(confidence: {confidence:.2f}, regime: {combo_result.get('regime', {}).get('kind', 'unknown')})")
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"COMBO signal generation error: {e}", exc_info=True)
             return None
 
 

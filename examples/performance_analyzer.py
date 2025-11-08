@@ -28,8 +28,16 @@ from dataclasses import dataclass, asdict
 from collections import defaultdict
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+# Optional plotting libraries
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
+    plt = None
+    sns = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -480,12 +488,37 @@ class PerformanceAnalyzer:
 
     def save_analysis(self, results: Dict, path: str):
         """Сохранить результаты анализа"""
+
+        def convert_to_json_serializable(obj):
+            """Конвертирует numpy типы в JSON-сериализуемые типы"""
+            if isinstance(obj, dict):
+                return {key: convert_to_json_serializable(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_to_json_serializable(item) for item in obj]
+            elif isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            else:
+                return obj
+
+        # Конвертируем результаты
+        serializable_results = convert_to_json_serializable(results)
+
         with open(path, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(serializable_results, f, indent=2)
         logger.info(f"💾 Analysis saved to {path}")
 
     def plot_analysis(self, save_path: str = None):
         """Визуализация результатов"""
+        if not PLOTTING_AVAILABLE:
+            logger.warning("⚠️  Plotting libraries not available. Install matplotlib and seaborn to enable visualization.")
+            return
+
         if not self.trades:
             logger.warning("⚠️  No trades to plot!")
             return
