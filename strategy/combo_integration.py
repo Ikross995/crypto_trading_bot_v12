@@ -86,8 +86,15 @@ class COMBOSignalIntegration:
             # Создаем агента (размеры будут из чекпоинта)
             checkpoint = torch.load(rl_agent_path, map_location=self.device)
 
-            # Получаем размеры из чекпоинта
-            state_dict = checkpoint.get('policy_net_state', checkpoint)
+            # Правильно извлекаем state_dict из checkpoint
+            # Checkpoint может содержать: 'policy_net', 'target_net', 'optimizer', etc.
+            if 'policy_net' in checkpoint:
+                state_dict = checkpoint['policy_net']
+            elif 'policy_net_state' in checkpoint:
+                state_dict = checkpoint['policy_net_state']
+            else:
+                # Fallback: весь checkpoint это state_dict
+                state_dict = checkpoint
 
             # Определяем state_size из первого слоя
             first_layer_key = 'fc1.weight'
@@ -104,7 +111,7 @@ class COMBOSignalIntegration:
                 device=self.device
             )
 
-            # Загружаем веса
+            # Загружаем веса policy_net
             rl_agent.policy_net.load_state_dict(state_dict)
             rl_agent.policy_net.eval()
 
