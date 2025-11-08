@@ -759,7 +759,6 @@ async def train_improved_gru(
         'final_metrics': {
             'mse': mse,
             'mae': mae,
-            'mape': mape,
             **win_rate_metrics
         }
     }, save_path)
