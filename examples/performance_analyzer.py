@@ -28,8 +28,16 @@ from dataclasses import dataclass, asdict
 from collections import defaultdict
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+# Optional plotting libraries
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
+    plt = None
+    sns = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -486,6 +494,10 @@ class PerformanceAnalyzer:
 
     def plot_analysis(self, save_path: str = None):
         """Визуализация результатов"""
+        if not PLOTTING_AVAILABLE:
+            logger.warning("⚠️  Plotting libraries not available. Install matplotlib and seaborn to enable visualization.")
+            return
+
         if not self.trades:
             logger.warning("⚠️  No trades to plot!")
             return
