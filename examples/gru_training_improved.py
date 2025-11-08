@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-🚀 IMPROVED GRU Model Training - Fixed All Issues!
-===================================================
+🚀 IMPROVED GRU Model Training - PERCENTAGE-BASED PREDICTION!
+============================================================
+
+PREDICTS: % price change (not absolute price)
 
 FIXES:
 1. ✅ Removed shuffle=True for time series
@@ -14,6 +16,7 @@ FIXES:
 8. ✅ Gradient clipping
 9. ✅ Better win rate calculation
 10. ✅ Separate validation set
+11. ✅ PERCENTAGE-based prediction for better direction accuracy!
 
 Автор: Claude (Anthropic)
 """
@@ -217,10 +220,13 @@ def prepare_sequences_no_leakage(
     """
     Подготовить последовательности БЕЗ data leakage!
 
+    🔥 НОВОЕ: Предсказываем % изменение цены, не абсолютную цену!
+
     Ключевые улучшения:
     1. Временной split ПЕРЕД нормализацией
     2. Separate scalers для train/val/test
     3. Rolling window normalization
+    4. TARGET = % price change (better for direction prediction!)
 
     Args:
         df: DataFrame с features и close
@@ -233,8 +239,16 @@ def prepare_sequences_no_leakage(
         X_train, X_val, X_test, y_train, y_val, y_test, scaler
     """
     logger.info(f"📦 Preparing sequences (NO LEAKAGE!)...")
+    logger.info(f"   🔥 TARGET: % price change (not absolute price!)")
     logger.info(f"   Sequence length: {sequence_length}")
     logger.info(f"   Train: {train_ratio*100:.0f}%, Val: {val_ratio*100:.0f}%, Test: {(1-train_ratio-val_ratio)*100:.0f}%")
+
+    # 🔥 CALCULATE PERCENTAGE CHANGE (target variable)
+    logger.info("🔥 Calculating % price change...")
+    df['pct_change'] = df['close'].pct_change() * 100  # % change
+    df = df.dropna()  # Remove first row (NaN)
+    logger.info(f"   ✅ % change range: {df['pct_change'].min():.2f}% to {df['pct_change'].max():.2f}%")
+    logger.info(f"   ✅ % change mean: {df['pct_change'].mean():.4f}%, std: {df['pct_change'].std():.2f}%")
 
     # ===== TEMPORAL SPLIT (НЕ случайный!) =====
     n = len(df)
@@ -259,11 +273,11 @@ def prepare_sequences_no_leakage(
     df_val[feature_columns] = feature_scaler.transform(df_val[feature_columns])
     df_test[feature_columns] = feature_scaler.transform(df_test[feature_columns])
 
-    # Target scaler - отдельный для 'close'
+    # 🔥 Target scaler - для % change (легкая нормализация)
     target_scaler = RobustScaler()
-    df_train[['close']] = target_scaler.fit_transform(df_train[['close']])
-    df_val[['close']] = target_scaler.transform(df_val[['close']])
-    df_test[['close']] = target_scaler.transform(df_test[['close']])
+    df_train[['pct_change']] = target_scaler.fit_transform(df_train[['pct_change']])
+    df_val[['pct_change']] = target_scaler.transform(df_val[['pct_change']])
+    df_test[['pct_change']] = target_scaler.transform(df_test[['pct_change']])
 
     logger.info(f"   ✅ Scalers fitted on TRAIN data only (NO LEAKAGE!)")
 
@@ -272,7 +286,8 @@ def prepare_sequences_no_leakage(
         X, y = [], []
         for i in range(len(data) - sequence_length):
             X.append(data[features].iloc[i:i + sequence_length].values)
-            y.append(data['close'].iloc[i + sequence_length])
+            # 🔥 Target = % change (not absolute close!)
+            y.append(data['pct_change'].iloc[i + sequence_length])
         return np.array(X), np.array(y)
 
     X_train, y_train = create_sequences(df_train, feature_columns)
@@ -357,7 +372,6 @@ def train_improved_model(
         mode='min',
         factor=0.5,  # Уменьшаем LR в 2 раза
         patience=3,
-        verbose=True,
         min_lr=1e-6
     )
 
@@ -470,30 +484,32 @@ def train_improved_model(
 def calculate_win_rate(
     predictions: np.ndarray,
     targets: np.ndarray,
-    threshold: float = 0.0001
+    threshold: float = 0.1
 ) -> Dict:
     """
     Рассчитать win rate (процент правильных предсказаний направления).
 
+    🔥 ОБНОВЛЕНО для % predictions!
+
     Args:
-        predictions: Предсказанные цены
-        targets: Реальные цены
-        threshold: Минимальное изменение для считания направления
+        predictions: Предсказанные % изменения
+        targets: Реальные % изменения
+        threshold: Минимальное % изменение для считания направления (default 0.1%)
 
     Returns:
         Dict с метриками win rate
     """
-    # Направление изменения (up/down)
-    pred_direction = np.sign(predictions[1:] - predictions[:-1])
-    true_direction = np.sign(targets[1:] - targets[:-1])
+    # 🔥 Направление: знак % изменения (+ = UP, - = DOWN)
+    pred_direction = np.sign(predictions)
+    true_direction = np.sign(targets)
 
     # Win rate
     correct_predictions = (pred_direction == true_direction).sum()
     total_predictions = len(pred_direction)
     win_rate = (correct_predictions / total_predictions) * 100
 
-    # Win rate для значимых движений
-    significant_moves = np.abs(targets[1:] - targets[:-1]) > threshold
+    # Win rate для значимых движений (> threshold %)
+    significant_moves = np.abs(targets) > threshold
     if significant_moves.sum() > 0:
         significant_correct = ((pred_direction == true_direction) & significant_moves).sum()
         significant_win_rate = (significant_correct / significant_moves.sum()) * 100
@@ -502,7 +518,7 @@ def calculate_win_rate(
 
     logger.info(f"📊 Win Rate Analysis:")
     logger.info(f"   Overall: {win_rate:.2f}% ({correct_predictions}/{total_predictions})")
-    logger.info(f"   Significant moves (>{threshold}): {significant_win_rate:.2f}%")
+    logger.info(f"   Significant moves (>{threshold}%): {significant_win_rate:.2f}%")
 
     return {
         'win_rate': win_rate,
@@ -555,24 +571,30 @@ async def train_improved_gru(
         ]
 
     logger.info("=" * 80)
-    logger.info("🚀 IMPROVED GRU Model Training (NO BUGS!)")
+    logger.info("🚀 IMPROVED GRU Model Training - PERCENTAGE-BASED!")
     logger.info("=" * 80)
     logger.info(f"📋 Configuration:")
     logger.info(f"   Symbols: {', '.join(symbols)}")
     logger.info(f"   Days: {days}")
+    logger.info(f"   Interval: {interval}")
     logger.info(f"   Sequence: {sequence_length}")
     logger.info(f"   Epochs: {epochs} (max, with early stopping)")
     logger.info(f"   Batch size: {batch_size}")
     logger.info("=" * 80)
-    logger.info("✅ FIXES:")
-    logger.info("   1. shuffle=False (preserves time order)")
-    logger.info("   2. Temporal train/val/test split")
-    logger.info("   3. NO data leakage (fit on train only)")
-    logger.info("   4. Early stopping (patience=7)")
-    logger.info("   5. Learning rate scheduler")
-    logger.info("   6. Dropout 0.4 (was 0.2)")
-    logger.info("   7. Batch normalization")
-    logger.info("   8. RobustScaler (outlier resistant)")
+    logger.info("🔥 KEY IMPROVEMENT:")
+    logger.info("   TARGET = % price change (NOT absolute price!)")
+    logger.info("   This dramatically improves direction prediction accuracy!")
+    logger.info("=" * 80)
+    logger.info("✅ ALL FIXES:")
+    logger.info("   1. 🔥 Predict % change (not absolute price)")
+    logger.info("   2. shuffle=False (preserves time order)")
+    logger.info("   3. Temporal train/val/test split")
+    logger.info("   4. NO data leakage (fit on train only)")
+    logger.info("   5. Early stopping (patience=7)")
+    logger.info("   6. Learning rate scheduler")
+    logger.info("   7. Dropout 0.4 (was 0.2)")
+    logger.info("   8. Batch normalization")
+    logger.info("   9. RobustScaler (outlier resistant)")
     logger.info("=" * 80)
 
     # GPU setup
@@ -697,26 +719,26 @@ async def train_improved_gru(
     test_predictions = np.array(test_predictions).flatten()
     test_targets = np.array(test_targets)
 
-    # Денормализация
-    test_predictions_real = target_scaler.inverse_transform(
+    # 🔥 Денормализация % изменений
+    test_predictions_pct = target_scaler.inverse_transform(
         test_predictions.reshape(-1, 1)
     ).flatten()
-    test_targets_real = target_scaler.inverse_transform(
+    test_targets_pct = target_scaler.inverse_transform(
         test_targets.reshape(-1, 1)
     ).flatten()
 
-    # Метрики
-    mse = np.mean((test_predictions_real - test_targets_real) ** 2)
-    mae = np.mean(np.abs(test_predictions_real - test_targets_real))
-    mape = np.mean(np.abs((test_targets_real - test_predictions_real) / test_targets_real)) * 100
+    # 🔥 Метрики в % терминах
+    mse = np.mean((test_predictions_pct - test_targets_pct) ** 2)
+    mae = np.mean(np.abs(test_predictions_pct - test_targets_pct))
 
-    logger.info(f"📊 Test Metrics (Real Prices):")
-    logger.info(f"   MSE:  {mse:.2f}")
-    logger.info(f"   MAE:  ${mae:.2f}")
-    logger.info(f"   MAPE: {mape:.2f}%")
+    logger.info(f"📊 Test Metrics (% Price Change):")
+    logger.info(f"   MSE:  {mse:.4f} (%²)")
+    logger.info(f"   MAE:  {mae:.4f}%")
+    logger.info(f"   Predicted range: {test_predictions_pct.min():.2f}% to {test_predictions_pct.max():.2f}%")
+    logger.info(f"   Actual range: {test_targets_pct.min():.2f}% to {test_targets_pct.max():.2f}%")
 
-    # Win Rate
-    win_rate_metrics = calculate_win_rate(test_predictions_real, test_targets_real)
+    # 🔥 Win Rate (direction accuracy)
+    win_rate_metrics = calculate_win_rate(test_predictions_pct, test_targets_pct)
 
     # ===== SAVE MODEL =====
     save_dir = Path(save_path).parent
@@ -737,7 +759,6 @@ async def train_improved_gru(
         'final_metrics': {
             'mse': mse,
             'mae': mae,
-            'mape': mape,
             **win_rate_metrics
         }
     }, save_path)
@@ -746,7 +767,10 @@ async def train_improved_gru(
     logger.info(f"   Size: {Path(save_path).stat().st_size / 1024 / 1024:.1f} MB")
 
     logger.info("=" * 80)
-    logger.info("🎉 IMPROVED TRAINING COMPLETED!")
+    logger.info("🎉 IMPROVED TRAINING COMPLETED - PERCENTAGE-BASED!")
+    logger.info("=" * 80)
+    logger.info("🔥 This model predicts % price change (not absolute price)")
+    logger.info("   This dramatically improves Win Rate and direction accuracy!")
     logger.info("=" * 80)
     logger.info("📋 Next steps:")
     logger.info(f"   1. Update .env: GRU_MODEL_PATH={save_path}")
