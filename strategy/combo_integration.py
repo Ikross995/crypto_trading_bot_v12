@@ -261,14 +261,14 @@ class COMBOSignalIntegration:
             # Подготовка последовательности (как в обучении)
             from examples.gru_training_improved import prepare_sequences_no_leakage
 
+            # Используем только индикаторы, которые добавляет add_technical_indicators()
+            # bb_middle (не bb_mid!), нет volume_delta, obv, volume_spike, mfi, cvd, vwap_distance
             feature_columns = [
                 'open', 'high', 'low', 'volume',
                 'rsi', 'macd', 'macd_signal',
-                'bb_upper', 'bb_mid', 'bb_lower',
+                'bb_upper', 'bb_middle', 'bb_lower',
                 'sma_20', 'sma_50', 'ema_50',
-                'volume_sma', 'atr',
-                'volume_delta', 'obv', 'volume_ratio',
-                'volume_spike', 'mfi', 'cvd', 'vwap_distance'
+                'volume_sma', 'atr', 'volume_ratio'
             ]
 
             X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
