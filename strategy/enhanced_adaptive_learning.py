@@ -562,10 +562,10 @@ class EnhancedAdaptiveLearningSystem:
             # 🎯 EXPLORATION PHASE - Первые 50 сделок
             if total_samples < 50:
                 logger.info(f"🧠 [COLD_START] Exploration mode: {total_samples}/50 samples")
-                
+
                 # В начале торгуем на основе ТОЛЬКО сигналов IMBA (не ML)
-                # Но с повышенным порогом для безопасности
-                exploration_threshold = 1.4  # Выше обычного 1.2
+                # Порог понижен для работы с RL фильтром (который может снижать сигнал)
+                exploration_threshold = 1.0  # Было 1.4, понижено для RL совместимости
                 
                 if signal_strength >= exploration_threshold:
                     logger.info(f"🚀 [EXPLORATION] TRADE: Signal {signal_strength:.2f} >= {exploration_threshold}")
