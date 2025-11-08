@@ -492,15 +492,19 @@ def live(
         console.print("[cyan]   - Market regime detection[/cyan]")
         console.print("[cyan]   - Smart signal filtering[/cyan]")
 
-    # Enable COMBO ML models if requested
+    # Enable COMBO RL Position Advisor if requested
     if use_combo:
         config.use_combo_signals = True
-        config.use_imba_signals = False  # Disable IMBA when using COMBO
-        console.print("[cyan]🚀 COMBO ML System ENABLED[/cyan]")
-        console.print("[cyan]   - Ensemble of 5 GRU models[/cyan]")
-        console.print("[cyan]   - RL Agent (Deep Q-Network)[/cyan]")
-        console.print("[cyan]   - Meta-Learner strategy selection[/cyan]")
-        console.print("[yellow]⚠️  Note: Models must be trained first![/yellow]")
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED[/cyan]")
+        console.print("[cyan]   - IMBA opens positions with TP1/TP2/TP3[/cyan]")
+        console.print("[cyan]   - RL Agent manages positions after TP2[/cyan]")
+        console.print("[cyan]   - Intelligent trailing stop (3% from peak)[/cyan]")
+        console.print("[cyan]   - Early close on reversal detection (≥75% confidence)[/cyan]")
+        console.print("[yellow]⚠️  Note: COMBO models must be trained first![/yellow]")
         console.print("[yellow]   Run: python run_full_combo_system_multi.py --symbols <SYMBOL>[/yellow]")
 
     # Handle both --symbol and --symbols
@@ -585,12 +589,15 @@ def paper(
         config.use_imba_signals = True
         console.print("[cyan]🎯 IMBA Research Signals ENABLED[/cyan]")
 
-    # Enable COMBO ML models if requested
+    # Enable COMBO RL Position Advisor if requested
     if use_combo:
         config.use_combo_signals = True
-        config.use_imba_signals = False
-        console.print("[cyan]🚀 COMBO ML System ENABLED[/cyan]")
-        console.print("[cyan]   - Ensemble + RL Agent + Meta-Learner[/cyan]")
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED[/cyan]")
+        console.print("[cyan]   - IMBA opens positions, RL manages after TP2[/cyan]")
 
     # Handle both --symbol and --symbols
     if symbol:
@@ -663,12 +670,15 @@ def backtest(
         config.use_imba_signals = True
         console.print("[cyan]IMBA Research Signals ENABLED for backtest[/cyan]")
 
-    # Enable COMBO ML models if requested
+    # Enable COMBO RL Position Advisor if requested
     if use_combo:
         config.use_combo_signals = True
-        config.use_imba_signals = False
-        console.print("[cyan]🚀 COMBO ML System ENABLED for backtest[/cyan]")
-        console.print("[cyan]   - Ensemble + RL Agent + Meta-Learner[/cyan]")
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED for backtest[/cyan]")
+        console.print("[cyan]   - IMBA opens positions, RL manages after TP2[/cyan]")
 
     # Enable self-learning if requested
     if self_learning:

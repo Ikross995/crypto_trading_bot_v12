@@ -205,14 +205,8 @@ class SignalGenerator:
         else:
             self.logger.debug(f"[SIGNAL_DATA] {symbol}: Received {type(market_data)}")
 
-        # 🚀 COMBO ML Signal Generation - if enabled, use trained ML models
-        if self.use_combo and self.combo_integration:
-            try:
-                return self._generate_combo_signal(symbol, market_data)
-            except Exception as e:
-                self.logger.error(f"COMBO signal generation failed for {symbol}: {e}, falling back to default")
-
-        # 🎯 IMBA Signal Generation - if enabled, use advanced multi-signal aggregation
+        # 🎯 IMBA Signal Generation - HIGH PRIORITY for position opening
+        # When both IMBA and COMBO are enabled, IMBA opens positions and COMBO manages them
         if self.use_imba and self.imba_integration:
             try:
                 # DIAGNOSTIC: Log confidence threshold being used
@@ -224,6 +218,16 @@ class SignalGenerator:
             except Exception as e:
                 self.logger.error(f"IMBA signal generation failed for {symbol}: {e}, falling back to default")
                 # Fall through to default signal generation
+
+        # 🚀 COMBO ML Signal Generation - ONLY if IMBA is not enabled
+        # Note: When both IMBA and COMBO are enabled, COMBO is used only for position management (RL Advisor)
+        # not for signal generation. This block only runs if COMBO is enabled WITHOUT IMBA.
+        if self.use_combo and self.combo_integration and not self.use_imba:
+            try:
+                self.logger.info(f"[COMBO_SOLO] Using COMBO ML for signal generation (IMBA disabled)")
+                return self._generate_combo_signal(symbol, market_data)
+            except Exception as e:
+                self.logger.error(f"COMBO signal generation failed for {symbol}: {e}, falling back to default")
 
         # ✅ Новый блок: обработка если пришел список
         if isinstance(market_data, list):
