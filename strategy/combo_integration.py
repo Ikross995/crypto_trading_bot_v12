@@ -146,61 +146,71 @@ class COMBOSignalIntegration:
         """
         Подготовить state для RL Agent из последних данных.
 
+        ВАЖНО: State должен соответствовать обучению (15 features):
+        - 10 market features: close_norm, volume_norm, returns, volatility, rsi, macd, bb_upper, bb_lower, sma_20, sma_50
+        - 3 position features: position, pnl%, position_size%
+        - 2 balance features: total_return, num_trades
+
         Args:
             df: DataFrame с OHLCV + индикаторами
             symbol: Торговый символ
 
         Returns:
-            State вектор для агента или None
+            State вектор для агента (15 features) или None
         """
         try:
-            if len(df) < 60:
-                logger.warning(f"Not enough data for state preparation: {len(df)} < 60")
+            if len(df) < 100:
+                logger.warning(f"Not enough data for state preparation: {len(df)} < 100")
                 return None
 
             # Последняя свеча
             latest = df.iloc[-1]
 
-            # Формируем state (как в TradingEnvironment)
-            state_features = [
-                latest.get('close', 0),
-                latest.get('volume', 0),
+            # Calculate normalized features (как при обучении)
+            # Price normalization: (price - mean) / std
+            close_rolling_mean = df['close'].rolling(100).mean().iloc[-1]
+            close_rolling_std = df['close'].rolling(100).std().iloc[-1]
+            close_norm = (latest['close'] - close_rolling_mean) / close_rolling_std if close_rolling_std > 0 else 0
+
+            volume_rolling_mean = df['volume'].rolling(100).mean().iloc[-1]
+            volume_rolling_std = df['volume'].rolling(100).std().iloc[-1]
+            volume_norm = (latest['volume'] - volume_rolling_mean) / volume_rolling_std if volume_rolling_std > 0 else 0
+
+            # Returns and volatility
+            returns = df['close'].pct_change().iloc[-1] * 100 if len(df) > 1 else 0
+            volatility = df['close'].pct_change().rolling(20).std().iloc[-1] * 100 if len(df) > 20 else 0
+
+            # Market features (10)
+            market_features = [
+                close_norm,
+                volume_norm,
+                returns,
+                volatility,
                 latest.get('rsi', 50),
                 latest.get('macd', 0),
-                latest.get('macd_signal', 0),
-                latest.get('bb_upper', 0),
-                latest.get('bb_mid', 0),
-                latest.get('bb_lower', 0),
-                latest.get('sma_20', 0),
-                latest.get('sma_50', 0),
-                latest.get('ema_50', 0),
-                latest.get('atr', 0),
-                latest.get('volume_sma', 0),
-                latest.get('volume_delta', 0),
-                latest.get('obv', 0),
-                latest.get('volume_ratio', 1),
-                latest.get('volume_spike', 0),
-                latest.get('mfi', 50),
-                latest.get('cvd', 0),
-                latest.get('vwap_distance', 0),
-                0.0,  # current_position (нет позиции при генерации сигнала)
-                10000.0,  # balance (default)
+                latest.get('bb_upper', latest['close']),
+                latest.get('bb_lower', latest['close']),
+                latest.get('sma_20', latest['close']),
+                latest.get('sma_50', latest['close']),
             ]
 
-            state = np.array(state_features, dtype=np.float32)
+            # Position features (3) - нет позиции при генерации сигнала
+            position_features = [
+                0.0,  # position (no position)
+                0.0,  # pnl% (no position)
+                0.0,  # position_size% (no position)
+            ]
 
-            # Нормализация (простая)
-            # Цены нормализуем относительно текущей цены
-            price = state[0] if state[0] > 0 else 1
-            state[0:11] = state[0:11] / price  # Цены и полосы Боллинджера
+            # Balance features (2)
+            balance_features = [
+                0.0,  # total_return (начало)
+                0.0,  # num_trades (начало)
+            ]
 
-            # RSI, MFI уже в диапазоне 0-100
-            state[2] = state[2] / 100  # RSI
-            state[17] = state[17] / 100  # MFI
+            state = np.array(market_features + position_features + balance_features, dtype=np.float32)
 
-            # Volume нормализуем по volume_sma
-            if state[12] > 0:  # volume_sma
-                state[1] = state[1] / state[12]  # volume / volume_sma
+            # Handle NaN (как при обучении)
+            state = np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
 
             return state
 
