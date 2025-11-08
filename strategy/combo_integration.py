@@ -164,7 +164,7 @@ class COMBOSignalIntegration:
                 return None
 
             # Добавляем индикаторы, если их нет
-            from utils.indicators import add_technical_indicators
+            from examples.adaptive_trading_integration import add_technical_indicators
 
             # Проверяем, есть ли индикаторы
             required_indicators = ['rsi', 'macd', 'bb_upper', 'sma_20', 'sma_50']
@@ -251,7 +251,7 @@ class COMBOSignalIntegration:
             recent_df = df.iloc[-100:].copy()
 
             # Добавляем индикаторы, если их нет
-            from utils.indicators import add_technical_indicators
+            from examples.adaptive_trading_integration import add_technical_indicators
 
             # Проверяем, есть ли индикаторы
             required_indicators = ['rsi', 'macd', 'bb_upper']
