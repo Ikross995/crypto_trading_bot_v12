@@ -2550,10 +2550,10 @@ class LiveTradingEngine:
                         # Use LIMIT order with slight price adjustment for better execution
                         if order_side == "BUY":
                             # For BUY orders, add small premium to ensure execution
-                            limit_price = current_market_price * 1.001  # 0.1% premium
+                            limit_price = current_market_price * 1.002  # 0.2% premium (increased for testnet)
                         else:
                             # For SELL orders, subtract small discount to ensure execution
-                            limit_price = current_market_price * 0.999  # 0.1% discount
+                            limit_price = current_market_price * 0.998  # 0.2% discount (increased for testnet)
 
                         # Round limit price to proper precision
                         limit_price = self._round_price(limit_price, symbol)
@@ -2585,7 +2585,7 @@ class LiveTradingEngine:
                                     type="LIMIT",
                                     quantity=api_quantity,
                                     price=limit_price,
-                                    timeInForce="IOC",  # Immediate or Cancel - fills immediately or cancels
+                                    timeInForce="GTC",  # Good Til Cancelled - better for testnet
                                 )
                             else:
                                 # Fallback to market order
@@ -2604,7 +2604,7 @@ class LiveTradingEngine:
                                 type="LIMIT",
                                 quantity=api_quantity,
                                 price=limit_price,
-                                timeInForce="IOC",
+                                timeInForce="GTC",  # Good Til Cancelled - better for testnet
                             )
                         else:
                             order_result = self.client.place_order(
