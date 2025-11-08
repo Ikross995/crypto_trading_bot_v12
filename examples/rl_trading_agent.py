@@ -426,10 +426,14 @@ class RLTradingAgent:
             return np.random.randint(self.action_size)
 
         # Exploitation - use network
+        # Set to eval mode to handle BatchNorm with single sample
+        self.policy_net.eval()
         with torch.no_grad():
             state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             q_values = self.policy_net(state_t)
             action = q_values.argmax().item()
+        # Restore training mode
+        self.policy_net.train()
 
         return action
 
