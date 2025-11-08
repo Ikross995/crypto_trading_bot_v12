@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 # 🔥 IMPORT EXISTING COMPONENTS
 # ==========================================
 
-# Импортируем существующий код из старого файла
+# Импортируем существующий код из старого файла (без запуска main)
 try:
     # 🔥 Pass __SKIP_MAIN__ flag to prevent old script's argparse from running
     _old_globals = globals()
