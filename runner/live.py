@@ -655,6 +655,10 @@ class LiveTradingEngine:
         if qty <= 0:
             return None
 
+        # Round quantity to proper precision for the symbol
+        # Most futures have precision 0-3 decimal places
+        qty = self._round_quantity(qty, symbol)
+
         self.logger.info(
             "[POSITION_SIZE] Equity=%.2f, Risk=%.2f%%, Strength=%.2f (clamped=%.2f), Value=%.2f (max=%.2f), Qty=%.6f",
             equity,
