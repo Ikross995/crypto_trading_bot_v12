@@ -3540,10 +3540,12 @@ class LiveTradingEngine:
                                 primary_tp * 1.2 - entry_price * 0.2   # 120% to target
                             ]
                         else:  # SELL
+                            # CRITICAL FIX: TP3 must be BELOW entry for SHORT
+                            # Calculate 120% movement from entry downwards
                             tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,
-                                primary_tp,
-                                entry_price * 1.2 - primary_tp * 0.2
+                                primary_tp * 0.6 + entry_price * 0.4,  # 60% to target
+                                primary_tp,  # 100% to target
+                                primary_tp * 1.2 - entry_price * 0.2   # 120% to target (same formula as BUY)
                             ]
 
                     self.logger.info(
