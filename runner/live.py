@@ -2551,20 +2551,29 @@ class LiveTradingEngine:
                                 )
                                 return  # Don't place order with extreme slippage
 
-                        # Use LIMIT order with slight price adjustment for better execution
-                        if order_side == "BUY":
-                            # For BUY orders, add small premium to ensure execution
-                            limit_price = current_market_price * 1.002  # 0.2% premium (increased for testnet)
+                        # CRITICAL FIX: On testnet, use MARKET orders for reliable fills
+                        # Testnet has very low liquidity, causing LIMIT orders to hang
+                        if self.cfg.testnet:
+                            limit_price = None  # Use MARKET order
+                            self.logger.info("[ORDER_TYPE] Using MARKET order for testnet (better fill rate)")
                         else:
-                            # For SELL orders, subtract small discount to ensure execution
-                            limit_price = current_market_price * 0.998  # 0.2% discount (increased for testnet)
+                            # For LIVE trading, use LIMIT with tight spread for better execution
+                            if order_side == "BUY":
+                                limit_price = current_market_price * 1.002  # 0.2% above
+                            else:  # SELL
+                                limit_price = current_market_price * 0.998  # 0.2% below (taker order)
 
-                        # Round limit price to proper precision
-                        limit_price = self._round_price(limit_price, symbol)
+                            # Round limit price to proper precision
+                            limit_price = self._round_price(limit_price, symbol)
 
-                        self.logger.info(
-                            f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
-                        )
+                        if limit_price:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
+                            )
+                        else:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Type: MARKET"
+                            )
 
                     except Exception as price_e:
                         self.logger.warning(
