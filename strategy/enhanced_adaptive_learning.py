@@ -177,9 +177,13 @@ class EnhancedAdaptiveLearningSystem:
                 # Обновляем предсказания в истории
                 self._update_prediction_accuracy(trade_record.trade_id, trade_record.pnl_pct)
                 
+                # Get total samples count for progress tracking
+                total_samples = len(self.ml_system.trade_outcomes) if hasattr(self.ml_system, 'trade_outcomes') else 0
+
                 logger.info(f"🧠 [ML_LEARNING] Learned from {trade_record.symbol}: "
                            f"{trade_record.pnl_pct:+.2f}% PnL in {trade_record.hold_time_seconds/60:.1f} min")
-                
+                logger.info(f"📚 [ML_SAMPLES] {total_samples}/50 samples collected for ML training")
+
                 # Периодически оцениваем и обновляем метрики
                 if len(self.prediction_history) % 10 == 0:
                     await self._update_enhanced_metrics()

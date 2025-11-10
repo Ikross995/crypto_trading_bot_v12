@@ -4267,6 +4267,26 @@ class LiveTradingEngine:
                         fees_paid=0.0,  # Estimate
                     )
 
+                # 🧠 Notify Enhanced ML system for learning
+                if self.enhanced_ai and hasattr(self.enhanced_ai, "update_trade_exit_with_ml"):
+                    trade_record = pending_trade.get("trade_record")
+                    if trade_record:
+                        # Get candles data for ML context
+                        candles_data = None
+                        if hasattr(self, '_last_candles_data'):
+                            candles_data = getattr(self, '_last_candles_data', {}).get(symbol)
+
+                        await self.enhanced_ai.update_trade_exit_with_ml(
+                            trade_record=trade_record,
+                            exit_price=current_price,
+                            exit_reason=exit_reason,
+                            candles_data=candles_data
+                        )
+
+                        self.logger.info(
+                            f"🧠 [ML_LEARN] Trade {trade_id} sent to ML Learning System for analysis"
+                        )
+
                 # Clean up pending trade
                 if hasattr(self, "pending_trades") and symbol in self.pending_trades:
                     del self.pending_trades[symbol]
