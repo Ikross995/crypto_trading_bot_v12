@@ -602,7 +602,7 @@ class LiveTradingEngine:
         return None
 
     def _position_size_qty(
-        self, price: Optional[float], strength: float = 0.5
+        self, price: Optional[float], strength: float = 0.5, symbol: str = "UNKNOWN"
     ) -> Optional[float]:
         """
         FIXED: Conservative position sizing with proper risk management.
@@ -685,7 +685,7 @@ class LiveTradingEngine:
         """
         # Fallback to legacy method if Kelly not initialized
         if not self.kelly_calculator or not self.trade_history:
-            return self._position_size_qty(price, strength)
+            return self._position_size_qty(price, strength, symbol)
 
         p = _to_float(price)
         if not p or p <= 0:
@@ -704,7 +704,7 @@ class LiveTradingEngine:
                 self.logger.warning(
                     "[KELLY] Invalid result, falling back to legacy sizing"
                 )
-                return self._position_size_qty(price, strength)
+                return self._position_size_qty(price, strength, symbol)
 
             # Base position size from Kelly
             kelly_pct = kelly_result.recommended_size_pct  # Already fractional (e.g., 2.5%)
@@ -753,7 +753,7 @@ class LiveTradingEngine:
             self.logger.warning(
                 "[KELLY] Error calculating adaptive size: %s, falling back to legacy", e
             )
-            return self._position_size_qty(price, strength)
+            return self._position_size_qty(price, strength, symbol)
 
     async def _detect_market_regime(self, symbol: str, candles_df: Any) -> Optional[str]:
         """
