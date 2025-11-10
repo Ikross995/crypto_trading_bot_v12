@@ -602,7 +602,7 @@ class LiveTradingEngine:
         return None
 
     def _position_size_qty(
-        self, price: Optional[float], strength: float = 0.5
+        self, price: Optional[float], strength: float = 0.5, symbol: str = "UNKNOWN"
     ) -> Optional[float]:
         """
         FIXED: Conservative position sizing with proper risk management.
@@ -655,6 +655,10 @@ class LiveTradingEngine:
         if qty <= 0:
             return None
 
+        # Round quantity to proper precision for the symbol
+        # Most futures have precision 0-3 decimal places
+        qty = self._round_quantity(qty, symbol)
+
         self.logger.info(
             "[POSITION_SIZE] Equity=%.2f, Risk=%.2f%%, Strength=%.2f (clamped=%.2f), Value=%.2f (max=%.2f), Qty=%.6f",
             equity,
@@ -681,7 +685,7 @@ class LiveTradingEngine:
         """
         # Fallback to legacy method if Kelly not initialized
         if not self.kelly_calculator or not self.trade_history:
-            return self._position_size_qty(price, strength)
+            return self._position_size_qty(price, strength, symbol)
 
         p = _to_float(price)
         if not p or p <= 0:
@@ -700,7 +704,7 @@ class LiveTradingEngine:
                 self.logger.warning(
                     "[KELLY] Invalid result, falling back to legacy sizing"
                 )
-                return self._position_size_qty(price, strength)
+                return self._position_size_qty(price, strength, symbol)
 
             # Base position size from Kelly
             kelly_pct = kelly_result.recommended_size_pct  # Already fractional (e.g., 2.5%)
@@ -749,7 +753,7 @@ class LiveTradingEngine:
             self.logger.warning(
                 "[KELLY] Error calculating adaptive size: %s, falling back to legacy", e
             )
-            return self._position_size_qty(price, strength)
+            return self._position_size_qty(price, strength, symbol)
 
     async def _detect_market_regime(self, symbol: str, candles_df: Any) -> Optional[str]:
         """
@@ -2008,6 +2012,8 @@ class LiveTradingEngine:
 
         # 🤖 RL AGENT SIGNAL VALIDATION (COMBO RL Position Advisor)
         # If COMBO is enabled, use RL Agent to validate/filter IMBA signals
+        rl_signal = None  # Save RL prediction for ML learning
+
         if self.config.use_combo_signals and md is not None:
             try:
                 # Import COMBO integration
@@ -2038,7 +2044,7 @@ class LiveTradingEngine:
                     df_for_rl = None
 
                 if df_for_rl is not None and len(df_for_rl) >= 250:
-                    # Get RL Agent's opinion
+                    # Get RL Agent's opinion (save for ML learning)
                     rl_signal = self._combo_signal_checker.generate_signal_from_df(df_for_rl, symbol)
 
                     if rl_signal:
@@ -2153,13 +2159,17 @@ class LiveTradingEngine:
                             'iteration': self.iteration,
                             'market_session': self._get_market_session(),
                             'volatility_factor': getattr(self.config, 'volatility_factor', 1.0),
-                            'gru_prediction': gru_prediction  # Add GRU prediction to ML context
+                            'gru_prediction': gru_prediction,  # GRU prediction for ML context
+                            'rl_prediction': rl_signal  # RL Agent prediction for ML learning
                         }
                     )
 
-                    # Add GRU prediction to enhanced_analysis for recording
-                    if enhanced_analysis and gru_prediction:
-                        enhanced_analysis['gru_prediction'] = gru_prediction
+                    # Add GRU and RL predictions to enhanced_analysis for recording
+                    if enhanced_analysis:
+                        if gru_prediction:
+                            enhanced_analysis['gru_prediction'] = gru_prediction
+                        if rl_signal:
+                            enhanced_analysis['rl_prediction'] = rl_signal
                     
                     processing_time = time.time() - start_time
                     
@@ -2544,10 +2554,10 @@ class LiveTradingEngine:
                         # Use LIMIT order with slight price adjustment for better execution
                         if order_side == "BUY":
                             # For BUY orders, add small premium to ensure execution
-                            limit_price = current_market_price * 1.001  # 0.1% premium
+                            limit_price = current_market_price * 1.002  # 0.2% premium (increased for testnet)
                         else:
                             # For SELL orders, subtract small discount to ensure execution
-                            limit_price = current_market_price * 0.999  # 0.1% discount
+                            limit_price = current_market_price * 0.998  # 0.2% discount (increased for testnet)
 
                         # Round limit price to proper precision
                         limit_price = self._round_price(limit_price, symbol)
@@ -2579,7 +2589,7 @@ class LiveTradingEngine:
                                     type="LIMIT",
                                     quantity=api_quantity,
                                     price=limit_price,
-                                    timeInForce="IOC",  # Immediate or Cancel - fills immediately or cancels
+                                    timeInForce="GTC",  # Good Til Cancelled - better for testnet
                                 )
                             else:
                                 # Fallback to market order
@@ -2598,7 +2608,7 @@ class LiveTradingEngine:
                                 type="LIMIT",
                                 quantity=api_quantity,
                                 price=limit_price,
-                                timeInForce="IOC",
+                                timeInForce="GTC",  # Good Til Cancelled - better for testnet
                             )
                         else:
                             order_result = self.client.place_order(
@@ -4256,6 +4266,26 @@ class LiveTradingEngine:
                         exit_reason=exit_reason,
                         fees_paid=0.0,  # Estimate
                     )
+
+                # 🧠 Notify Enhanced ML system for learning
+                if self.enhanced_ai and hasattr(self.enhanced_ai, "update_trade_exit_with_ml"):
+                    trade_record = pending_trade.get("trade_record")
+                    if trade_record:
+                        # Get candles data for ML context
+                        candles_data = None
+                        if hasattr(self, '_last_candles_data'):
+                            candles_data = getattr(self, '_last_candles_data', {}).get(symbol)
+
+                        await self.enhanced_ai.update_trade_exit_with_ml(
+                            trade_record=trade_record,
+                            exit_price=current_price,
+                            exit_reason=exit_reason,
+                            candles_data=candles_data
+                        )
+
+                        self.logger.info(
+                            f"🧠 [ML_LEARN] Trade {trade_id} sent to ML Learning System for analysis"
+                        )
 
                 # Clean up pending trade
                 if hasattr(self, "pending_trades") and symbol in self.pending_trades:

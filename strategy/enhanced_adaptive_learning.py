@@ -177,9 +177,13 @@ class EnhancedAdaptiveLearningSystem:
                 # Обновляем предсказания в истории
                 self._update_prediction_accuracy(trade_record.trade_id, trade_record.pnl_pct)
                 
+                # Get total samples count for progress tracking
+                total_samples = len(self.ml_system.trade_outcomes) if hasattr(self.ml_system, 'trade_outcomes') else 0
+
                 logger.info(f"🧠 [ML_LEARNING] Learned from {trade_record.symbol}: "
                            f"{trade_record.pnl_pct:+.2f}% PnL in {trade_record.hold_time_seconds/60:.1f} min")
-                
+                logger.info(f"📚 [ML_SAMPLES] {total_samples}/50 samples collected for ML training")
+
                 # Периодически оцениваем и обновляем метрики
                 if len(self.prediction_history) % 10 == 0:
                     await self._update_enhanced_metrics()
@@ -561,18 +565,17 @@ class EnhancedAdaptiveLearningSystem:
             
             # 🎯 EXPLORATION PHASE - Первые 50 сделок
             if total_samples < 50:
-                logger.info(f"🧠 [COLD_START] Exploration mode: {total_samples}/50 samples")
-                
-                # В начале торгуем на основе ТОЛЬКО сигналов IMBA (не ML)
-                # Но с повышенным порогом для безопасности
-                exploration_threshold = 1.4  # Выше обычного 1.2
-                
-                if signal_strength >= exploration_threshold:
-                    logger.info(f"🚀 [EXPLORATION] TRADE: Signal {signal_strength:.2f} >= {exploration_threshold}")
-                    return True
-                else:
-                    logger.info(f"🚫 [EXPLORATION] SKIP: Signal {signal_strength:.2f} < {exploration_threshold}")
-                    return False
+                logger.info(f"🧠 [COLD_START] Learning mode: {total_samples}/50 samples - ML не блокирует")
+
+                # 📚 КОНЦЕПЦИЯ:
+                # - RL Agent уже обучен на исторических данных
+                # - ML Learning System учится на РЕАЛЬНЫХ сделках
+                # - Первые 50 сделок: ML только ЗАПОМИНАЕТ результаты
+                # - RL фильтрует сигналы, ML сравнивает его предсказания с фактом
+                # - После 50 сделок: ML начинает использовать свой опыт для фильтрации
+
+                logger.info(f"📚 [LEARNING_MODE] Пропускаем сигнал {signal_strength:.2f} - ML учится на реальных данных")
+                return True  # Всегда пропускаем - учимся на всех сделках!
             
             # 🧠 LEARNING PHASE - 50-200 сделок (постепенно добавляем ML)
             elif total_samples < 200:

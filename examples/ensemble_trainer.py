@@ -485,9 +485,14 @@ class EnsembleTrainer:
 
             # Recreate model
             config = checkpoint['config']
+
+            # Extract actual sequence_length from saved BatchNorm layer
+            # BatchNorm1d(sequence_length) stores sequence_length in weight shape
+            sequence_length = checkpoint['model_state']['input_bn.weight'].shape[0]
+
             model = EnsembleGRU(
                 input_features=checkpoint['model_state']['gru.weight_ih_l0'].shape[1],
-                sequence_length=100,  # Will be overridden
+                sequence_length=sequence_length,  # ✅ Extract from checkpoint!
                 hidden_size=config['hidden_size'],
                 num_layers=config['num_layers'],
                 dropout=config['dropout']
@@ -499,7 +504,7 @@ class EnsembleTrainer:
             self.model_performance[name] = checkpoint['performance']
             self.model_weights[name] = checkpoint['weight']
 
-        logger.info(f"✅ Ensemble loaded from {path}/")
+        logger.info(f"✅ Ensemble loaded from {path}/ (sequence_length={sequence_length})")
 
 
 # ==========================================

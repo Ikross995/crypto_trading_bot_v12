@@ -86,8 +86,15 @@ class COMBOSignalIntegration:
             # Создаем агента (размеры будут из чекпоинта)
             checkpoint = torch.load(rl_agent_path, map_location=self.device)
 
-            # Получаем размеры из чекпоинта
-            state_dict = checkpoint.get('policy_net_state', checkpoint)
+            # Правильно извлекаем state_dict из checkpoint
+            # Checkpoint может содержать: 'policy_net', 'target_net', 'optimizer', etc.
+            if 'policy_net' in checkpoint:
+                state_dict = checkpoint['policy_net']
+            elif 'policy_net_state' in checkpoint:
+                state_dict = checkpoint['policy_net_state']
+            else:
+                # Fallback: весь checkpoint это state_dict
+                state_dict = checkpoint
 
             # Определяем state_size из первого слоя
             first_layer_key = 'fc1.weight'
@@ -104,7 +111,7 @@ class COMBOSignalIntegration:
                 device=self.device
             )
 
-            # Загружаем веса
+            # Загружаем веса policy_net
             rl_agent.policy_net.load_state_dict(state_dict)
             rl_agent.policy_net.eval()
 
@@ -139,61 +146,79 @@ class COMBOSignalIntegration:
         """
         Подготовить state для RL Agent из последних данных.
 
+        ВАЖНО: State должен соответствовать обучению (15 features):
+        - 10 market features: close_norm, volume_norm, returns, volatility, rsi, macd, bb_upper, bb_lower, sma_20, sma_50
+        - 3 position features: position, pnl%, position_size%
+        - 2 balance features: total_return, num_trades
+
         Args:
-            df: DataFrame с OHLCV + индикаторами
+            df: DataFrame с OHLCV (индикаторы будут добавлены если отсутствуют)
             symbol: Торговый символ
 
         Returns:
-            State вектор для агента или None
+            State вектор для агента (15 features) или None
         """
         try:
-            if len(df) < 60:
-                logger.warning(f"Not enough data for state preparation: {len(df)} < 60")
+            if len(df) < 100:
+                logger.warning(f"Not enough data for state preparation: {len(df)} < 100")
                 return None
+
+            # Добавляем индикаторы, если их нет
+            from examples.adaptive_trading_integration import add_technical_indicators
+
+            # Проверяем, есть ли индикаторы
+            required_indicators = ['rsi', 'macd', 'bb_upper', 'sma_20', 'sma_50']
+            if not all(col in df.columns for col in required_indicators):
+                df = add_technical_indicators(df)
 
             # Последняя свеча
             latest = df.iloc[-1]
 
-            # Формируем state (как в TradingEnvironment)
-            state_features = [
-                latest.get('close', 0),
-                latest.get('volume', 0),
+            # Calculate normalized features (как при обучении)
+            # Price normalization: (price - mean) / std
+            close_rolling_mean = df['close'].rolling(100).mean().iloc[-1]
+            close_rolling_std = df['close'].rolling(100).std().iloc[-1]
+            close_norm = (latest['close'] - close_rolling_mean) / close_rolling_std if close_rolling_std > 0 else 0
+
+            volume_rolling_mean = df['volume'].rolling(100).mean().iloc[-1]
+            volume_rolling_std = df['volume'].rolling(100).std().iloc[-1]
+            volume_norm = (latest['volume'] - volume_rolling_mean) / volume_rolling_std if volume_rolling_std > 0 else 0
+
+            # Returns and volatility
+            returns = df['close'].pct_change().iloc[-1] * 100 if len(df) > 1 else 0
+            volatility = df['close'].pct_change().rolling(20).std().iloc[-1] * 100 if len(df) > 20 else 0
+
+            # Market features (10)
+            market_features = [
+                close_norm,
+                volume_norm,
+                returns,
+                volatility,
                 latest.get('rsi', 50),
                 latest.get('macd', 0),
-                latest.get('macd_signal', 0),
-                latest.get('bb_upper', 0),
-                latest.get('bb_mid', 0),
-                latest.get('bb_lower', 0),
-                latest.get('sma_20', 0),
-                latest.get('sma_50', 0),
-                latest.get('ema_50', 0),
-                latest.get('atr', 0),
-                latest.get('volume_sma', 0),
-                latest.get('volume_delta', 0),
-                latest.get('obv', 0),
-                latest.get('volume_ratio', 1),
-                latest.get('volume_spike', 0),
-                latest.get('mfi', 50),
-                latest.get('cvd', 0),
-                latest.get('vwap_distance', 0),
-                0.0,  # current_position (нет позиции при генерации сигнала)
-                10000.0,  # balance (default)
+                latest.get('bb_upper', latest['close']),
+                latest.get('bb_lower', latest['close']),
+                latest.get('sma_20', latest['close']),
+                latest.get('sma_50', latest['close']),
             ]
 
-            state = np.array(state_features, dtype=np.float32)
+            # Position features (3) - нет позиции при генерации сигнала
+            position_features = [
+                0.0,  # position (no position)
+                0.0,  # pnl% (no position)
+                0.0,  # position_size% (no position)
+            ]
 
-            # Нормализация (простая)
-            # Цены нормализуем относительно текущей цены
-            price = state[0] if state[0] > 0 else 1
-            state[0:11] = state[0:11] / price  # Цены и полосы Боллинджера
+            # Balance features (2)
+            balance_features = [
+                0.0,  # total_return (начало)
+                0.0,  # num_trades (начало)
+            ]
 
-            # RSI, MFI уже в диапазоне 0-100
-            state[2] = state[2] / 100  # RSI
-            state[17] = state[17] / 100  # MFI
+            state = np.array(market_features + position_features + balance_features, dtype=np.float32)
 
-            # Volume нормализуем по volume_sma
-            if state[12] > 0:  # volume_sma
-                state[1] = state[1] / state[12]  # volume / volume_sma
+            # Handle NaN (как при обучении)
+            state = np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
 
             return state
 
@@ -206,7 +231,7 @@ class COMBOSignalIntegration:
         Получить предсказание от Ensemble моделей.
 
         Args:
-            df: DataFrame с данными
+            df: DataFrame с данными (OHLCV)
             symbol: Торговый символ
 
         Returns:
@@ -218,48 +243,69 @@ class COMBOSignalIntegration:
 
             ensemble = self.models[symbol]['ensemble']
 
-            # Подготовка последовательности (как в обучении)
-            from examples.gru_training_improved import prepare_sequences_no_leakage
+            # Берем достаточно свечей для sequence (60) + нормализации
+            min_required = 100  # Для rolling нормализации
+            if len(df) < min_required:
+                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < {min_required}")
+                return None
 
+            recent_df = df.iloc[-min_required:].copy()
+
+            # Добавляем индикаторы, если их нет
+            from examples.adaptive_trading_integration import add_technical_indicators
+
+            # Проверяем, есть ли индикаторы
+            required_indicators = ['rsi', 'macd', 'bb_upper']
+            if not all(col in recent_df.columns for col in required_indicators):
+                recent_df = add_technical_indicators(recent_df)
+
+            # Используем только индикаторы, которые добавляет add_technical_indicators()
             feature_columns = [
                 'open', 'high', 'low', 'volume',
                 'rsi', 'macd', 'macd_signal',
-                'bb_upper', 'bb_mid', 'bb_lower',
+                'bb_upper', 'bb_middle', 'bb_lower',
                 'sma_20', 'sma_50', 'ema_50',
-                'volume_sma', 'atr',
-                'volume_delta', 'obv', 'volume_ratio',
-                'volume_spike', 'mfi', 'cvd', 'vwap_distance'
+                'volume_sma', 'atr', 'volume_ratio'
             ]
 
-            # Берем последние 60 свечей для последовательности
-            if len(df) < 60:
-                logger.warning(f"Not enough data for ensemble prediction: {len(df)} < 60")
+            # Для inference: используем простую подготовку без split
+            # Нормализация и создание последовательности вручную
+            from sklearn.preprocessing import RobustScaler
+
+            # Подготовка features и target
+            df_features = recent_df[feature_columns].copy()
+            df_target = recent_df['close'].pct_change().shift(-1) * 100  # % change
+
+            # Удаляем NaN
+            df_features = df_features.dropna()
+            df_target = df_target.dropna()
+
+            # Выравниваем длины
+            min_len = min(len(df_features), len(df_target))
+            df_features = df_features.iloc[:min_len]
+            df_target = df_target.iloc[:min_len]
+
+            if len(df_features) < 60:
+                logger.warning(f"Not enough clean data after indicators: {len(df_features)} < 60")
                 return None
 
-            recent_df = df.iloc[-100:].copy()  # Берем больше для скейлера
+            # Нормализация
+            feature_scaler = RobustScaler()
+            target_scaler = RobustScaler()
 
-            X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
-                prepare_sequences_no_leakage(
-                    recent_df,
-                    feature_columns,
-                    sequence_length=60,
-                    train_ratio=0.7,
-                    val_ratio=0.15
-                )
+            features_scaled = feature_scaler.fit_transform(df_features)
+            target_scaled = target_scaler.fit_transform(df_target.values.reshape(-1, 1))
 
-            # Берем последнюю последовательность
-            if len(X_test) > 0:
-                last_sequence = X_test[-1:]
-            elif len(X_val) > 0:
-                last_sequence = X_val[-1:]
-            else:
-                last_sequence = X_train[-1:]
+            # Создаем последнюю последовательность (60 timesteps)
+            sequence_length = 60
+            last_sequence = features_scaled[-sequence_length:].reshape(1, sequence_length, -1)
 
-            # Конвертируем в torch
-            X_tensor = torch.FloatTensor(last_sequence).to(self.device)
+            # Конвертируем в numpy для ensemble.predict()
+            # ensemble.predict() сам конвертирует в torch tensor
+            last_sequence_np = last_sequence  # Уже numpy array
 
-            # Предсказание от ансамбля
-            prediction = ensemble.predict(X_tensor)
+            # Предсказание от ансамбля (передаем numpy array)
+            prediction = ensemble.predict(last_sequence_np)
 
             # Обратное преобразование
             prediction_original = target_scaler.inverse_transform(prediction.reshape(-1, 1))[0][0]
@@ -281,7 +327,7 @@ class COMBOSignalIntegration:
         Генерация торгового сигнала используя COMBO модели.
 
         Args:
-            df: DataFrame с OHLCV + индикаторами
+            df: DataFrame с OHLCV + индикаторами (или list of dicts)
             symbol: Торговый символ
 
         Returns:
@@ -296,6 +342,10 @@ class COMBOSignalIntegration:
                 'metadata': dict
             }
         """
+        # Конвертируем list в DataFrame если нужно
+        if isinstance(df, list):
+            df = pd.DataFrame(df)
+
         # Загружаем модели если не загружены
         if symbol not in self.models:
             if not self.load_models_for_symbol(symbol):
