@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from core.types import Position
 from .client import BinanceClient
 from .orders import OrderManager
+from .precision import adjust_price
 
 logger = logging.getLogger(__name__)
 
@@ -427,9 +428,9 @@ class TrailingStopManager:
     async def _place_stop_loss_order(self, symbol: str, side: str, stop_price: float) -> None:
         """Place new stop loss order."""
         try:
-            # Round stop price to proper precision
-            rounded_stop_price = round(stop_price, 4)  # Most pairs use 4 decimals for price
-            
+            # Round stop price to proper precision using exchange filters
+            rounded_stop_price = adjust_price(symbol, stop_price)
+
             # Place STOP_MARKET order with closePosition=true
             order_result = self.client.place_order(
                 symbol=symbol,
@@ -439,10 +440,10 @@ class TrailingStopManager:
                 closePosition="true",  # Close entire position
                 workingType="MARK_PRICE"  # Use mark price to avoid manipulation
             )
-            
+
             logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} @ {rounded_stop_price:.4f} "
                        f"(order: {order_result.get('orderId', 'N/A')})")
-            
+
         except Exception as e:
             logger.error(f"[TRAIL_SL] Failed to place SL order for {symbol}: {e}")
             raise
