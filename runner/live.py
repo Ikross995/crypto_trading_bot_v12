@@ -3349,14 +3349,17 @@ class LiveTradingEngine:
                         getattr(self.config, "testnet", True),
                     )
 
-                    # ✅ Теперь инициализируем ExitManager с готовой системой адаптивного обучения и клиентом
-                    if ExitManager and not self.exit_mgr and self.adaptive_learning:
+                    # ✅ CRITICAL FIX: Use enhanced_ai (ML system) instead of adaptive_learning
+                    # enhanced_ai contains ML models that need trade data for learning
+                    learning_system = getattr(self, 'enhanced_ai', None) or getattr(self, 'adaptive_learning', None)
+
+                    if ExitManager and not self.exit_mgr and learning_system:
                         try:
                             self.exit_mgr = ExitManager(
-                                self.client, self.config, self.adaptive_learning
+                                self.client, self.config, learning_system
                             )
                             self.logger.info(
-                                "🎯 [EXIT_MANAGER] Exit tracking integrated with AI learning system"
+                                "🎯 [EXIT_MANAGER] Exit tracking integrated with ML learning system"
                             )
                         except Exception as e:
                             self.logger.warning(
