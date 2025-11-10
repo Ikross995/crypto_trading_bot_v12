@@ -283,6 +283,19 @@ class BinanceClient:
         data = self._rest("GET", "/fapi/v1/openOrders", payload)
         return data if isinstance(data, list) else []
 
+    def get_all_orders(self, symbol: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """Get all orders (open, filled, canceled) for a symbol."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_get_all_orders, symbol=symbol.upper(), limit=limit)
+            except Exception as e:
+                msg = str(e)
+                if "_http" not in msg and "send_request" not in msg:
+                    raise
+        payload = {"symbol": symbol.upper(), "limit": limit}
+        data = self._rest("GET", "/fapi/v1/allOrders", payload)
+        return data if isinstance(data, list) else []
+
     def cancel_order(self, symbol: str, orderId: Optional[int] = None, origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
         if self.dry_run:
             return {"symbol": symbol.upper(), "status": "CANCELED", "orderId": orderId or 0, "origClientOrderId": origClientOrderId or ""}

@@ -2551,20 +2551,29 @@ class LiveTradingEngine:
                                 )
                                 return  # Don't place order with extreme slippage
 
-                        # Use LIMIT order with slight price adjustment for better execution
-                        if order_side == "BUY":
-                            # For BUY orders, add small premium to ensure execution
-                            limit_price = current_market_price * 1.002  # 0.2% premium (increased for testnet)
+                        # CRITICAL FIX: On testnet, use MARKET orders for reliable fills
+                        # Testnet has very low liquidity, causing LIMIT orders to hang
+                        if self.cfg.testnet:
+                            limit_price = None  # Use MARKET order
+                            self.logger.info("[ORDER_TYPE] Using MARKET order for testnet (better fill rate)")
                         else:
-                            # For SELL orders, subtract small discount to ensure execution
-                            limit_price = current_market_price * 0.998  # 0.2% discount (increased for testnet)
+                            # For LIVE trading, use LIMIT with tight spread for better execution
+                            if order_side == "BUY":
+                                limit_price = current_market_price * 1.002  # 0.2% above
+                            else:  # SELL
+                                limit_price = current_market_price * 0.998  # 0.2% below (taker order)
 
-                        # Round limit price to proper precision
-                        limit_price = self._round_price(limit_price, symbol)
+                            # Round limit price to proper precision
+                            limit_price = self._round_price(limit_price, symbol)
 
-                        self.logger.info(
-                            f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
-                        )
+                        if limit_price:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
+                            )
+                        else:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Type: MARKET"
+                            )
 
                     except Exception as price_e:
                         self.logger.warning(
@@ -3340,14 +3349,17 @@ class LiveTradingEngine:
                         getattr(self.config, "testnet", True),
                     )
 
-                    # ✅ Теперь инициализируем ExitManager с готовой системой адаптивного обучения и клиентом
-                    if ExitManager and not self.exit_mgr and self.adaptive_learning:
+                    # ✅ CRITICAL FIX: Use enhanced_ai (ML system) instead of adaptive_learning
+                    # enhanced_ai contains ML models that need trade data for learning
+                    learning_system = getattr(self, 'enhanced_ai', None) or getattr(self, 'adaptive_learning', None)
+
+                    if ExitManager and not self.exit_mgr and learning_system:
                         try:
                             self.exit_mgr = ExitManager(
-                                self.client, self.config, self.adaptive_learning
+                                self.client, self.config, learning_system
                             )
                             self.logger.info(
-                                "🎯 [EXIT_MANAGER] Exit tracking integrated with AI learning system"
+                                "🎯 [EXIT_MANAGER] Exit tracking integrated with ML learning system"
                             )
                         except Exception as e:
                             self.logger.warning(
@@ -3531,10 +3543,12 @@ class LiveTradingEngine:
                                 primary_tp * 1.2 - entry_price * 0.2   # 120% to target
                             ]
                         else:  # SELL
+                            # CRITICAL FIX: TP3 must be BELOW entry for SHORT
+                            # Calculate 120% movement from entry downwards
                             tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,
-                                primary_tp,
-                                entry_price * 1.2 - primary_tp * 0.2
+                                primary_tp * 0.6 + entry_price * 0.4,  # 60% to target
+                                primary_tp,  # 100% to target
+                                primary_tp * 1.2 - entry_price * 0.2   # 120% to target (same formula as BUY)
                             ]
 
                     self.logger.info(

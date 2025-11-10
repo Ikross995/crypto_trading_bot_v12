@@ -276,6 +276,21 @@ class DCAManager:
             "total_pnl": self.total_pnl,
         }
 
+    async def check_dca_trigger(self, symbol: str, position: dict) -> None:
+        """
+        Check if DCA should be triggered for a position.
+
+        This is a compatibility method for the live trading engine.
+        Currently a no-op as DCA logic is handled elsewhere.
+
+        Args:
+            symbol: Trading symbol
+            position: Position data dict
+        """
+        # TODO: Implement DCA trigger logic if needed
+        # For now, DCA is managed through the existing start_dca_position flow
+        pass
+
     def get_status(self) -> dict[str, Any]:
         """Get current DCA manager status."""
         return {
