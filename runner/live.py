@@ -1481,9 +1481,85 @@ class LiveTradingEngine:
 
             if existing_count > 0:
                 self.logger.info(
-                    "📊 [STARTUP] ✅ Loaded %d existing position(s) - no Telegram notifications sent",
+                    "📊 [STARTUP] ✅ Loaded %d existing position(s)",
                     existing_count,
                 )
+
+                # 📱 Send Telegram notification about existing positions at startup
+                if self.telegram_bot and self.telegram_trade_notifications:
+                    try:
+                        # Prepare positions summary
+                        positions_list = []
+                        total_pnl = 0.0
+                        total_margin = 0.0
+
+                        for symbol, pos_data in self.active_positions.items():
+                            side = pos_data["side"]
+                            entry_price = pos_data["entry_price"]
+                            quantity = pos_data["quantity"]
+                            pnl = pos_data["unrealized_pnl"]
+
+                            # Calculate margin used
+                            notional = entry_price * quantity
+                            margin = notional / self.leverage
+
+                            total_pnl += pnl
+                            total_margin += margin
+
+                            positions_list.append({
+                                "symbol": symbol,
+                                "side": "LONG" if side == "BUY" else "SHORT",
+                                "entry_price": entry_price,
+                                "quantity": quantity,
+                                "pnl": pnl,
+                                "margin": margin,
+                                "notional": notional
+                            })
+
+                        # Sort by PnL (highest first)
+                        positions_list.sort(key=lambda x: x["pnl"], reverse=True)
+
+                        # Build message
+                        pnl_emoji = "💰" if total_pnl >= 0 else "📉"
+                        message = f"""<b>🚀 BOT STARTED - EXISTING POSITIONS</b>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>📊 PORTFOLIO SUMMARY</b>
+━━━━━━━━━━━━━━━━━━━━
+
+Open Positions: <b>{existing_count}</b>
+Total P&L: <b>{pnl_emoji} ${total_pnl:+,.2f}</b>
+Total Margin Used: <b>${total_margin:,.2f}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>📈 POSITION DETAILS</b>
+━━━━━━━━━━━━━━━━━━━━
+"""
+
+                        # Add each position
+                        for i, pos in enumerate(positions_list, 1):
+                            side_emoji = "🟢" if pos["side"] == "LONG" else "🔴"
+                            pnl_emoji = "💚" if pos["pnl"] >= 0 else "💔"
+
+                            message += f"""
+<b>{i}. {pos["symbol"]}</b> {side_emoji} {pos["side"]}
+Entry: ${pos["entry_price"]:,.4f} × {pos["quantity"]:.3f}
+P&L: {pnl_emoji} <b>${pos["pnl"]:+,.2f}</b>
+Margin: ${pos["margin"]:.2f}
+"""
+
+                        message += "\n━━━━━━━━━━━━━━━━━━━━"
+                        message += "\n\n<i>✅ Monitoring active. You'll receive updates when positions close.</i>"
+
+                        # Send async
+                        asyncio.create_task(
+                            self.telegram_bot.send_message(message, parse_mode="HTML")
+                        )
+                        self.logger.info("📱 [TELEGRAM] Startup positions summary sent")
+                    except Exception as tg_e:
+                        self.logger.warning(
+                            "📱 [TELEGRAM] Failed to send startup summary: %s", tg_e
+                        )
             else:
                 self.logger.info("📊 [STARTUP] No existing positions found")
 
