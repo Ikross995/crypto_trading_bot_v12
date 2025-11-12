@@ -1508,6 +1508,15 @@ class LiveTradingEngine:
                         except Exception as price_e:
                             self.logger.debug("Failed to fetch current prices: %s", price_e)
 
+                        # Get open orders (TP/SL limit orders)
+                        all_open_orders = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                orders = self.client.get_open_orders(symbol)
+                                all_open_orders[symbol] = orders
+                        except Exception as orders_e:
+                            self.logger.debug("Failed to fetch open orders: %s", orders_e)
+
                         # Prepare positions summary
                         positions_list = []
                         total_pnl = 0.0
@@ -1539,6 +1548,30 @@ class LiveTradingEngine:
                             total_margin += margin
                             total_notional += notional
 
+                            # Extract TP/SL orders
+                            tp_orders = []
+                            sl_orders = []
+                            open_orders = all_open_orders.get(symbol, [])
+                            for order in open_orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+
+                            # Sort TP orders (closest first for LONG, furthest first for SHORT)
+                            if side == "BUY":
+                                tp_orders.sort()  # Ascending for LONG
+                            else:
+                                tp_orders.sort(reverse=True)  # Descending for SHORT
+
+                            # Get first TP and SL
+                            first_tp = tp_orders[0] if tp_orders else None
+                            first_sl = sl_orders[0] if sl_orders else None
+
                             positions_list.append({
                                 "symbol": symbol,
                                 "side": "LONG" if side == "BUY" else "SHORT",
@@ -1551,7 +1584,11 @@ class LiveTradingEngine:
                                 "margin": margin,
                                 "notional": notional,
                                 "leverage": self.leverage,
-                                "liq_price": liq_price
+                                "liq_price": liq_price,
+                                "tp_price": first_tp,
+                                "sl_price": first_sl,
+                                "tp_count": len(tp_orders),
+                                "sl_count": len(sl_orders)
                             })
 
                         # Sort by ROI% (highest first)
@@ -1664,8 +1701,19 @@ class LiveTradingEngine:
                             else:
                                 price_emoji = "❄️"
 
+                            # Build TP/SL info
+                            tp_sl_info = ""
+                            if pos["tp_price"]:
+                                tp_distance = ((pos["tp_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                tp_badge = f" ({pos['tp_count']}x)" if pos["tp_count"] > 1 else ""
+                                tp_sl_info += f"🎯 <b>TP:</b> ${pos['tp_price']:,.4f} ({tp_distance:+.2f}%){tp_badge}\n"
+                            if pos["sl_price"]:
+                                sl_distance = ((pos["sl_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                sl_badge = f" ({pos['sl_count']}x)" if pos["sl_count"] > 1 else ""
+                                tp_sl_info += f"🛡️ <b>SL:</b> ${pos['sl_price']:,.4f} ({sl_distance:+.2f}%){sl_badge}\n"
+
                             message += f"""╭──────────────────╮
-│ <b>{i}. {pos["symbol"]}</b> {direction_emoji} {pos["side"]}
+│ <b>{i}. {pos["symbol"]}</b>  {direction_emoji}  <b>{pos["side"]}</b>
 ╰──────────────────╯
 <b>Entry:</b> ${pos["entry_price"]:,.4f}
 <b>Now:</b> ${pos["current_price"]:,.4f} {price_emoji} <b>{pos["price_change_pct"]:+.2f}%</b>
@@ -1673,7 +1721,7 @@ class LiveTradingEngine:
 
 {status_emoji} <b>P&L: ${pos["pnl"]:+,.2f}</b> (<b>{pos["roi_pct"]:+.2f}%</b>)
 💵 <b>Margin:</b> ${pos["margin"]:.2f}
-⚡ <b>Liq:</b> ${pos["liq_price"]:,.4f}
+{tp_sl_info}⚡ <b>Liq:</b> ${pos["liq_price"]:,.4f}
 
 """
 
