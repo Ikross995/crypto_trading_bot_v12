@@ -1800,6 +1800,10 @@ class LiveTradingEngine:
             len(self.symbols),
             ", ".join(self.symbols),
         )
+
+        # Sync existing positions on startup and send Telegram notification
+        await self._sync_existing_positions_on_startup()
+
         # Default: iterate forever; we will sleep 1s between cycles to be gentle.
         while self.running:
             self.iteration += 1
@@ -3652,6 +3656,100 @@ class LiveTradingEngine:
         except Exception as e:
             self.logger.error("[BINANCE] Failed to initialize client: %s", e)
             self._binance_client = None
+
+    async def _sync_existing_positions_on_startup(self) -> None:
+        """
+        Sync existing open positions from exchange on startup and send Telegram notifications.
+        """
+        try:
+            if not self.client:
+                return
+
+            self.logger.info("🔄 [STARTUP] Syncing existing positions from exchange...")
+
+            # Get all positions from Binance
+            positions = self.client.get_positions()
+            existing_positions_found = []
+
+            for pos in positions:
+                symbol = pos.get("symbol", "")
+                position_amt = float(pos.get("positionAmt", 0))
+
+                if abs(position_amt) > 0:  # Active position
+                    entry_price = float(pos.get("entryPrice", 0))
+                    mark_price = float(pos.get("markPrice", 0))
+                    unrealized_pnl = float(pos.get("unRealizedProfit", 0))
+                    leverage = int(pos.get("leverage", 1))
+                    isolated_margin = float(pos.get("isolatedMargin", 0))
+                    notional = abs(float(pos.get("notional", 0)))
+
+                    side = "BUY" if position_amt > 0 else "SELL"
+                    quantity = abs(position_amt)
+
+                    existing_positions_found.append({
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "leverage": leverage,
+                        "margin": isolated_margin,
+                        "notional": notional,
+                    })
+
+                    # Add to active_positions tracking
+                    from datetime import datetime, timezone
+                    self.active_positions[symbol] = {
+                        "side": side,
+                        "entry_price": entry_price,
+                        "quantity": quantity,
+                        "unrealized_pnl": unrealized_pnl,
+                        "created_time": datetime.now(timezone.utc),
+                    }
+
+                    self.logger.info(
+                        "📊 [STARTUP] Found existing position: %s %s %.4f @ $%.2f (P&L: $%.2f)",
+                        side, symbol, quantity, entry_price, unrealized_pnl
+                    )
+
+            # Send Telegram notification about existing positions
+            if existing_positions_found and self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                try:
+                    # Format message about existing positions
+                    message = "📊 <b>EXISTING POSITIONS ON STARTUP</b>\n\n"
+                    message += f"Found {len(existing_positions_found)} open position(s):\n\n"
+
+                    for idx, pos in enumerate(existing_positions_found, 1):
+                        pnl_emoji = "🟢" if pos['unrealized_pnl'] >= 0 else "🔴"
+                        side_emoji = "🟢" if pos['side'] == "BUY" else "🔴"
+
+                        message += f"{side_emoji} <b>{pos['symbol']}</b> ({pos['side']})\n"
+                        message += f"├─ Entry: ${pos['entry_price']:,.2f}\n"
+                        message += f"├─ Current: ${pos['mark_price']:,.2f}\n"
+                        message += f"├─ Quantity: {pos['quantity']:.4f}\n"
+                        message += f"├─ Leverage: {pos['leverage']}x\n"
+                        message += f"├─ Margin: ${pos['margin']:,.2f}\n"
+                        message += f"├─ Notional: ${pos['notional']:,.2f}\n"
+                        message += f"└─ {pnl_emoji} P&L: ${pos['unrealized_pnl']:+,.2f}\n\n"
+
+                    # Calculate total P&L
+                    total_pnl = sum(p['unrealized_pnl'] for p in existing_positions_found)
+                    total_pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    message += f"━━━━━━━━━━━━━━━━━━\n"
+                    message += f"{total_pnl_emoji} <b>Total Unrealized P&L: ${total_pnl:+,.2f}</b>"
+
+                    await self.telegram_bot.send_message(message)
+                    self.logger.info("📱 [TELEGRAM] Sent notification about %d existing positions", len(existing_positions_found))
+
+                except Exception as tg_e:
+                    self.logger.warning("📱 [TELEGRAM] Failed to send startup positions notification: %s", tg_e)
+
+            if not existing_positions_found:
+                self.logger.info("✅ [STARTUP] No existing positions found - starting fresh")
+
+        except Exception as e:
+            self.logger.error("[STARTUP] Failed to sync existing positions: %s", e)
 
     async def _setup_tp_sl_orders(
         self,
