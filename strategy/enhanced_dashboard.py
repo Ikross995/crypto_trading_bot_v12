@@ -710,7 +710,58 @@ class EnhancedDashboardGenerator:
                 </div>
             </div>
         </div>
-        
+
+        <!-- 🧠 GRU Predictions & ML Learning -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>🔮 GRU Price Prediction</h3>
+                {self._generate_gru_section(latest)}
+            </div>
+
+            <div class="card">
+                <h3>🧠 ML Learning Progress</h3>
+                <div class="metric">
+                    <span class="metric-label">📚 Samples Collected</span>
+                    <span class="metric-value">{latest.ml_samples_collected}/{latest.ml_samples_needed}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Progress</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden;">
+                        <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: {(latest.ml_samples_collected / latest.ml_samples_needed * 100):.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value">{(latest.ml_samples_collected / latest.ml_samples_needed * 100):.1f}%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">🎯 Prediction Accuracy</span>
+                    <span class="metric-value">{latest.ml_prediction_accuracy:.1%}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💰 Avg PnL Prediction</span>
+                    <span class="metric-value {'positive' if latest.ml_avg_pnl_prediction >= 0 else 'negative'}">{latest.ml_avg_pnl_prediction:+.2f}%</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>📊 Open Positions</h3>
+                <div class="metric">
+                    <span class="metric-label">🎯 Active Positions</span>
+                    <span class="metric-value">{latest.open_positions:,}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💵 Total Value</span>
+                    <span class="metric-value">${latest.total_position_value:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">📈 Largest Position</span>
+                    <span class="metric-value">${latest.largest_position:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💎 Available Balance</span>
+                    <span class="metric-value">${latest.available_balance:,.2f}</span>
+                </div>
+            </div>
+        </div>
+
         <div class="chart-grid">
             <div class="chart-container">
                 <h3>📊 PnL Evolution</h3>
@@ -862,7 +913,61 @@ class EnhancedDashboardGenerator:
 </body>
 </html>
         """
-    
+
+    def _generate_gru_section(self, data: DashboardData) -> str:
+        """Generate GRU prediction section HTML."""
+        if data.gru_prediction and data.gru_current_price:
+            price_change = data.gru_prediction - data.gru_current_price
+            price_change_pct = (price_change / data.gru_current_price) * 100
+
+            # Direction emoji and color
+            if data.gru_direction == "LONG":
+                direction_emoji = "📈"
+                direction_color = "#00ff88"
+            elif data.gru_direction == "SHORT":
+                direction_emoji = "📉"
+                direction_color = "#ff4757"
+            else:
+                direction_emoji = "➡️"
+                direction_color = "#ffa502"
+
+            return f"""
+                <div class="metric">
+                    <span class="metric-label">💵 Current Price</span>
+                    <span class="metric-value">${data.gru_current_price:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">🔮 Predicted Price</span>
+                    <span class="metric-value">${data.gru_prediction:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">📊 Expected Change</span>
+                    <span class="metric-value {'positive' if price_change >= 0 else 'negative'}">{price_change:+,.2f} ({price_change_pct:+.2f}%)</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">🎯 Direction</span>
+                    <span class="metric-value" style="color: {direction_color}; font-size: 1.5em;">{direction_emoji} {data.gru_direction}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💪 Confidence</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
+                        <div style="background: linear-gradient(90deg, #00ff88 0%, #00d9ff 100%); height: 100%; width: {(data.gru_confidence or 0) * 100:.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value">{(data.gru_confidence or 0) * 100:.1f}%</span>
+                </div>
+            """
+        else:
+            return """
+                <div class="metric">
+                    <span class="metric-label">ℹ️ Status</span>
+                    <span class="metric-value" style="opacity: 0.6;">Waiting for prediction...</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">⏳ Info</span>
+                    <span class="metric-value" style="opacity: 0.6; font-size: 0.9em;">GRU model will predict next price movement</span>
+                </div>
+            """
+
     def _generate_empty_dashboard(self) -> str:
         """Генерирует дашборд для случая отсутствия данных."""
         return """
