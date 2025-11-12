@@ -1743,13 +1743,38 @@ class LiveTradingEngine:
         self.logger.info("[PRELOAD] COMPLETE: Historical data preload finished!")
 
     async def stop(self) -> None:
+        """Gracefully stop trading engine and cleanup resources."""
+        self.logger.info("🛑 [SHUTDOWN] Stopping trading engine...")
         self.running = False
+
+        # Stop metrics
         if self.metrics:
             try:
                 self.metrics.stop()  # type: ignore
-            except Exception:
-                pass
-        self.logger.info("Live trading engine stopped")
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
+
+        # Cancel all pending tasks
+        try:
+            tasks = [t for t in asyncio.all_tasks() if not t.done()]
+            if tasks:
+                self.logger.info(f"🛑 [SHUTDOWN] Cancelling {len(tasks)} pending tasks...")
+                for task in tasks:
+                    task.cancel()
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            self.logger.debug(f"[SHUTDOWN] Task cleanup error: {e}")
+
+        # Save dashboard history one last time
+        if self.dashboard:
+            try:
+                self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
+                self.dashboard._save_history()
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Dashboard save error: {e}")
+
+        self.logger.info("✅ [SHUTDOWN] Trading engine stopped cleanly")
 
     async def _run_trading_loop(self) -> None:
         self.logger.info(
