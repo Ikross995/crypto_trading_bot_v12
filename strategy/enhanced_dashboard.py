@@ -86,11 +86,16 @@ class EnhancedDashboardGenerator:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.dashboard_file = self.output_dir / "enhanced_dashboard.html"
-        
+        self.history_file = self.output_dir / "dashboard_history.json"
+
         # История данных для графиков
         self.data_history: List[DashboardData] = []
-        
+
+        # Загружаем историю при старте
+        self._load_history()
+
         logger.info(f"📊 [ENHANCED_DASHBOARD] Initialized: {self.dashboard_file}")
+        logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical data points")
     
     async def update_dashboard(self, trading_engine=None, adaptive_learning=None, enhanced_ai=None) -> str:
         """Обновляет дашборд с новыми данными."""
@@ -104,6 +109,9 @@ class EnhancedDashboardGenerator:
             # Ограничиваем историю последними 500 точками
             if len(self.data_history) > 500:
                 self.data_history = self.data_history[-500:]
+
+            # Сохраняем историю в JSON
+            self._save_history()
 
             # Генерируем HTML
             html_content = self._generate_enhanced_html()
@@ -786,126 +794,264 @@ class EnhancedDashboardGenerator:
     </div>
     
     <script>
-        // PnL Chart
+        // PnL Chart with gradient fill
+        var pnlValues = {[d.total_pnl for d in self.data_history[-100:]]};
+        var pnlColors = pnlValues.map(v => v >= 0 ? 'rgba(0,255,136,0.8)' : 'rgba(255,71,87,0.8)');
+
         var pnlData = [{{
             x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-            y: {[d.total_pnl for d in self.data_history[-100:]]},
+            y: pnlValues,
             type: 'scatter',
-            mode: 'lines+markers',
+            mode: 'lines',
             name: 'Cumulative PnL',
-            line: {{color: '#00ff88', width: 3}},
-            marker: {{size: 6}},
-            fill: 'tonexty',
-            fillcolor: 'rgba(0,255,136,0.1)'
+            line: {{
+                color: '#00ff88',
+                width: 3,
+                shape: 'spline',
+                smoothing: 1.3
+            }},
+            fill: 'tozeroy',
+            fillcolor: 'rgba(0,255,136,0.2)',
+            hovertemplate: '<b>Time:</b> %{{x}}<br><b>PnL:</b> $%{{y:.2f}}<extra></extra>'
+        }},
+        {{
+            x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
+            y: {[d.equity for d in self.data_history[-100:]]},
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Account Equity',
+            yaxis: 'y2',
+            line: {{
+                color: '#667eea',
+                width: 2,
+                shape: 'spline',
+                smoothing: 1.3,
+                dash: 'dot'
+            }},
+            hovertemplate: '<b>Equity:</b> $%{{y:.2f}}<extra></extra>'
         }}];
-        
+
         var pnlLayout = {{
-            title: 'Cumulative PnL Over Time',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'PnL ($)', color: '#cccccc'}},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            title: {{
+                text: '💰 PnL & Equity Evolution',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'PnL ($)',
+                color: '#00ff88',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true,
+                zeroline: true,
+                zerolinecolor: 'rgba(255,255,255,0.3)',
+                zerolinewidth: 2
+            }},
+            yaxis2: {{
+                title: 'Equity ($)',
+                color: '#667eea',
+                overlaying: 'y',
+                side: 'right'
+            }},
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
-            showlegend: false
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
+            showlegend: true,
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                x: 0.02,
+                y: 0.98
+            }},
+            hovermode: 'x unified'
         }};
+
+        Plotly.newPlot('pnl-chart', pnlData, pnlLayout, {{responsive: true, displayModeBar: false}});
         
-        Plotly.newPlot('pnl-chart', pnlData, pnlLayout, {{responsive: true}});
-        
-        // Parameters Chart
+        // Parameters Chart with area fills
         var paramData = [
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.confidence_threshold for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines+markers',
+                mode: 'lines',
                 name: 'Confidence Threshold',
-                line: {{color: '#667eea', width: 2}}
+                line: {{
+                    color: '#667eea',
+                    width: 3,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(102,126,234,0.2)',
+                hovertemplate: '<b>Confidence:</b> %{{y:.3f}}<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.position_size_multiplier for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines+markers',
+                mode: 'lines',
                 name: 'Position Multiplier',
                 yaxis: 'y2',
-                line: {{color: '#764ba2', width: 2}}
+                line: {{
+                    color: '#764ba2',
+                    width: 3,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(118,75,162,0.2)',
+                hovertemplate: '<b>Multiplier:</b> %{{y:.2f}}x<extra></extra>'
             }}
         ];
-        
+
         var paramLayout = {{
-            title: 'AI Parameter Evolution',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'Confidence Threshold', side: 'left', color: '#667eea'}},
+            title: {{
+                text: '🎛️ AI Parameter Evolution',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'Confidence Threshold',
+                side: 'left',
+                color: '#667eea',
+                gridcolor: 'rgba(255,255,255,0.05)',
+                showgrid: true
+            }},
             yaxis2: {{
                 title: 'Position Multiplier',
                 side: 'right',
                 overlaying: 'y',
                 color: '#764ba2'
             }},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
             showlegend: true,
-            legend: {{bgcolor: 'rgba(0,0,0,0.5)'}}
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                x: 0.02,
+                y: 0.98
+            }},
+            hovermode: 'x unified'
         }};
+
+        Plotly.newPlot('parameters-chart', paramData, paramLayout, {{responsive: true, displayModeBar: false}});
         
-        Plotly.newPlot('parameters-chart', paramData, paramLayout, {{responsive: true}});
-        
-        // Performance Dashboard
+        // Performance Dashboard - Win Rate & Trades Bar Chart
         var performanceData = [
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.win_rate * 100 for d in self.data_history[-100:]]},
                 type: 'scatter',
                 mode: 'lines',
-                name: 'Win Rate (%)',
-                line: {{color: '#00ff88', width: 2}}
+                name: 'Win Rate',
+                line: {{
+                    color: '#00ff88',
+                    width: 4,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(0,255,136,0.15)',
+                hovertemplate: '<b>Win Rate:</b> %{{y:.1f}}%<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-                y: {[min(d.profit_factor, 5.0) for d in self.data_history[-100:]]},  // Cap at 5 for better visualization
-                type: 'scatter',
-                mode: 'lines',
+                y: {[min(d.profit_factor, 5.0) for d in self.data_history[-100:]]},
+                type: 'bar',
                 name: 'Profit Factor',
                 yaxis: 'y2',
-                line: {{color: '#ffa502', width: 2}}
+                marker: {{
+                    color: {[f"'rgba(255,165,2,{min(d.profit_factor/5, 1)})'" for d in self.data_history[-100:]]},
+                    line: {{color: '#ffa502', width: 1}}
+                }},
+                hovertemplate: '<b>Profit Factor:</b> %{{y:.2f}}<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-                y: {[d.equity for d in self.data_history[-100:]]},
+                y: {[d.total_trades for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines',
-                name: 'Account Equity',
+                mode: 'lines+markers',
+                name: 'Total Trades',
                 yaxis: 'y3',
-                line: {{color: '#667eea', width: 2}}
+                line: {{
+                    color: '#667eea',
+                    width: 2,
+                    dash: 'dot'
+                }},
+                marker: {{
+                    size: 8,
+                    color: '#667eea',
+                    line: {{color: '#ffffff', width: 1}}
+                }},
+                hovertemplate: '<b>Trades:</b> %{{y}}<extra></extra>'
             }}
         ];
-        
+
         var performanceLayout = {{
-            title: 'Multi-Metric Performance Dashboard',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'Win Rate (%)', side: 'left', color: '#00ff88'}},
+            title: {{
+                text: '📊 Multi-Metric Performance Dashboard',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'Win Rate (%)',
+                side: 'left',
+                color: '#00ff88',
+                gridcolor: 'rgba(255,255,255,0.05)',
+                showgrid: true,
+                range: [0, 100]
+            }},
             yaxis2: {{
                 title: 'Profit Factor',
                 side: 'right',
                 overlaying: 'y',
                 color: '#ffa502',
-                position: 0.85
+                position: 0.85,
+                range: [0, 5]
             }},
             yaxis3: {{
-                title: 'Equity ($)',
+                title: 'Total Trades',
                 side: 'right',
                 overlaying: 'y',
                 color: '#667eea'
             }},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
             showlegend: true,
-            legend: {{bgcolor: 'rgba(0,0,0,0.5)'}}
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                orientation: 'h',
+                x: 0.5,
+                y: -0.15,
+                xanchor: 'center'
+            }},
+            hovermode: 'x unified',
+            barmode: 'overlay'
         }};
-        
-        Plotly.newPlot('performance-chart', performanceData, performanceLayout, {{responsive: true}});
+
+        Plotly.newPlot('performance-chart', performanceData, performanceLayout, {{responsive: true, displayModeBar: false}});
         
         // Auto-refresh every 30 seconds
         setTimeout(function() {{ location.reload(); }}, 30000);
@@ -967,6 +1113,48 @@ class EnhancedDashboardGenerator:
                     <span class="metric-value" style="opacity: 0.6; font-size: 0.9em;">GRU model will predict next price movement</span>
                 </div>
             """
+
+    def _save_history(self):
+        """Сохраняет историю дашборда в JSON файл."""
+        try:
+            # Конвертируем dataclass объекты в dict
+            history_data = []
+            for data in self.data_history[-100:]:  # Сохраняем только последние 100 точек
+                data_dict = asdict(data)
+                # Конвертируем datetime в строку
+                data_dict['timestamp'] = data.timestamp.isoformat()
+                history_data.append(data_dict)
+
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(history_data, f, indent=2)
+
+            logger.debug(f"📊 [DASHBOARD_HISTORY] Saved {len(history_data)} data points")
+        except Exception as e:
+            logger.debug(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+
+    def _load_history(self):
+        """Загружает историю дашборда из JSON файла."""
+        try:
+            if not self.history_file.exists():
+                logger.debug("📊 [DASHBOARD_HISTORY] No history file found, starting fresh")
+                return
+
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+
+            # Конвертируем dict обратно в DashboardData
+            for data_dict in history_data:
+                # Конвертируем timestamp обратно в datetime
+                data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
+
+                # Создаем DashboardData объект
+                dashboard_data = DashboardData(**data_dict)
+                self.data_history.append(dashboard_data)
+
+            logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical points")
+        except Exception as e:
+            logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to load history: {e}")
+            self.data_history = []
 
     def _generate_empty_dashboard(self) -> str:
         """Генерирует дашборд для случая отсутствия данных."""
