@@ -78,6 +78,22 @@ class DashboardData:
     ml_avg_pnl_prediction: float = 0.0
     ml_win_probability: float = 0.0
 
+    # Extended Stats
+    recent_trades: List[Dict] = None  # Last 10 trades
+    open_positions_details: List[Dict] = None  # Detailed position info
+    sharpe_ratio: float = 0.0
+    avg_hold_time: float = 0.0  # In hours
+    daily_pnl: float = 0.0
+    weekly_pnl: float = 0.0
+    monthly_pnl: float = 0.0
+
+    def __post_init__(self):
+        """Initialize list fields after creation."""
+        if self.recent_trades is None:
+            self.recent_trades = []
+        if self.open_positions_details is None:
+            self.open_positions_details = []
+
 
 class EnhancedDashboardGenerator:
     """Генератор улучшенного дашборда с богатой статистикой."""
@@ -356,16 +372,44 @@ class EnhancedDashboardGenerator:
             # Risk metrics
             data.max_drawdown = stats.max_drawdown
             data.profit_factor = getattr(stats, 'profit_factor', 1.0)
+            data.sharpe_ratio = stats.sharpe_ratio
 
             # Performance periods
-            # Эти данные можно добавить в DashboardData если нужно
-            # data.daily_pnl = stats.daily_pnl
-            # data.weekly_pnl = stats.weekly_pnl
-            # data.monthly_pnl = stats.monthly_pnl
+            data.daily_pnl = stats.daily_pnl
+            data.weekly_pnl = stats.weekly_pnl
+            data.monthly_pnl = stats.monthly_pnl
+
+            # Детали открытых позиций
+            data.open_positions_details = []
+            for pos in stats.open_positions[:10]:  # Последние 10
+                data.open_positions_details.append({
+                    'symbol': pos.symbol,
+                    'side': pos.side,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'quantity': pos.quantity,
+                    'notional': pos.notional_value,
+                    'pnl': pos.unrealized_pnl,
+                    'pnl_pct': pos.unrealized_pnl_pct,
+                    'leverage': pos.leverage
+                })
+
+            # Последние сделки (из portfolio_tracker history если есть)
+            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
+                data.recent_trades = []
+                for trade in list(portfolio_tracker.trade_history)[-10:]:  # Последние 10
+                    data.recent_trades.append({
+                        'symbol': getattr(trade, 'symbol', 'N/A'),
+                        'side': getattr(trade, 'side', 'N/A'),
+                        'pnl': getattr(trade, 'pnl', 0.0),
+                        'pnl_pct': getattr(trade, 'pnl_pct', 0.0),
+                        'timestamp': getattr(trade, 'timestamp', datetime.now()).strftime('%H:%M:%S')
+                    })
 
             logger.debug(f"[DASHBOARD_PORTFOLIO] Loaded: {data.total_trades} trades, "
                         f"{data.winning_trades}W/{data.losing_trades}L, "
-                        f"Win Rate: {data.win_rate*100:.1f}%")
+                        f"Win Rate: {data.win_rate*100:.1f}%, "
+                        f"Positions: {len(data.open_positions_details)}")
 
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting portfolio tracker data: {e}")
@@ -604,13 +648,80 @@ class EnhancedDashboardGenerator:
             padding: 10px;
         }}
         
-        .trade-item {{ 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 8px 12px; 
-            margin-bottom: 5px; 
-            background: rgba(255,255,255,0.05); 
+        .trade-item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            background: rgba(255,255,255,0.05);
             border-radius: 6px;
+        }}
+
+        /* Table Styles */
+        .table-container {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }}
+
+        .table-container h3 {{
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+        }}
+
+        .data-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }}
+
+        .data-table thead {{
+            background: rgba(102,126,234,0.2);
+        }}
+
+        .data-table th {{
+            padding: 12px 15px;
+            text-align: left;
+            color: #fff;
+            font-weight: 600;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }}
+
+        .data-table td {{
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #ccc;
+        }}
+
+        .data-table tbody tr {{
+            transition: background 0.2s ease;
+        }}
+
+        .data-table tbody tr:hover {{
+            background: rgba(255,255,255,0.05);
+        }}
+
+        .badge {{
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }}
+
+        .badge-long {{
+            background: rgba(0,255,136,0.2);
+            color: #00ff88;
+            border: 1px solid #00ff88;
+        }}
+
+        .badge-short {{
+            background: rgba(255,71,87,0.2);
+            color: #ff4757;
+            border: 1px solid #ff4757;
         }}
     </style>
 </head>
@@ -769,6 +880,74 @@ class EnhancedDashboardGenerator:
                 </div>
             </div>
         </div>
+
+        <!-- 📊 Extended Trading Stats -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>🏆 Best Trade</h3>
+                <div class="metric">
+                    <span class="metric-label">💰 Profit</span>
+                    <span class="metric-value positive">${latest.best_trade:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📉 Worst Trade</h3>
+                <div class="metric">
+                    <span class="metric-label">💸 Loss</span>
+                    <span class="metric-value negative">${latest.worst_trade:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>⚖️ Sharpe Ratio</h3>
+                <div class="metric">
+                    <span class="metric-label">📊 Risk-Adjusted Return</span>
+                    <span class="metric-value {'positive' if latest.sharpe_ratio > 1 else 'negative'}">{latest.sharpe_ratio:.2f}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📈 Performance by Period -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>📅 Daily Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Today's P&L</span>
+                    <span class="metric-value {'positive' if latest.daily_pnl >= 0 else 'negative'}">${latest.daily_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Daily %</span>
+                    <span class="metric-value {'positive' if latest.daily_pnl >= 0 else 'negative'}">{(latest.daily_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📅 Weekly Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Week P&L</span>
+                    <span class="metric-value {'positive' if latest.weekly_pnl >= 0 else 'negative'}">${latest.weekly_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Weekly %</span>
+                    <span class="metric-value {'positive' if latest.weekly_pnl >= 0 else 'negative'}">{(latest.weekly_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📅 Monthly Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Month P&L</span>
+                    <span class="metric-value {'positive' if latest.monthly_pnl >= 0 else 'negative'}">${latest.monthly_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Monthly %</span>
+                    <span class="metric-value {'positive' if latest.monthly_pnl >= 0 else 'negative'}">{(latest.monthly_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📊 Open Positions Table -->
+        {self._generate_positions_table(latest)}
+
+        <!-- 📊 Recent Trades Table -->
+        {self._generate_trades_table(latest)}
 
         <div class="chart-grid">
             <div class="chart-container">
@@ -1113,6 +1292,104 @@ class EnhancedDashboardGenerator:
                     <span class="metric-value" style="opacity: 0.6; font-size: 0.9em;">GRU model will predict next price movement</span>
                 </div>
             """
+
+    def _generate_positions_table(self, data: DashboardData) -> str:
+        """Generate table of open positions."""
+        if not data.open_positions_details or len(data.open_positions_details) == 0:
+            return """
+                <div class="table-container">
+                    <h3>📊 Open Positions</h3>
+                    <p style="text-align: center; opacity: 0.6; padding: 20px;">No open positions</p>
+                </div>
+            """
+
+        rows = ""
+        for pos in data.open_positions_details:
+            side_badge = f'<span class="badge badge-long">🟢 LONG</span>' if pos['side'] == 'LONG' else f'<span class="badge badge-short">🔴 SHORT</span>'
+            pnl_class = 'positive' if pos['pnl'] >= 0 else 'negative'
+
+            rows += f"""
+                <tr>
+                    <td><strong>{pos['symbol']}</strong></td>
+                    <td>{side_badge}</td>
+                    <td>{pos['leverage']}x</td>
+                    <td>${pos['entry_price']:,.4f}</td>
+                    <td>${pos['current_price']:,.4f}</td>
+                    <td>{pos['quantity']:.4f}</td>
+                    <td>${pos['notional']:,.2f}</td>
+                    <td class="{pnl_class}"><strong>${pos['pnl']:+,.2f}</strong></td>
+                    <td class="{pnl_class}"><strong>{pos['pnl_pct']:+.2f}%</strong></td>
+                </tr>
+            """
+
+        return f"""
+            <div class="table-container">
+                <h3>📊 Open Positions ({len(data.open_positions_details)})</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Leverage</th>
+                            <th>Entry Price</th>
+                            <th>Current Price</th>
+                            <th>Quantity</th>
+                            <th>Notional</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
+            </div>
+        """
+
+    def _generate_trades_table(self, data: DashboardData) -> str:
+        """Generate table of recent trades."""
+        if not data.recent_trades or len(data.recent_trades) == 0:
+            return """
+                <div class="table-container">
+                    <h3>📈 Recent Trades</h3>
+                    <p style="text-align: center; opacity: 0.6; padding: 20px;">No recent trades</p>
+                </div>
+            """
+
+        rows = ""
+        for trade in reversed(data.recent_trades):  # Latest first
+            side_badge = f'<span class="badge badge-long">BUY</span>' if trade['side'] == 'BUY' or trade['side'] == 'LONG' else f'<span class="badge badge-short">SELL</span>'
+            pnl_class = 'positive' if trade['pnl'] >= 0 else 'negative'
+
+            rows += f"""
+                <tr>
+                    <td>{trade['timestamp']}</td>
+                    <td><strong>{trade['symbol']}</strong></td>
+                    <td>{side_badge}</td>
+                    <td class="{pnl_class}"><strong>${trade['pnl']:+,.2f}</strong></td>
+                    <td class="{pnl_class}"><strong>{trade['pnl_pct']:+.2f}%</strong></td>
+                </tr>
+            """
+
+        return f"""
+            <div class="table-container">
+                <h3>📈 Recent Trades (Last {len(data.recent_trades)})</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
+            </div>
+        """
 
     def _save_history(self):
         """Сохраняет историю дашборда в JSON файл."""
