@@ -21,7 +21,7 @@ from core.utils import format_currency
 from data.fetchers import HistoricalDataFetcher
 from data.indicators import TechnicalIndicators
 from data.preprocessing import FeatureEngineer
-from infra.logging import setup_structured_logging
+from infra.log_config import setup_structured_logging
 from strategy.dca import DCAManager
 from strategy.risk import RiskManager
 from strategy.signals import SignalGenerator
