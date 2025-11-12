@@ -164,6 +164,10 @@ class EnhancedDashboardGenerator:
         if trading_engine:
             data = await self._get_trading_engine_data(trading_engine, data)
 
+        # Используем Portfolio Tracker если доступен (приоритет!)
+        if trading_engine and hasattr(trading_engine, 'portfolio_tracker') and trading_engine.portfolio_tracker:
+            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data)
+
         # Данные системы обучения
         if adaptive_learning:
             data = await self._get_learning_data(adaptive_learning, data)
@@ -305,6 +309,60 @@ class EnhancedDashboardGenerator:
             
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting learning data: {e}")
+
+        return data
+
+    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData) -> DashboardData:
+        """Получает данные от Portfolio Tracker (приоритет над другими источниками!)."""
+        try:
+            # Получаем полную статистику портфеля
+            stats = portfolio_tracker.get_portfolio_stats()
+
+            # Баланс и капитал
+            data.account_balance = stats.total_balance
+            data.available_balance = stats.available_balance
+            data.margin_used = stats.margin_balance
+            data.unrealized_pnl = stats.total_unrealized_pnl
+            data.equity = stats.total_balance + stats.total_unrealized_pnl
+            data.margin_ratio = (stats.margin_balance / stats.total_balance * 100) if stats.total_balance > 0 else 0.0
+
+            # Позиции
+            data.open_positions = len(stats.open_positions)
+            if stats.open_positions:
+                position_values = [pos.notional_value for pos in stats.open_positions]
+                data.total_position_value = sum(position_values)
+                data.largest_position = max(position_values) if position_values else 0.0
+
+            # Trading Performance (ГЛАВНОЕ!)
+            data.total_trades = stats.total_trades
+            data.winning_trades = stats.winning_trades
+            data.losing_trades = stats.losing_trades
+            data.win_rate = stats.win_rate
+
+            # PnL статистика
+            data.total_pnl = stats.daily_pnl  # Или можно взять cumulative
+            data.best_trade = getattr(stats, 'best_trade', 0.0)
+            data.worst_trade = getattr(stats, 'worst_trade', 0.0)
+            data.avg_trade = getattr(stats, 'avg_trade', 0.0)
+
+            # Risk metrics
+            data.max_drawdown = stats.max_drawdown
+            data.profit_factor = getattr(stats, 'profit_factor', 1.0)
+
+            # Performance periods
+            # Эти данные можно добавить в DashboardData если нужно
+            # data.daily_pnl = stats.daily_pnl
+            # data.weekly_pnl = stats.weekly_pnl
+            # data.monthly_pnl = stats.monthly_pnl
+
+            logger.debug(f"[DASHBOARD_PORTFOLIO] Loaded: {data.total_trades} trades, "
+                        f"{data.winning_trades}W/{data.losing_trades}L, "
+                        f"Win Rate: {data.win_rate*100:.1f}%")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting portfolio tracker data: {e}")
+            import traceback
+            logger.debug(f"[DASHBOARD] Traceback: {traceback.format_exc()}")
 
         return data
 
