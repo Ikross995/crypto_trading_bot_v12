@@ -75,6 +75,12 @@ try:
 except Exception:  # pragma: no cover
     EnhancedDashboardGenerator = None  # type: ignore
 
+# Telegram Bot Integration
+try:
+    from infra.telegram_bot import TelegramDashboardBot  # type: ignore
+except Exception:  # pragma: no cover
+    TelegramDashboardBot = None  # type: ignore
+
 # DCA and LSTM integration
 try:
     from strategy.dca import DCAManager  # type: ignore
@@ -347,18 +353,30 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
 
-        # Telegram Notifications
+        # Telegram Notifications - NEW: TelegramDashboardBot with trade alerts
         self.telegram = None
+        self.telegram_bot = None
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
-            if tg_token and tg_chat_id:
-                from infra.telegram import init_notifier
 
-                self.telegram = init_notifier(tg_token, tg_chat_id)
-                self.logger.info("[TELEGRAM] Notifier initialized")
+            if tg_token and tg_chat_id and TelegramDashboardBot:
+                self.telegram_bot = TelegramDashboardBot(
+                    bot_token=tg_token,
+                    chat_id=tg_chat_id,
+                    config=config
+                )
+                self.logger.info("📱 [TELEGRAM] TelegramDashboardBot initialized (trade notifications enabled)")
+            elif tg_token and tg_chat_id:
+                # Fallback to old notifier if TelegramDashboardBot not available
+                try:
+                    from infra.telegram import init_notifier
+                    self.telegram = init_notifier(tg_token, tg_chat_id)
+                    self.logger.info("[TELEGRAM] Legacy notifier initialized")
+                except:
+                    pass
             else:
-                self.logger.info("[TELEGRAM] Not configured - notifications disabled")
+                self.logger.info("[TELEGRAM] Not configured (set TG_BOT_TOKEN and TG_CHAT_ID in .env)")
         except Exception as e:
             self.logger.warning("[TELEGRAM] Failed to initialize: %s", e)
 
@@ -2802,6 +2820,35 @@ class LiveTradingEngine:
                             regime=regime,
                             market_data=market_data
                         )
+
+                        # 📱 NEW: Send Telegram trade notification
+                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                            try:
+                                # Calculate TP/SL levels for notification
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Prepare trade info
+                                trade_info = {
+                                    "symbol": symbol,
+                                    "side": order_side,
+                                    "entry_price": avg_fill_price,
+                                    "quantity": executed_qty,
+                                    "leverage": self.leverage,
+                                    "margin_used": (executed_qty * avg_fill_price) / self.leverage,
+                                    "notional": executed_qty * avg_fill_price,
+                                    "tp_levels": tp_prices if tp_prices else [],
+                                    "sl_price": sl_price if sl_price else 0.0,
+                                    "signal_strength": strength,
+                                    "regime": regime if regime else "unknown",
+                                }
+
+                                # Send notification asynchronously
+                                asyncio.create_task(self.telegram_bot.send_trade_opened(trade_info))
+                                self.logger.info("📱 [TELEGRAM] Trade open notification sent for %s", symbol)
+                            except Exception as tg_e:
+                                self.logger.warning("📱 [TELEGRAM] Failed to send trade notification: %s", tg_e)
 
                         # Register TP/SL orders with Exit Tracker if available
                         if (
