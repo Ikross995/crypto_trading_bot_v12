@@ -102,6 +102,16 @@ class DashboardData:
     free_margin: float = 0.0
     largest_position_margin: float = 0.0
 
+    # Performance Metrics
+    roi_pct: float = 0.0  # Return on Investment %
+    initial_balance: float = 1000.0  # Starting balance
+    win_streak: int = 0  # Current winning streak
+    loss_streak: int = 0  # Current losing streak
+    max_win_streak: int = 0  # Best winning streak
+    max_loss_streak: int = 0  # Worst losing streak
+    hourly_pnl: float = 0.0  # P&L per hour
+    risk_score: float = 0.0  # Risk score 0-100 (lower is better)
+
     def __post_init__(self):
         """Initialize list fields after creation."""
         if self.recent_trades is None:
@@ -428,6 +438,61 @@ class EnhancedDashboardGenerator:
                 else:
                     data.margin_usage_pct = 0.0
                     data.free_margin = 0.0
+
+            # Performance Metrics
+            # ROI % = (Current Balance - Initial Balance) / Initial Balance * 100
+            if data.account_balance > 0:
+                data.roi_pct = ((data.account_balance - data.initial_balance) / data.initial_balance) * 100
+
+            # Win/Loss Streaks
+            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
+                trades = list(portfolio_tracker.trade_history)
+                if trades:
+                    # Calculate current streak
+                    current_streak = 0
+                    for trade in reversed(trades):
+                        pnl = getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            if data.win_streak >= 0:
+                                data.win_streak += 1
+                                data.loss_streak = 0
+                            else:
+                                break
+                        elif pnl < 0:
+                            if data.loss_streak >= 0:
+                                data.loss_streak += 1
+                                data.win_streak = 0
+                            else:
+                                break
+                        else:
+                            break
+
+                    # Calculate max streaks
+                    win_streak = 0
+                    loss_streak = 0
+                    for trade in trades:
+                        pnl = getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            win_streak += 1
+                            loss_streak = 0
+                            data.max_win_streak = max(data.max_win_streak, win_streak)
+                        elif pnl < 0:
+                            loss_streak += 1
+                            win_streak = 0
+                            data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+
+            # Hourly PnL (based on uptime)
+            if data.uptime_hours > 0:
+                data.hourly_pnl = data.total_pnl / data.uptime_hours
+
+            # Risk Score (0-100, lower is better)
+            # Factors: margin usage, open positions, max drawdown, volatility
+            risk_score = 0
+            risk_score += min(data.margin_usage_pct, 50)  # Max 50 points from margin
+            risk_score += min(data.open_positions * 5, 20)  # Max 20 points from positions
+            risk_score += min(abs(data.max_drawdown) / 10, 20)  # Max 20 points from drawdown
+            risk_score += min(data.market_volatility * 100, 10)  # Max 10 points from volatility
+            data.risk_score = min(risk_score, 100)
 
             # Последние сделки (из portfolio_tracker history если есть)
             if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
@@ -866,6 +931,56 @@ class EnhancedDashboardGenerator:
         </div>
 
         <!-- 📊 Extended Trading Stats -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>💎 ROI Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">📈 Return on Investment</span>
+                    <span class="metric-value {'positive' if latest.roi_pct >= 0 else 'negative'}" style="font-size: 1.8em;">{latest.roi_pct:+.2f}%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💵 Initial → Current</span>
+                    <span class="metric-value">${latest.initial_balance:,.2f} → ${latest.account_balance:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">⚡ Hourly P&L</span>
+                    <span class="metric-value {'positive' if latest.hourly_pnl >= 0 else 'negative'}">${latest.hourly_pnl:+,.2f}/hr</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🔥 Win/Loss Streaks</h3>
+                <div class="metric">
+                    <span class="metric-label">{'🟢 Current Win Streak' if latest.win_streak > 0 else '🔴 Current Loss Streak' if latest.loss_streak > 0 else '⚪ No Active Streak'}</span>
+                    <span class="metric-value {'positive' if latest.win_streak > 0 else 'negative' if latest.loss_streak > 0 else ''}" style="font-size: 2em;">{max(latest.win_streak, latest.loss_streak)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">🏆 Best Win Streak</span>
+                    <span class="metric-value">{latest.max_win_streak}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💔 Worst Loss Streak</span>
+                    <span class="metric-value">{latest.max_loss_streak}</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>⚠️ Risk Score</h3>
+                <div class="metric">
+                    <span class="metric-label">🎯 Overall Risk</span>
+                    <span class="metric-value {'positive' if latest.risk_score < 30 else 'negative' if latest.risk_score > 70 else ''}" style="font-size: 2em;">{latest.risk_score:.0f}/100</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Status</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
+                        <div style="background: {'linear-gradient(90deg, #00ff88 0%, #00d9ff 100%)' if latest.risk_score < 30 else 'linear-gradient(90deg, #ffa502 0%, #ff4757 100%)' if latest.risk_score > 70 else 'linear-gradient(90deg, #ffa502 0%, #00ff88 100%)'}; height: 100%; width: {latest.risk_score:.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value {'positive' if latest.risk_score < 30 else 'negative' if latest.risk_score > 70 else ''}">{'🟢 LOW RISK' if latest.risk_score < 30 else '🔴 HIGH RISK' if latest.risk_score > 70 else '🟡 MEDIUM RISK'}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📈 Trade Stats -->
         <div class="main-grid">
             <div class="card">
                 <h3>🏆 Best Trade</h3>
