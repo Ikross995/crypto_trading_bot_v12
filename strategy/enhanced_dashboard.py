@@ -4,11 +4,20 @@ Enhanced Trading Dashboard - Improved Real-time Analytics
 Создает мощный интерактивный дашборд с расширенной статистикой
 """
 
+# Отключаем TensorFlow warnings
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # FATAL
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Отключаем oneDNN
+
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 import asyncio
 import json
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -92,6 +101,16 @@ class DashboardData:
     margin_usage_pct: float = 0.0
     free_margin: float = 0.0
     largest_position_margin: float = 0.0
+
+    # Performance Metrics
+    roi_pct: float = 0.0  # Return on Investment %
+    initial_balance: float = 1000.0  # Starting balance
+    win_streak: int = 0  # Current winning streak
+    loss_streak: int = 0  # Current losing streak
+    max_win_streak: int = 0  # Best winning streak
+    max_loss_streak: int = 0  # Worst losing streak
+    hourly_pnl: float = 0.0  # P&L per hour
+    risk_score: float = 0.0  # Risk score 0-100 (lower is better)
 
     def __post_init__(self):
         """Initialize list fields after creation."""
@@ -419,6 +438,61 @@ class EnhancedDashboardGenerator:
                 else:
                     data.margin_usage_pct = 0.0
                     data.free_margin = 0.0
+
+            # Performance Metrics
+            # ROI % = (Current Balance - Initial Balance) / Initial Balance * 100
+            if data.account_balance > 0:
+                data.roi_pct = ((data.account_balance - data.initial_balance) / data.initial_balance) * 100
+
+            # Win/Loss Streaks
+            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
+                trades = list(portfolio_tracker.trade_history)
+                if trades:
+                    # Calculate current streak
+                    current_streak = 0
+                    for trade in reversed(trades):
+                        pnl = getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            if data.win_streak >= 0:
+                                data.win_streak += 1
+                                data.loss_streak = 0
+                            else:
+                                break
+                        elif pnl < 0:
+                            if data.loss_streak >= 0:
+                                data.loss_streak += 1
+                                data.win_streak = 0
+                            else:
+                                break
+                        else:
+                            break
+
+                    # Calculate max streaks
+                    win_streak = 0
+                    loss_streak = 0
+                    for trade in trades:
+                        pnl = getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            win_streak += 1
+                            loss_streak = 0
+                            data.max_win_streak = max(data.max_win_streak, win_streak)
+                        elif pnl < 0:
+                            loss_streak += 1
+                            win_streak = 0
+                            data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+
+            # Hourly PnL (based on uptime)
+            if data.uptime_hours > 0:
+                data.hourly_pnl = data.total_pnl / data.uptime_hours
+
+            # Risk Score (0-100, lower is better)
+            # Factors: margin usage, open positions, max drawdown, volatility
+            risk_score = 0
+            risk_score += min(data.margin_usage_pct, 50)  # Max 50 points from margin
+            risk_score += min(data.open_positions * 5, 20)  # Max 20 points from positions
+            risk_score += min(abs(data.max_drawdown) / 10, 20)  # Max 20 points from drawdown
+            risk_score += min(data.market_volatility * 100, 10)  # Max 10 points from volatility
+            data.risk_score = min(risk_score, 100)
 
             # Последние сделки (из portfolio_tracker history если есть)
             if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
@@ -857,6 +931,56 @@ class EnhancedDashboardGenerator:
         </div>
 
         <!-- 📊 Extended Trading Stats -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>💎 ROI Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">📈 Return on Investment</span>
+                    <span class="metric-value {'positive' if latest.roi_pct >= 0 else 'negative'}" style="font-size: 1.8em;">{latest.roi_pct:+.2f}%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💵 Initial → Current</span>
+                    <span class="metric-value">${latest.initial_balance:,.2f} → ${latest.account_balance:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">⚡ Hourly P&L</span>
+                    <span class="metric-value {'positive' if latest.hourly_pnl >= 0 else 'negative'}">${latest.hourly_pnl:+,.2f}/hr</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🔥 Win/Loss Streaks</h3>
+                <div class="metric">
+                    <span class="metric-label">{'🟢 Current Win Streak' if latest.win_streak > 0 else '🔴 Current Loss Streak' if latest.loss_streak > 0 else '⚪ No Active Streak'}</span>
+                    <span class="metric-value {'positive' if latest.win_streak > 0 else 'negative' if latest.loss_streak > 0 else ''}" style="font-size: 2em;">{max(latest.win_streak, latest.loss_streak)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">🏆 Best Win Streak</span>
+                    <span class="metric-value">{latest.max_win_streak}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">💔 Worst Loss Streak</span>
+                    <span class="metric-value">{latest.max_loss_streak}</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>⚠️ Risk Score</h3>
+                <div class="metric">
+                    <span class="metric-label">🎯 Overall Risk</span>
+                    <span class="metric-value {'positive' if latest.risk_score < 30 else 'negative' if latest.risk_score > 70 else ''}" style="font-size: 2em;">{latest.risk_score:.0f}/100</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Status</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
+                        <div style="background: {'linear-gradient(90deg, #00ff88 0%, #00d9ff 100%)' if latest.risk_score < 30 else 'linear-gradient(90deg, #ffa502 0%, #ff4757 100%)' if latest.risk_score > 70 else 'linear-gradient(90deg, #ffa502 0%, #00ff88 100%)'}; height: 100%; width: {latest.risk_score:.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value {'positive' if latest.risk_score < 30 else 'negative' if latest.risk_score > 70 else ''}">{'🟢 LOW RISK' if latest.risk_score < 30 else '🔴 HIGH RISK' if latest.risk_score > 70 else '🟡 MEDIUM RISK'}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📈 Trade Stats -->
         <div class="main-grid">
             <div class="card">
                 <h3>🏆 Best Trade</h3>
@@ -1358,20 +1482,39 @@ class EnhancedDashboardGenerator:
     def _save_history(self):
         """Сохраняет историю дашборда в JSON файл."""
         try:
+            if not self.data_history:
+                logger.debug("📊 [DASHBOARD_HISTORY] No data to save yet")
+                return
+
             # Конвертируем dataclass объекты в dict
             history_data = []
             for data in self.data_history[-100:]:  # Сохраняем только последние 100 точек
-                data_dict = asdict(data)
-                # Конвертируем datetime в строку
-                data_dict['timestamp'] = data.timestamp.isoformat()
-                history_data.append(data_dict)
+                try:
+                    data_dict = asdict(data)
+                    # Конвертируем datetime в строку
+                    if isinstance(data.timestamp, datetime):
+                        data_dict['timestamp'] = data.timestamp.isoformat()
+                    history_data.append(data_dict)
+                except Exception as e:
+                    logger.debug(f"⚠️ [DASHBOARD_HISTORY] Failed to serialize data point: {e}")
+                    continue
 
+            if not history_data:
+                logger.warning("❌ [DASHBOARD_HISTORY] No valid data points to save")
+                return
+
+            # Создаем директорию если не существует
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Сохраняем с pretty print
             with open(self.history_file, 'w', encoding='utf-8') as f:
-                json.dump(history_data, f, indent=2)
+                json.dump(history_data, f, indent=2, ensure_ascii=False)
 
-            logger.debug(f"📊 [DASHBOARD_HISTORY] Saved {len(history_data)} data points")
+            logger.info(f"💾 [DASHBOARD_HISTORY] Saved {len(history_data)} data points to {self.history_file}")
         except Exception as e:
-            logger.debug(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+            logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
 
     def _load_history(self):
         """Загружает историю дашборда из JSON файла."""
@@ -1383,18 +1526,33 @@ class EnhancedDashboardGenerator:
             with open(self.history_file, 'r', encoding='utf-8') as f:
                 history_data = json.load(f)
 
+            # Получаем список всех полей DashboardData
+            valid_fields = {f.name for f in fields(DashboardData)}
+
             # Конвертируем dict обратно в DashboardData
+            loaded_count = 0
             for data_dict in history_data:
-                # Конвертируем timestamp обратно в datetime
-                data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
+                try:
+                    # Конвертируем timestamp обратно в datetime
+                    if 'timestamp' in data_dict:
+                        data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
 
-                # Создаем DashboardData объект
-                dashboard_data = DashboardData(**data_dict)
-                self.data_history.append(dashboard_data)
+                    # Фильтруем только известные поля (игнорируем устаревшие)
+                    filtered_dict = {k: v for k, v in data_dict.items() if k in valid_fields}
 
-            logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical points")
+                    # Создаем DashboardData объект
+                    dashboard_data = DashboardData(**filtered_dict)
+                    self.data_history.append(dashboard_data)
+                    loaded_count += 1
+                except Exception as e:
+                    logger.debug(f"⚠️ [DASHBOARD_HISTORY] Skipped invalid data point: {e}")
+                    continue
+
+            logger.info(f"📊 [DASHBOARD_HISTORY] Successfully loaded {loaded_count}/{len(history_data)} historical points")
         except Exception as e:
             logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to load history: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             self.data_history = []
 
     def _generate_empty_dashboard(self) -> str:

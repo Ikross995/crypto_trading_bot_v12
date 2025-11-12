@@ -19,7 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Callable
 
 try:
     # Optional structured logging init (present in the user's project)
-    from infra.logging import setup_structured_logging  # type: ignore
+    from infra.log_config import setup_structured_logging  # type: ignore
 except Exception:  # pragma: no cover
 
     def setup_structured_logging() -> None:
