@@ -151,6 +151,8 @@ class Config(BaseModel):
     tg_chat_id: str = Field(default="")
     tg_dashboard_enabled: bool = Field(default=False)  # Enable Telegram dashboard updates
     tg_dashboard_interval: int = Field(default=300, ge=60, le=3600)  # Update interval in seconds (5 min default)
+    tg_trade_notifications: bool = Field(default=True)  # Send notifications on trade open/close
+    tg_position_updates: bool = Field(default=False)  # Send position updates (can be spammy)
 
     # File Paths
     kl_persist: str = Field(default="data/klines.csv")

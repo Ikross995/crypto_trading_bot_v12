@@ -204,6 +204,189 @@ Margin: ${pos['margin_used']:,.2f}
 
         return message
 
+    async def send_trade_opened(self, trade_info: Dict[str, Any]) -> bool:
+        """
+        Отправить уведомление об открытии новой позиции.
+
+        Args:
+            trade_info: {
+                'symbol': str,
+                'side': str (LONG/SHORT),
+                'entry_price': float,
+                'quantity': float,
+                'leverage': float,
+                'notional': float,
+                'margin_used': float,
+                'stop_loss': float (optional),
+                'take_profit': float (optional),
+                'reason': str (optional)
+            }
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            message = self._format_trade_opened_message(trade_info)
+            return await self.send_message(message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending trade opened notification: {e}")
+            return False
+
+    async def send_trade_closed(self, trade_info: Dict[str, Any]) -> bool:
+        """
+        Отправить уведомление о закрытии позиции.
+
+        Args:
+            trade_info: {
+                'symbol': str,
+                'side': str (LONG/SHORT),
+                'entry_price': float,
+                'exit_price': float,
+                'quantity': float,
+                'pnl': float,
+                'pnl_pct': float,
+                'duration': str (optional),
+                'reason': str (optional)
+            }
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            message = self._format_trade_closed_message(trade_info)
+            return await self.send_message(message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending trade closed notification: {e}")
+            return False
+
+    async def send_position_update(self, position_info: Dict[str, Any]) -> bool:
+        """
+        Отправить обновление по открытой позиции.
+
+        Args:
+            position_info: {
+                'symbol': str,
+                'side': str,
+                'entry_price': float,
+                'current_price': float,
+                'pnl': float,
+                'pnl_pct': float,
+                'margin_used': float,
+                'leverage': float
+            }
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            message = self._format_position_update_message(position_info)
+            return await self.send_message(message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending position update: {e}")
+            return False
+
+    def _format_trade_opened_message(self, trade: Dict[str, Any]) -> str:
+        """Форматирует сообщение об открытии позиции."""
+        side_emoji = "🟢" if trade['side'] == 'LONG' else "🔴"
+
+        message = f"""
+<b>🎯 NEW TRADE OPENED</b>
+
+<b>{side_emoji} {trade['side']} {trade['symbol']}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>📊 ENTRY DETAILS</b>
+━━━━━━━━━━━━━━━━━━━━
+
+Entry Price: <b>${trade['entry_price']:,.4f}</b>
+Quantity: <b>{trade['quantity']:.4f}</b>
+Leverage: <b>{trade.get('leverage', 1):.0f}x</b>
+
+Notional: <b>${trade.get('notional', 0):,.2f}</b>
+Margin Used: <b>${trade.get('margin_used', 0):,.2f}</b>
+"""
+
+        # Stop Loss / Take Profit
+        if trade.get('stop_loss'):
+            sl_dist = abs((trade['stop_loss'] - trade['entry_price']) / trade['entry_price'] * 100)
+            message += f"\n🛡️ Stop Loss: <b>${trade['stop_loss']:,.4f}</b> ({sl_dist:.2f}%)"
+
+        if trade.get('take_profit'):
+            tp_dist = abs((trade['take_profit'] - trade['entry_price']) / trade['entry_price'] * 100)
+            message += f"\n💎 Take Profit: <b>${trade['take_profit']:,.4f}</b> ({tp_dist:.2f}%)"
+
+        # Reason
+        if trade.get('reason'):
+            message += f"\n\n📝 Reason: <i>{trade['reason']}</i>"
+
+        message += "\n\n━━━━━━━━━━━━━━━━━━━━"
+
+        return message
+
+    def _format_trade_closed_message(self, trade: Dict[str, Any]) -> str:
+        """Форматирует сообщение о закрытии позиции."""
+        side_emoji = "🟢" if trade['side'] == 'LONG' else "🔴"
+        pnl_emoji = "💰" if trade['pnl'] >= 0 else "📉"
+        result_emoji = "✅" if trade['pnl'] >= 0 else "❌"
+
+        message = f"""
+<b>{result_emoji} TRADE CLOSED</b>
+
+<b>{side_emoji} {trade['side']} {trade['symbol']}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>📊 TRADE SUMMARY</b>
+━━━━━━━━━━━━━━━━━━━━
+
+Entry: <b>${trade['entry_price']:,.4f}</b>
+Exit: <b>${trade['exit_price']:,.4f}</b>
+Quantity: <b>{trade['quantity']:.4f}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>{pnl_emoji} RESULT</b>
+━━━━━━━━━━━━━━━━━━━━
+
+P&L: <b>${trade['pnl']:+,.2f}</b>
+P&L %: <b>{trade['pnl_pct']:+.2f}%</b>
+"""
+
+        # Duration
+        if trade.get('duration'):
+            message += f"\n⏱️ Duration: <b>{trade['duration']}</b>"
+
+        # Exit reason
+        if trade.get('reason'):
+            message += f"\n📝 Reason: <i>{trade['reason']}</i>"
+
+        message += "\n\n━━━━━━━━━━━━━━━━━━━━"
+
+        return message
+
+    def _format_position_update_message(self, pos: Dict[str, Any]) -> str:
+        """Форматирует сообщение об обновлении позиции."""
+        side_emoji = "🟢" if pos['side'] == 'LONG' else "🔴"
+        pnl_emoji = "💚" if pos['pnl'] >= 0 else "💔"
+
+        price_change = pos['current_price'] - pos['entry_price']
+        price_change_pct = (price_change / pos['entry_price']) * 100
+
+        message = f"""
+<b>📊 POSITION UPDATE</b>
+
+<b>{side_emoji} {pos['side']} {pos['symbol']}</b>
+
+Entry: <b>${pos['entry_price']:,.4f}</b>
+Current: <b>${pos['current_price']:,.4f}</b>
+Change: <b>{price_change:+,.4f}</b> ({price_change_pct:+.2f}%)
+
+Leverage: <b>{pos.get('leverage', 1):.0f}x</b>
+Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
+
+{pnl_emoji} <b>P&L: ${pos['pnl']:+,.2f} ({pos['pnl_pct']:+.2f}%)</b>
+"""
+
+        return message
+
     async def test_connection(self) -> bool:
         """
         Тест соединения с Telegram.
