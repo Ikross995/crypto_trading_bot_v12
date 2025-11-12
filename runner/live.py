@@ -2005,8 +2005,8 @@ class LiveTradingEngine:
                                                     "leverage": self.leverage,
                                                 }
 
-                                                # Send notification asynchronously
-                                                asyncio.create_task(self.telegram_bot.send_trade_closed(trade_close_info))
+                                                # Send notification (await directly to avoid recursion on shutdown)
+                                                await self.telegram_bot.send_trade_closed(trade_close_info)
                                                 self.logger.info("📱 [TELEGRAM] RL close notification sent (P&L: $%.2f)", pnl_usdt)
                                             except Exception as tg_e:
                                                 self.logger.warning("📱 [TELEGRAM] Failed to send RL close notification: %s", tg_e)
@@ -2602,6 +2602,7 @@ class LiveTradingEngine:
                 "DOGEUSDT": 1.0,  # Whole numbers only
                 "MATICUSDT": 1.0,  # Whole numbers only
                 "LINKUSDT": 0.1,
+                "APTUSDT": 0.1,  # APT step size is 0.1
             }
 
             min_qty = min_qty_map.get(symbol, 0.001)  # Default to 0.001
@@ -2626,6 +2627,7 @@ class LiveTradingEngine:
                 "AVAXUSDT": 0,  # FIXED: AVAX needs 0 decimals like ADA/DOGE
                 "LINKUSDT": 1,
                 "MATICUSDT": 0,
+                "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
             }
             decimal_places = precision_map.get(symbol, 3)
             qty_format = f"{{:.{decimal_places}f}}"
@@ -2898,8 +2900,8 @@ class LiveTradingEngine:
                                     "regime": regime if regime else "unknown",
                                 }
 
-                                # Send notification asynchronously
-                                asyncio.create_task(self.telegram_bot.send_trade_opened(trade_info))
+                                # Send notification (await directly to avoid recursion on shutdown)
+                                await self.telegram_bot.send_trade_opened(trade_info)
                                 self.logger.info("📱 [TELEGRAM] Trade open notification sent for %s", symbol)
                             except Exception as tg_e:
                                 self.logger.warning("📱 [TELEGRAM] Failed to send trade notification: %s", tg_e)
@@ -4193,6 +4195,7 @@ class LiveTradingEngine:
             "AVAXUSDT": 0,  # FIXED: AVAX needs whole numbers like ADA/DOGE
             "LINKUSDT": 1,
             "MATICUSDT": 0,
+            "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
         }
 
         # Get precision for this symbol, default to 3
@@ -4480,8 +4483,8 @@ class LiveTradingEngine:
                             "leverage": self.leverage,
                         }
 
-                        # Send notification asynchronously
-                        asyncio.create_task(self.telegram_bot.send_trade_closed(trade_close_info))
+                        # Send notification (await directly to avoid recursion on shutdown)
+                        await self.telegram_bot.send_trade_closed(trade_close_info)
                         self.logger.info("📱 [TELEGRAM] Trade close notification sent for %s (P&L: $%.2f)", symbol, pnl_usdt_leveraged)
                     except Exception as tg_e:
                         self.logger.warning("📱 [TELEGRAM] Failed to send close notification: %s", tg_e)
