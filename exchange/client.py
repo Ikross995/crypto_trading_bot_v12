@@ -257,6 +257,24 @@ class BinanceClient:
             logger.error("REST call failed: %s %s payload=%s err=%s", method, path, payload, e)
             raise
 
+    def _rest_unsigned(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
+        """REST call without signature (for public endpoints like ticker data)."""
+        url = self._base + path
+        try:
+            if method == "GET":
+                r = self.session.get(url, params=payload, timeout=10)
+            elif method == "POST":
+                r = self.session.post(url, params=payload, timeout=10)
+            else:
+                raise RuntimeError(f"Unsupported method {method}")
+            data = r.json() if r.headers.get("content-type","").startswith("application/json") else {"status": r.status_code, "text": r.text}
+            if not r.ok:
+                raise RuntimeError(f"REST {method} {path} failed [{r.status_code}]: {data}")
+            return data
+        except Exception as e:
+            logger.error("REST unsigned call failed: %s %s payload=%s err=%s", method, path, payload, e)
+            raise
+
     # -------------------- PUBLIC API --------------------
     def get_exchange_info(self) -> Dict[str, Any]:
         if self.client:
@@ -295,6 +313,20 @@ class BinanceClient:
         payload = {"symbol": symbol.upper(), "limit": limit}
         data = self._rest("GET", "/fapi/v1/allOrders", payload)
         return data if isinstance(data, list) else []
+
+    def get_24hr_ticker(self, symbol: str) -> Dict[str, Any]:
+        """Get 24hr ticker price change statistics."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_ticker, symbol=symbol.upper())
+            except Exception as e:
+                msg = str(e)
+                if "_http" not in msg and "send_request" not in msg:
+                    raise
+        # Use unsigned REST endpoint (no signature needed for ticker data)
+        payload = {"symbol": symbol.upper()}
+        data = self._rest_unsigned("GET", "/fapi/v1/ticker/24hr", payload)
+        return data if isinstance(data, dict) else {}
 
     def cancel_order(self, symbol: str, orderId: Optional[int] = None, origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
         if self.dry_run:

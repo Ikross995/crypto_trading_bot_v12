@@ -970,6 +970,9 @@ class LiveTradingEngine:
                 confidence * 100
             )
 
+            # Save last GRU prediction for dashboard
+            self.last_gru_prediction = result
+
             return result
 
         except Exception as e:
@@ -4491,9 +4494,12 @@ class LiveTradingEngine:
             if not self.dashboard:
                 return
 
-            # Update dashboard with current trading engine and adaptive learning data
+            # Update dashboard with current trading engine, adaptive learning, and enhanced AI data
+            enhanced_ai = getattr(self, 'enhanced_ai', None)
             dashboard_path = await self.dashboard.update_dashboard(
-                trading_engine=self, adaptive_learning=self.adaptive_learning
+                trading_engine=self,
+                adaptive_learning=self.adaptive_learning,
+                enhanced_ai=enhanced_ai
             )
 
             if dashboard_path:

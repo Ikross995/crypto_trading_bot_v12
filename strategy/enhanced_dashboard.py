@@ -20,7 +20,7 @@ from loguru import logger
 class DashboardData:
     """Расширенные данные для дашборда."""
     timestamp: datetime
-    
+
     # Trading Performance
     total_trades: int
     winning_trades: int
@@ -32,7 +32,7 @@ class DashboardData:
     worst_trade: float
     avg_trade: float
     max_drawdown: float
-    
+
     # Account Info
     account_balance: float
     unrealized_pnl: float
@@ -40,30 +40,43 @@ class DashboardData:
     available_balance: float
     equity: float
     margin_ratio: float
-    
+
     # Positions
     open_positions: int
     total_position_value: float
     largest_position: float
-    
+
     # AI Learning
     confidence_threshold: float
     position_size_multiplier: float
     adaptations_count: int
     learning_confidence: float
-    
+
     # Market Data
     market_volatility: float
     market_trend: str
     price_change_24h: float
     volume_24h: float
-    
+
     # System Stats
     iteration: int
     uptime_hours: float
     signals_generated: int
     signals_executed: int
     execution_rate: float
+
+    # GRU Predictions
+    gru_prediction: Optional[float] = None
+    gru_direction: Optional[str] = None
+    gru_confidence: Optional[float] = None
+    gru_current_price: Optional[float] = None
+
+    # ML Learning System (Enhanced AI)
+    ml_samples_collected: int = 0
+    ml_samples_needed: int = 50
+    ml_prediction_accuracy: float = 0.0
+    ml_avg_pnl_prediction: float = 0.0
+    ml_win_probability: float = 0.0
 
 
 class EnhancedDashboardGenerator:
@@ -79,34 +92,34 @@ class EnhancedDashboardGenerator:
         
         logger.info(f"📊 [ENHANCED_DASHBOARD] Initialized: {self.dashboard_file}")
     
-    async def update_dashboard(self, trading_engine=None, adaptive_learning=None) -> str:
+    async def update_dashboard(self, trading_engine=None, adaptive_learning=None, enhanced_ai=None) -> str:
         """Обновляет дашборд с новыми данными."""
         try:
             # Собираем данные
-            dashboard_data = await self._collect_dashboard_data(trading_engine, adaptive_learning)
-            
+            dashboard_data = await self._collect_dashboard_data(trading_engine, adaptive_learning, enhanced_ai)
+
             # Добавляем в историю
             self.data_history.append(dashboard_data)
-            
+
             # Ограничиваем историю последними 500 точками
             if len(self.data_history) > 500:
                 self.data_history = self.data_history[-500:]
-            
+
             # Генерируем HTML
             html_content = self._generate_enhanced_html()
-            
+
             # Сохраняем
             with open(self.dashboard_file, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            
+
             logger.info(f"📊 [ENHANCED_DASHBOARD] Updated: {self.dashboard_file}")
             return str(self.dashboard_file)
-            
+
         except Exception as e:
             logger.error(f"❌ [ENHANCED_DASHBOARD] Update failed: {e}")
             return ""
-    
-    async def _collect_dashboard_data(self, trading_engine=None, adaptive_learning=None) -> DashboardData:
+
+    async def _collect_dashboard_data(self, trading_engine=None, adaptive_learning=None, enhanced_ai=None) -> DashboardData:
         """Собирает данные для дашборда."""
         now = datetime.now(timezone.utc)
         
@@ -150,11 +163,19 @@ class EnhancedDashboardGenerator:
         # Данные торгового движка
         if trading_engine:
             data = await self._get_trading_engine_data(trading_engine, data)
-        
+
         # Данные системы обучения
         if adaptive_learning:
             data = await self._get_learning_data(adaptive_learning, data)
-        
+
+        # Данные Enhanced AI (ML система)
+        if enhanced_ai:
+            data = await self._get_enhanced_ai_data(enhanced_ai, data)
+
+        # GRU предсказания из trading_engine
+        if trading_engine and hasattr(trading_engine, 'last_gru_prediction'):
+            data = await self._get_gru_data(trading_engine, data)
+
         return data
     
     async def _get_trading_engine_data(self, engine, data: DashboardData) -> DashboardData:
@@ -284,9 +305,56 @@ class EnhancedDashboardGenerator:
             
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting learning data: {e}")
-        
+
         return data
-    
+
+    async def _get_enhanced_ai_data(self, enhanced_ai, data: DashboardData) -> DashboardData:
+        """Получает данные от Enhanced AI (ML система)."""
+        try:
+            # Количество собранных samples для ML обучения
+            if hasattr(enhanced_ai, 'ml_trainer') and hasattr(enhanced_ai.ml_trainer, 'training_data'):
+                training_data = enhanced_ai.ml_trainer.training_data
+                data.ml_samples_collected = len(training_data) if training_data else 0
+
+            # Можно также проверить trades_history
+            if hasattr(enhanced_ai, 'trades_history'):
+                completed_trades = [t for t in enhanced_ai.trades_history if t.exit_reason != "pending"]
+                data.ml_samples_collected = len(completed_trades)
+
+            # ML метрики
+            if hasattr(enhanced_ai, 'enhanced_metrics'):
+                metrics = enhanced_ai.enhanced_metrics
+                data.ml_prediction_accuracy = metrics.get('prediction_accuracy', 0.0)
+                data.ml_avg_pnl_prediction = metrics.get('avg_pnl_prediction', 0.0)
+
+            logger.debug(f"[DASHBOARD_ML] Collected {data.ml_samples_collected}/{data.ml_samples_needed} ML samples")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting Enhanced AI data: {e}")
+
+        return data
+
+    async def _get_gru_data(self, trading_engine, data: DashboardData) -> DashboardData:
+        """Получает данные GRU предсказаний."""
+        try:
+            if hasattr(trading_engine, 'last_gru_prediction') and trading_engine.last_gru_prediction:
+                gru_pred = trading_engine.last_gru_prediction
+
+                # GRU предсказание может быть dict с ключами: predicted_price, direction, confidence, current_price
+                if isinstance(gru_pred, dict):
+                    data.gru_prediction = gru_pred.get('predicted_price')
+                    data.gru_direction = gru_pred.get('direction')
+                    data.gru_confidence = gru_pred.get('confidence')
+                    data.gru_current_price = gru_pred.get('current_price')
+
+                    logger.debug(f"[DASHBOARD_GRU] Prediction: ${data.gru_prediction:.2f}, "
+                                f"Direction: {data.gru_direction}, Confidence: {data.gru_confidence:.1f}%")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting GRU data: {e}")
+
+        return data
+
     def _generate_enhanced_html(self) -> str:
         """Генерирует улучшенный HTML дашборд."""
         if not self.data_history:
