@@ -4,11 +4,20 @@ Enhanced Trading Dashboard - Improved Real-time Analytics
 Создает мощный интерактивный дашборд с расширенной статистикой
 """
 
+# Отключаем TensorFlow warnings
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # FATAL
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Отключаем oneDNN
+
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 import asyncio
 import json
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -1358,20 +1367,39 @@ class EnhancedDashboardGenerator:
     def _save_history(self):
         """Сохраняет историю дашборда в JSON файл."""
         try:
+            if not self.data_history:
+                logger.debug("📊 [DASHBOARD_HISTORY] No data to save yet")
+                return
+
             # Конвертируем dataclass объекты в dict
             history_data = []
             for data in self.data_history[-100:]:  # Сохраняем только последние 100 точек
-                data_dict = asdict(data)
-                # Конвертируем datetime в строку
-                data_dict['timestamp'] = data.timestamp.isoformat()
-                history_data.append(data_dict)
+                try:
+                    data_dict = asdict(data)
+                    # Конвертируем datetime в строку
+                    if isinstance(data.timestamp, datetime):
+                        data_dict['timestamp'] = data.timestamp.isoformat()
+                    history_data.append(data_dict)
+                except Exception as e:
+                    logger.debug(f"⚠️ [DASHBOARD_HISTORY] Failed to serialize data point: {e}")
+                    continue
 
+            if not history_data:
+                logger.warning("❌ [DASHBOARD_HISTORY] No valid data points to save")
+                return
+
+            # Создаем директорию если не существует
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Сохраняем с pretty print
             with open(self.history_file, 'w', encoding='utf-8') as f:
-                json.dump(history_data, f, indent=2)
+                json.dump(history_data, f, indent=2, ensure_ascii=False)
 
-            logger.debug(f"📊 [DASHBOARD_HISTORY] Saved {len(history_data)} data points")
+            logger.info(f"💾 [DASHBOARD_HISTORY] Saved {len(history_data)} data points to {self.history_file}")
         except Exception as e:
-            logger.debug(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+            logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
 
     def _load_history(self):
         """Загружает историю дашборда из JSON файла."""
@@ -1383,18 +1411,33 @@ class EnhancedDashboardGenerator:
             with open(self.history_file, 'r', encoding='utf-8') as f:
                 history_data = json.load(f)
 
+            # Получаем список всех полей DashboardData
+            valid_fields = {f.name for f in fields(DashboardData)}
+
             # Конвертируем dict обратно в DashboardData
+            loaded_count = 0
             for data_dict in history_data:
-                # Конвертируем timestamp обратно в datetime
-                data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
+                try:
+                    # Конвертируем timestamp обратно в datetime
+                    if 'timestamp' in data_dict:
+                        data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
 
-                # Создаем DashboardData объект
-                dashboard_data = DashboardData(**data_dict)
-                self.data_history.append(dashboard_data)
+                    # Фильтруем только известные поля (игнорируем устаревшие)
+                    filtered_dict = {k: v for k, v in data_dict.items() if k in valid_fields}
 
-            logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical points")
+                    # Создаем DashboardData объект
+                    dashboard_data = DashboardData(**filtered_dict)
+                    self.data_history.append(dashboard_data)
+                    loaded_count += 1
+                except Exception as e:
+                    logger.debug(f"⚠️ [DASHBOARD_HISTORY] Skipped invalid data point: {e}")
+                    continue
+
+            logger.info(f"📊 [DASHBOARD_HISTORY] Successfully loaded {loaded_count}/{len(history_data)} historical points")
         except Exception as e:
             logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to load history: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             self.data_history = []
 
     def _generate_empty_dashboard(self) -> str:
