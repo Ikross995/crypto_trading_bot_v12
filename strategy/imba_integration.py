@@ -447,28 +447,49 @@ class IMBASignalIntegration:
         try:
             from utils.exchange_prices import get_price_fetcher, format_exchange_prices, format_price
             import os
-            
+            from datetime import datetime, timezone
+
             # Get current Binance price
             current_price = float(df.iloc[-1]['close'])
-            
-            # Fetch prices from other sources (with caching, 60s TTL)
-            fetcher = get_price_fetcher()
-            cmc_api_key = os.getenv('CMC_API_KEY')  # Optional: set in .env if you have one
-            prices = fetcher.fetch_all_sync(symbol, cmc_api_key=cmc_api_key)
+
+            # Check if this is historical data (backtest) or live data
+            candle_time = pd.to_datetime(df.iloc[-1].name)
+            if candle_time.tzinfo is None:
+                candle_time = candle_time.tz_localize('UTC')
+            current_time = datetime.now(timezone.utc)
+
+            # If candle is older than 1 hour, skip spot price checks (historical backtest)
+            time_diff_seconds = (current_time - candle_time).total_seconds()
+            is_historical = time_diff_seconds > 3600  # More than 1 hour old
+
+            if is_historical:
+                # Historical data: skip spot price fetching (no historical spot prices available)
+                logger.debug(f"[SPREAD_SKIP] {symbol}: Historical candle (age: {time_diff_seconds/3600:.1f}h) - skipping spot price checks")
+                prices = None
+            else:
+                # Live/recent data: fetch current spot prices (with caching, 60s TTL)
+                fetcher = get_price_fetcher()
+                cmc_api_key = os.getenv('CMC_API_KEY')  # Optional: set in .env if you have one
+                prices = fetcher.fetch_all_sync(symbol, cmc_api_key=cmc_api_key)
             
             # Format prices
             exchanges_str, aggregators_str = format_exchange_prices(prices, current_price)
-            
+
             # Build display
-            exchange_info = f"\n📊 CURRENT PRICE: {format_price(current_price)} (Binance Futures)\n"
-            
-            if exchanges_str:
-                exchange_info += f"💱 SPOT EXCHANGES:\n"
-                exchange_info += f"  └─ {exchanges_str}\n"
-            
-            if aggregators_str:
-                exchange_info += f"💎 PRICE AGGREGATORS:\n"
-                exchange_info += f"  └─ {aggregators_str}\n"
+            if is_historical:
+                # For historical data, only show futures price without spot comparison
+                exchange_info = f"\n📊 HISTORICAL PRICE: {format_price(current_price)} (Binance Futures, {time_diff_seconds/3600:.1f}h ago)\n"
+            else:
+                # For live data, show full price comparison
+                exchange_info = f"\n📊 CURRENT PRICE: {format_price(current_price)} (Binance Futures)\n"
+
+                if exchanges_str:
+                    exchange_info += f"💱 SPOT EXCHANGES:\n"
+                    exchange_info += f"  └─ {exchanges_str}\n"
+
+                if aggregators_str:
+                    exchange_info += f"💎 PRICE AGGREGATORS:\n"
+                    exchange_info += f"  └─ {aggregators_str}\n"
             
             # Check spot-futures spread
             # Note: prices is a flat dict like {'bybit': 123.45, 'okx': 123.50, ...}
