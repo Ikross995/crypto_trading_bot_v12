@@ -49,7 +49,10 @@ class EnhancedAdaptiveLearningSystem:
         # Статистика предсказаний
         self.prediction_history = []
         self.recommendation_history = []
-        
+
+        # Trade history для совместимости с Exit Manager
+        self.trades_history = []  # List[TradeRecord]
+
         logger.info("🧠 [ENHANCED_ML] Advanced adaptive learning system initialized")
         
     async def analyze_signal_context(self, 
@@ -130,6 +133,10 @@ class EnhancedAdaptiveLearningSystem:
                     current_price=trade_record.entry_price
                 )
             
+            # CRITICAL: Add to trades_history for Exit Manager to find it
+            self.trades_history.append(trade_record)
+            logger.info(f"📝 [TRADES_HISTORY] Added trade {trade_record.trade_id} (total: {len(self.trades_history)})")
+
             # Сохраняем предсказание для последующей оценки
             if hasattr(trade_record, 'ml_prediction'):
                 self.prediction_history.append({
@@ -139,13 +146,85 @@ class EnhancedAdaptiveLearningSystem:
                     'actual_pnl': None,  # Будет заполнено при закрытии
                     'timestamp': datetime.now(timezone.utc)
                 })
-            
+
             logger.info(f"📝 [ENHANCED_RECORD] {trade_record.symbol} {trade_record.side}: "
                        f"Entry @ ${trade_record.entry_price:.2f}, Qty: {trade_record.quantity}")
                        
         except Exception as e:
             logger.error(f"❌ [ENHANCED_RECORD] Error recording trade: {e}")
     
+    async def update_trade_exit(self, symbol: str = None, exit_price: float = None,
+                               exit_reason: str = "manual", trade_id: str = None, **kwargs) -> bool:
+        """
+        Compatibility wrapper for Exit Manager.
+
+        This method is called by Exit Manager when position closes.
+        It finds the trade record and calls update_trade_exit_with_ml for ML learning.
+        """
+        try:
+            logger.info(f"🔍 [ML_EXIT_SEARCH] Looking for trade: symbol={symbol}, trade_id={trade_id}")
+
+            # Find the pending trade record
+            target_trade = None
+
+            # Check if we have trades_history (from adaptive learning base)
+            if hasattr(self, 'trades_history') and self.trades_history:
+                if trade_id:
+                    for trade in self.trades_history:
+                        if trade.trade_id == trade_id and trade.exit_reason == "pending":
+                            target_trade = trade
+                            logger.info(f"✅ [ML_TRADE_FOUND] Found by trade_id: {trade_id}")
+                            break
+
+                if not target_trade and symbol:
+                    # Fallback: find last pending trade for symbol
+                    for i in range(len(self.trades_history) - 1, -1, -1):
+                        trade = self.trades_history[i]
+                        if (trade.symbol == symbol and
+                            trade.exit_reason == "pending"):
+                            target_trade = trade
+                            logger.info(f"✅ [ML_TRADE_FOUND] Found by symbol: {symbol}")
+                            break
+
+            if not target_trade:
+                logger.error(f"❌ [ML_TRADE_NOT_FOUND] No pending trade for symbol={symbol}, trade_id={trade_id}")
+                return False
+
+            # Update trade record
+            target_trade.exit_price = exit_price
+            target_trade.exit_reason = exit_reason
+
+            # Calculate PnL
+            if target_trade.side.upper() == "BUY":
+                target_trade.pnl = (exit_price - target_trade.entry_price) * target_trade.quantity
+            else:  # SELL
+                target_trade.pnl = (target_trade.entry_price - exit_price) * target_trade.quantity
+
+            notional = target_trade.entry_price * target_trade.quantity
+            target_trade.pnl_pct = (target_trade.pnl / notional) * 100 if notional > 0 else 0.0
+
+            hold_time = (datetime.now(timezone.utc) - target_trade.timestamp).total_seconds()
+            target_trade.hold_time_seconds = hold_time
+
+            logger.info(f"🎯 [ML_TRADE_UPDATED] {symbol} ({trade_id}): "
+                       f"PnL {target_trade.pnl:+.2f} USDT ({target_trade.pnl_pct:+.2f}%), "
+                       f"Hold {hold_time/60:.1f} min")
+
+            # Call ML learning
+            await self.update_trade_exit_with_ml(
+                trade_record=target_trade,
+                exit_price=exit_price,
+                exit_reason=exit_reason
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ [ML_EXIT_UPDATE] Error in update_trade_exit: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def update_trade_exit_with_ml(self, 
                                       trade_record: TradeRecord,
                                       exit_price: float,

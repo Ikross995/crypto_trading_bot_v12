@@ -970,6 +970,9 @@ class LiveTradingEngine:
                 confidence * 100
             )
 
+            # Save last GRU prediction for dashboard
+            self.last_gru_prediction = result
+
             return result
 
         except Exception as e:
@@ -1136,8 +1139,21 @@ class LiveTradingEngine:
         if self.dashboard:
             try:
                 self.logger.info("📊 [DASHBOARD] Generating initial dashboard...")
+
+                # Принудительно получаем свежие данные из portfolio_tracker
+                if self.portfolio_tracker:
+                    try:
+                        self.portfolio_tracker.log_portfolio_summary()
+                        self.logger.info("📊 [DASHBOARD] Portfolio data refreshed for dashboard")
+                    except Exception as pt_e:
+                        self.logger.debug("📊 [DASHBOARD] Portfolio refresh failed: %s", pt_e)
+
+                # Передаём все данные включая enhanced_ai
+                enhanced_ai = getattr(self, 'enhanced_ai', None)
                 dashboard_path = await self.dashboard.update_dashboard(
-                    trading_engine=self, adaptive_learning=self.adaptive_learning
+                    trading_engine=self,
+                    adaptive_learning=self.adaptive_learning,
+                    enhanced_ai=enhanced_ai
                 )
 
                 if dashboard_path:
@@ -1155,7 +1171,7 @@ class LiveTradingEngine:
                             file_url,
                         )
                         self.logger.info(
-                            "📊 [DASHBOARD] 🔄 Will auto-update every 30 seconds during trading"
+                            "📊 [DASHBOARD] 🔄 Auto-updates: every 5s (first 30 iterations), then every 30s"
                         )
                     except Exception as browser_e:
                         self.logger.warning(
@@ -1727,13 +1743,38 @@ class LiveTradingEngine:
         self.logger.info("[PRELOAD] COMPLETE: Historical data preload finished!")
 
     async def stop(self) -> None:
+        """Gracefully stop trading engine and cleanup resources."""
+        self.logger.info("🛑 [SHUTDOWN] Stopping trading engine...")
         self.running = False
+
+        # Stop metrics
         if self.metrics:
             try:
                 self.metrics.stop()  # type: ignore
-            except Exception:
-                pass
-        self.logger.info("Live trading engine stopped")
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
+
+        # Cancel all pending tasks
+        try:
+            tasks = [t for t in asyncio.all_tasks() if not t.done()]
+            if tasks:
+                self.logger.info(f"🛑 [SHUTDOWN] Cancelling {len(tasks)} pending tasks...")
+                for task in tasks:
+                    task.cancel()
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            self.logger.debug(f"[SHUTDOWN] Task cleanup error: {e}")
+
+        # Save dashboard history one last time
+        if self.dashboard:
+            try:
+                self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
+                self.dashboard._save_history()
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Dashboard save error: {e}")
+
+        self.logger.info("✅ [SHUTDOWN] Trading engine stopped cleanly")
 
     async def _run_trading_loop(self) -> None:
         self.logger.info(
@@ -1798,8 +1839,18 @@ class LiveTradingEngine:
                             "[LEARNING_VIZ] Failed to generate visualization: %s", viz_e
                         )
 
-                # 📊 Update Enhanced Dashboard (every 30 iterations ~ 30 seconds)
-                if self.dashboard and self.iteration % 30 == 0:
+                # 📊 Update Enhanced Dashboard
+                # Быстрее в начале (каждые 5 итераций), потом реже (каждые 30)
+                should_update_dashboard = False
+                if self.dashboard:
+                    if self.iteration <= 30:
+                        # Первые 30 итераций - обновлять каждые 5 секунд
+                        should_update_dashboard = self.iteration % 5 == 0
+                    else:
+                        # После 30 итераций - обновлять каждые 30 секунд
+                        should_update_dashboard = self.iteration % 30 == 0
+
+                if should_update_dashboard:
                     try:
                         await self._update_enhanced_dashboard()
                     except Exception as dash_e:
@@ -4491,9 +4542,12 @@ class LiveTradingEngine:
             if not self.dashboard:
                 return
 
-            # Update dashboard with current trading engine and adaptive learning data
+            # Update dashboard with current trading engine, adaptive learning, and enhanced AI data
+            enhanced_ai = getattr(self, 'enhanced_ai', None)
             dashboard_path = await self.dashboard.update_dashboard(
-                trading_engine=self, adaptive_learning=self.adaptive_learning
+                trading_engine=self,
+                adaptive_learning=self.adaptive_learning,
+                enhanced_ai=enhanced_ai
             )
 
             if dashboard_path:

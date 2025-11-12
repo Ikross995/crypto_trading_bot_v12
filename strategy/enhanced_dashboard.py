@@ -20,7 +20,7 @@ from loguru import logger
 class DashboardData:
     """Расширенные данные для дашборда."""
     timestamp: datetime
-    
+
     # Trading Performance
     total_trades: int
     winning_trades: int
@@ -32,7 +32,7 @@ class DashboardData:
     worst_trade: float
     avg_trade: float
     max_drawdown: float
-    
+
     # Account Info
     account_balance: float
     unrealized_pnl: float
@@ -40,30 +40,65 @@ class DashboardData:
     available_balance: float
     equity: float
     margin_ratio: float
-    
+
     # Positions
     open_positions: int
     total_position_value: float
     largest_position: float
-    
+
     # AI Learning
     confidence_threshold: float
     position_size_multiplier: float
     adaptations_count: int
     learning_confidence: float
-    
+
     # Market Data
     market_volatility: float
     market_trend: str
     price_change_24h: float
     volume_24h: float
-    
+
     # System Stats
     iteration: int
     uptime_hours: float
     signals_generated: int
     signals_executed: int
     execution_rate: float
+
+    # GRU Predictions
+    gru_prediction: Optional[float] = None
+    gru_direction: Optional[str] = None
+    gru_confidence: Optional[float] = None
+    gru_current_price: Optional[float] = None
+
+    # ML Learning System (Enhanced AI)
+    ml_samples_collected: int = 0
+    ml_samples_needed: int = 50
+    ml_prediction_accuracy: float = 0.0
+    ml_avg_pnl_prediction: float = 0.0
+    ml_win_probability: float = 0.0
+
+    # Extended Stats
+    recent_trades: List[Dict] = None  # Last 10 trades
+    open_positions_details: List[Dict] = None  # Detailed position info
+    sharpe_ratio: float = 0.0
+    avg_hold_time: float = 0.0  # In hours
+    daily_pnl: float = 0.0
+    weekly_pnl: float = 0.0
+    monthly_pnl: float = 0.0
+
+    # Risk Metrics
+    total_margin_used: float = 0.0
+    margin_usage_pct: float = 0.0
+    free_margin: float = 0.0
+    largest_position_margin: float = 0.0
+
+    def __post_init__(self):
+        """Initialize list fields after creation."""
+        if self.recent_trades is None:
+            self.recent_trades = []
+        if self.open_positions_details is None:
+            self.open_positions_details = []
 
 
 class EnhancedDashboardGenerator:
@@ -73,40 +108,48 @@ class EnhancedDashboardGenerator:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.dashboard_file = self.output_dir / "enhanced_dashboard.html"
-        
+        self.history_file = self.output_dir / "dashboard_history.json"
+
         # История данных для графиков
         self.data_history: List[DashboardData] = []
-        
+
+        # Загружаем историю при старте
+        self._load_history()
+
         logger.info(f"📊 [ENHANCED_DASHBOARD] Initialized: {self.dashboard_file}")
+        logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical data points")
     
-    async def update_dashboard(self, trading_engine=None, adaptive_learning=None) -> str:
+    async def update_dashboard(self, trading_engine=None, adaptive_learning=None, enhanced_ai=None) -> str:
         """Обновляет дашборд с новыми данными."""
         try:
             # Собираем данные
-            dashboard_data = await self._collect_dashboard_data(trading_engine, adaptive_learning)
-            
+            dashboard_data = await self._collect_dashboard_data(trading_engine, adaptive_learning, enhanced_ai)
+
             # Добавляем в историю
             self.data_history.append(dashboard_data)
-            
+
             # Ограничиваем историю последними 500 точками
             if len(self.data_history) > 500:
                 self.data_history = self.data_history[-500:]
-            
+
+            # Сохраняем историю в JSON
+            self._save_history()
+
             # Генерируем HTML
             html_content = self._generate_enhanced_html()
-            
+
             # Сохраняем
             with open(self.dashboard_file, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            
+
             logger.info(f"📊 [ENHANCED_DASHBOARD] Updated: {self.dashboard_file}")
             return str(self.dashboard_file)
-            
+
         except Exception as e:
             logger.error(f"❌ [ENHANCED_DASHBOARD] Update failed: {e}")
             return ""
-    
-    async def _collect_dashboard_data(self, trading_engine=None, adaptive_learning=None) -> DashboardData:
+
+    async def _collect_dashboard_data(self, trading_engine=None, adaptive_learning=None, enhanced_ai=None) -> DashboardData:
         """Собирает данные для дашборда."""
         now = datetime.now(timezone.utc)
         
@@ -150,11 +193,23 @@ class EnhancedDashboardGenerator:
         # Данные торгового движка
         if trading_engine:
             data = await self._get_trading_engine_data(trading_engine, data)
-        
+
+        # Используем Portfolio Tracker если доступен (приоритет!)
+        if trading_engine and hasattr(trading_engine, 'portfolio_tracker') and trading_engine.portfolio_tracker:
+            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data)
+
         # Данные системы обучения
         if adaptive_learning:
             data = await self._get_learning_data(adaptive_learning, data)
-        
+
+        # Данные Enhanced AI (ML система)
+        if enhanced_ai:
+            data = await self._get_enhanced_ai_data(enhanced_ai, data)
+
+        # GRU предсказания из trading_engine
+        if trading_engine and hasattr(trading_engine, 'last_gru_prediction'):
+            data = await self._get_gru_data(trading_engine, data)
+
         return data
     
     async def _get_trading_engine_data(self, engine, data: DashboardData) -> DashboardData:
@@ -284,9 +339,158 @@ class EnhancedDashboardGenerator:
             
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting learning data: {e}")
-        
+
         return data
-    
+
+    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData) -> DashboardData:
+        """Получает данные от Portfolio Tracker (приоритет над другими источниками!)."""
+        try:
+            # Получаем полную статистику портфеля
+            stats = portfolio_tracker.get_portfolio_stats()
+
+            # Баланс и капитал
+            data.account_balance = stats.total_balance
+            data.available_balance = stats.available_balance
+            data.margin_used = stats.margin_balance
+            data.unrealized_pnl = stats.total_unrealized_pnl
+            data.equity = stats.total_balance + stats.total_unrealized_pnl
+            data.margin_ratio = (stats.margin_balance / stats.total_balance * 100) if stats.total_balance > 0 else 0.0
+
+            # Позиции
+            data.open_positions = len(stats.open_positions)
+            if stats.open_positions:
+                position_values = [pos.notional_value for pos in stats.open_positions]
+                data.total_position_value = sum(position_values)
+                data.largest_position = max(position_values) if position_values else 0.0
+
+            # Trading Performance (ГЛАВНОЕ!)
+            data.total_trades = stats.total_trades
+            data.winning_trades = stats.winning_trades
+            data.losing_trades = stats.losing_trades
+            data.win_rate = stats.win_rate
+
+            # PnL статистика
+            data.total_pnl = stats.daily_pnl  # Или можно взять cumulative
+            data.best_trade = getattr(stats, 'best_trade', 0.0)
+            data.worst_trade = getattr(stats, 'worst_trade', 0.0)
+            data.avg_trade = getattr(stats, 'avg_trade', 0.0)
+
+            # Risk metrics
+            data.max_drawdown = stats.max_drawdown
+            data.profit_factor = getattr(stats, 'profit_factor', 1.0)
+            data.sharpe_ratio = stats.sharpe_ratio
+
+            # Performance periods
+            data.daily_pnl = stats.daily_pnl
+            data.weekly_pnl = stats.weekly_pnl
+            data.monthly_pnl = stats.monthly_pnl
+
+            # Детали открытых позиций
+            data.open_positions_details = []
+            for pos in stats.open_positions[:10]:  # Последние 10
+                # Рассчитываем реальные значения
+                notional_value = pos.notional_value if pos.notional_value else (pos.quantity * pos.current_price)
+                leverage = pos.leverage if pos.leverage and pos.leverage > 0 else 1.0
+                margin_used = notional_value / leverage  # Реальный залог
+
+                data.open_positions_details.append({
+                    'symbol': pos.symbol,
+                    'side': pos.side,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'quantity': pos.quantity,
+                    'notional': notional_value,
+                    'margin_used': margin_used,
+                    'pnl': pos.unrealized_pnl,
+                    'pnl_pct': pos.unrealized_pnl_pct,
+                    'leverage': leverage,
+                    'liquidation_price': getattr(pos, 'liquidation_price', None)
+                })
+
+            # Рассчитываем risk metrics
+            if data.open_positions_details:
+                data.total_margin_used = sum(pos['margin_used'] for pos in data.open_positions_details)
+                data.largest_position_margin = max((pos['margin_used'] for pos in data.open_positions_details), default=0.0)
+
+                # Margin usage % от account balance
+                if data.account_balance > 0:
+                    data.margin_usage_pct = (data.total_margin_used / data.account_balance) * 100
+                    data.free_margin = data.account_balance - data.total_margin_used
+                else:
+                    data.margin_usage_pct = 0.0
+                    data.free_margin = 0.0
+
+            # Последние сделки (из portfolio_tracker history если есть)
+            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
+                data.recent_trades = []
+                for trade in list(portfolio_tracker.trade_history)[-10:]:  # Последние 10
+                    data.recent_trades.append({
+                        'symbol': getattr(trade, 'symbol', 'N/A'),
+                        'side': getattr(trade, 'side', 'N/A'),
+                        'pnl': getattr(trade, 'pnl', 0.0),
+                        'pnl_pct': getattr(trade, 'pnl_pct', 0.0),
+                        'timestamp': getattr(trade, 'timestamp', datetime.now()).strftime('%H:%M:%S')
+                    })
+
+            logger.debug(f"[DASHBOARD_PORTFOLIO] Loaded: {data.total_trades} trades, "
+                        f"{data.winning_trades}W/{data.losing_trades}L, "
+                        f"Win Rate: {data.win_rate*100:.1f}%, "
+                        f"Positions: {len(data.open_positions_details)}")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting portfolio tracker data: {e}")
+            import traceback
+            logger.debug(f"[DASHBOARD] Traceback: {traceback.format_exc()}")
+
+        return data
+
+    async def _get_enhanced_ai_data(self, enhanced_ai, data: DashboardData) -> DashboardData:
+        """Получает данные от Enhanced AI (ML система)."""
+        try:
+            # Количество собранных samples для ML обучения
+            if hasattr(enhanced_ai, 'ml_trainer') and hasattr(enhanced_ai.ml_trainer, 'training_data'):
+                training_data = enhanced_ai.ml_trainer.training_data
+                data.ml_samples_collected = len(training_data) if training_data else 0
+
+            # Можно также проверить trades_history
+            if hasattr(enhanced_ai, 'trades_history'):
+                completed_trades = [t for t in enhanced_ai.trades_history if t.exit_reason != "pending"]
+                data.ml_samples_collected = len(completed_trades)
+
+            # ML метрики
+            if hasattr(enhanced_ai, 'enhanced_metrics'):
+                metrics = enhanced_ai.enhanced_metrics
+                data.ml_prediction_accuracy = metrics.get('prediction_accuracy', 0.0)
+                data.ml_avg_pnl_prediction = metrics.get('avg_pnl_prediction', 0.0)
+
+            logger.debug(f"[DASHBOARD_ML] Collected {data.ml_samples_collected}/{data.ml_samples_needed} ML samples")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting Enhanced AI data: {e}")
+
+        return data
+
+    async def _get_gru_data(self, trading_engine, data: DashboardData) -> DashboardData:
+        """Получает данные GRU предсказаний."""
+        try:
+            if hasattr(trading_engine, 'last_gru_prediction') and trading_engine.last_gru_prediction:
+                gru_pred = trading_engine.last_gru_prediction
+
+                # GRU предсказание может быть dict с ключами: predicted_price, direction, confidence, current_price
+                if isinstance(gru_pred, dict):
+                    data.gru_prediction = gru_pred.get('predicted_price')
+                    data.gru_direction = gru_pred.get('direction')
+                    data.gru_confidence = gru_pred.get('confidence')
+                    data.gru_current_price = gru_pred.get('current_price')
+
+                    logger.debug(f"[DASHBOARD_GRU] Prediction: ${data.gru_prediction:.2f}, "
+                                f"Direction: {data.gru_direction}, Confidence: {data.gru_confidence:.1f}%")
+
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] Error getting GRU data: {e}")
+
+        return data
+
     def _generate_enhanced_html(self) -> str:
         """Генерирует улучшенный HTML дашборд."""
         if not self.data_history:
@@ -470,13 +674,80 @@ class EnhancedDashboardGenerator:
             padding: 10px;
         }}
         
-        .trade-item {{ 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 8px 12px; 
-            margin-bottom: 5px; 
-            background: rgba(255,255,255,0.05); 
+        .trade-item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            background: rgba(255,255,255,0.05);
             border-radius: 6px;
+        }}
+
+        /* Table Styles */
+        .table-container {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }}
+
+        .table-container h3 {{
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+        }}
+
+        .data-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }}
+
+        .data-table thead {{
+            background: rgba(102,126,234,0.2);
+        }}
+
+        .data-table th {{
+            padding: 12px 15px;
+            text-align: left;
+            color: #fff;
+            font-weight: 600;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }}
+
+        .data-table td {{
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #ccc;
+        }}
+
+        .data-table tbody tr {{
+            transition: background 0.2s ease;
+        }}
+
+        .data-table tbody tr:hover {{
+            background: rgba(255,255,255,0.05);
+        }}
+
+        .badge {{
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }}
+
+        .badge-long {{
+            background: rgba(0,255,136,0.2);
+            color: #00ff88;
+            border: 1px solid #00ff88;
+        }}
+
+        .badge-short {{
+            background: rgba(255,71,87,0.2);
+            color: #ff4757;
+            border: 1px solid #ff4757;
         }}
     </style>
 </head>
@@ -584,7 +855,111 @@ class EnhancedDashboardGenerator:
                 </div>
             </div>
         </div>
-        
+
+        <!-- 📊 Extended Trading Stats -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>🏆 Best Trade</h3>
+                <div class="metric">
+                    <span class="metric-label">💰 Profit</span>
+                    <span class="metric-value positive">${latest.best_trade:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📉 Worst Trade</h3>
+                <div class="metric">
+                    <span class="metric-label">💸 Loss</span>
+                    <span class="metric-value negative">${latest.worst_trade:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>⚖️ Sharpe Ratio</h3>
+                <div class="metric">
+                    <span class="metric-label">📊 Risk-Adjusted Return</span>
+                    <span class="metric-value {'positive' if latest.sharpe_ratio > 1 else 'negative'}">{latest.sharpe_ratio:.2f}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📈 Performance by Period -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>📅 Daily Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Today's P&L</span>
+                    <span class="metric-value {'positive' if latest.daily_pnl >= 0 else 'negative'}">${latest.daily_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Daily %</span>
+                    <span class="metric-value {'positive' if latest.daily_pnl >= 0 else 'negative'}">{(latest.daily_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📅 Weekly Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Week P&L</span>
+                    <span class="metric-value {'positive' if latest.weekly_pnl >= 0 else 'negative'}">${latest.weekly_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Weekly %</span>
+                    <span class="metric-value {'positive' if latest.weekly_pnl >= 0 else 'negative'}">{(latest.weekly_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📅 Monthly Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Month P&L</span>
+                    <span class="metric-value {'positive' if latest.monthly_pnl >= 0 else 'negative'}">${latest.monthly_pnl:+,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Monthly %</span>
+                    <span class="metric-value {'positive' if latest.monthly_pnl >= 0 else 'negative'}">{(latest.monthly_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⚠️ Risk Metrics -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>💰 Total Margin Used</h3>
+                <div class="metric">
+                    <span class="metric-label">Used Margin</span>
+                    <span class="metric-value">${latest.total_margin_used:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Free Margin</span>
+                    <span class="metric-value positive">${latest.free_margin:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📊 Margin Usage</h3>
+                <div class="metric">
+                    <span class="metric-label">Usage %</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
+                        <div style="background: {'linear-gradient(90deg, #ff4757 0%, #ffa502 100%)' if latest.margin_usage_pct > 80 else 'linear-gradient(90deg, #ffa502 0%, #00ff88 100%)' if latest.margin_usage_pct > 50 else 'linear-gradient(90deg, #00ff88 0%, #00d9ff 100%)'}; height: 100%; width: {min(latest.margin_usage_pct, 100):.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value {'negative' if latest.margin_usage_pct > 80 else 'positive' if latest.margin_usage_pct < 50 else ''}">{latest.margin_usage_pct:.1f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🎯 Largest Position</h3>
+                <div class="metric">
+                    <span class="metric-label">Margin Required</span>
+                    <span class="metric-value">${latest.largest_position_margin:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">% of Balance</span>
+                    <span class="metric-value">{(latest.largest_position_margin/latest.account_balance*100 if latest.account_balance > 0 else 0):.1f}%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📊 Open Positions Table -->
+        {self._generate_positions_table(latest)}
+
+        <!-- 📊 Recent Trades Table -->
+        {self._generate_trades_table(latest)}
+
         <div class="chart-grid">
             <div class="chart-container">
                 <h3>📊 PnL Evolution</h3>
@@ -609,126 +984,264 @@ class EnhancedDashboardGenerator:
     </div>
     
     <script>
-        // PnL Chart
+        // PnL Chart with gradient fill
+        var pnlValues = {[d.total_pnl for d in self.data_history[-100:]]};
+        var pnlColors = pnlValues.map(v => v >= 0 ? 'rgba(0,255,136,0.8)' : 'rgba(255,71,87,0.8)');
+
         var pnlData = [{{
             x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-            y: {[d.total_pnl for d in self.data_history[-100:]]},
+            y: pnlValues,
             type: 'scatter',
-            mode: 'lines+markers',
+            mode: 'lines',
             name: 'Cumulative PnL',
-            line: {{color: '#00ff88', width: 3}},
-            marker: {{size: 6}},
-            fill: 'tonexty',
-            fillcolor: 'rgba(0,255,136,0.1)'
+            line: {{
+                color: '#00ff88',
+                width: 3,
+                shape: 'spline',
+                smoothing: 1.3
+            }},
+            fill: 'tozeroy',
+            fillcolor: 'rgba(0,255,136,0.2)',
+            hovertemplate: '<b>Time:</b> %{{x}}<br><b>PnL:</b> $%{{y:.2f}}<extra></extra>'
+        }},
+        {{
+            x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
+            y: {[d.equity for d in self.data_history[-100:]]},
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Account Equity',
+            yaxis: 'y2',
+            line: {{
+                color: '#667eea',
+                width: 2,
+                shape: 'spline',
+                smoothing: 1.3,
+                dash: 'dot'
+            }},
+            hovertemplate: '<b>Equity:</b> $%{{y:.2f}}<extra></extra>'
         }}];
-        
+
         var pnlLayout = {{
-            title: 'Cumulative PnL Over Time',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'PnL ($)', color: '#cccccc'}},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            title: {{
+                text: '💰 PnL & Equity Evolution',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'PnL ($)',
+                color: '#00ff88',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true,
+                zeroline: true,
+                zerolinecolor: 'rgba(255,255,255,0.3)',
+                zerolinewidth: 2
+            }},
+            yaxis2: {{
+                title: 'Equity ($)',
+                color: '#667eea',
+                overlaying: 'y',
+                side: 'right'
+            }},
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
-            showlegend: false
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
+            showlegend: true,
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                x: 0.02,
+                y: 0.98
+            }},
+            hovermode: 'x unified'
         }};
+
+        Plotly.newPlot('pnl-chart', pnlData, pnlLayout, {{responsive: true, displayModeBar: false}});
         
-        Plotly.newPlot('pnl-chart', pnlData, pnlLayout, {{responsive: true}});
-        
-        // Parameters Chart
+        // Parameters Chart with area fills
         var paramData = [
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.confidence_threshold for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines+markers',
+                mode: 'lines',
                 name: 'Confidence Threshold',
-                line: {{color: '#667eea', width: 2}}
+                line: {{
+                    color: '#667eea',
+                    width: 3,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(102,126,234,0.2)',
+                hovertemplate: '<b>Confidence:</b> %{{y:.3f}}<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.position_size_multiplier for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines+markers',
+                mode: 'lines',
                 name: 'Position Multiplier',
                 yaxis: 'y2',
-                line: {{color: '#764ba2', width: 2}}
+                line: {{
+                    color: '#764ba2',
+                    width: 3,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(118,75,162,0.2)',
+                hovertemplate: '<b>Multiplier:</b> %{{y:.2f}}x<extra></extra>'
             }}
         ];
-        
+
         var paramLayout = {{
-            title: 'AI Parameter Evolution',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'Confidence Threshold', side: 'left', color: '#667eea'}},
+            title: {{
+                text: '🎛️ AI Parameter Evolution',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'Confidence Threshold',
+                side: 'left',
+                color: '#667eea',
+                gridcolor: 'rgba(255,255,255,0.05)',
+                showgrid: true
+            }},
             yaxis2: {{
                 title: 'Position Multiplier',
                 side: 'right',
                 overlaying: 'y',
                 color: '#764ba2'
             }},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
             showlegend: true,
-            legend: {{bgcolor: 'rgba(0,0,0,0.5)'}}
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                x: 0.02,
+                y: 0.98
+            }},
+            hovermode: 'x unified'
         }};
+
+        Plotly.newPlot('parameters-chart', paramData, paramLayout, {{responsive: true, displayModeBar: false}});
         
-        Plotly.newPlot('parameters-chart', paramData, paramLayout, {{responsive: true}});
-        
-        // Performance Dashboard
+        // Performance Dashboard - Win Rate & Trades Bar Chart
         var performanceData = [
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
                 y: {[d.win_rate * 100 for d in self.data_history[-100:]]},
                 type: 'scatter',
                 mode: 'lines',
-                name: 'Win Rate (%)',
-                line: {{color: '#00ff88', width: 2}}
+                name: 'Win Rate',
+                line: {{
+                    color: '#00ff88',
+                    width: 4,
+                    shape: 'spline',
+                    smoothing: 1.3
+                }},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(0,255,136,0.15)',
+                hovertemplate: '<b>Win Rate:</b> %{{y:.1f}}%<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-                y: {[min(d.profit_factor, 5.0) for d in self.data_history[-100:]]},  // Cap at 5 for better visualization
-                type: 'scatter',
-                mode: 'lines',
+                y: {[min(d.profit_factor, 5.0) for d in self.data_history[-100:]]},
+                type: 'bar',
                 name: 'Profit Factor',
                 yaxis: 'y2',
-                line: {{color: '#ffa502', width: 2}}
+                marker: {{
+                    color: {[f"'rgba(255,165,2,{min(d.profit_factor/5, 1)})'" for d in self.data_history[-100:]]},
+                    line: {{color: '#ffa502', width: 1}}
+                }},
+                hovertemplate: '<b>Profit Factor:</b> %{{y:.2f}}<extra></extra>'
             }},
             {{
                 x: {[f"'{d.timestamp.strftime('%H:%M:%S')}'" for d in self.data_history[-100:]]},
-                y: {[d.equity for d in self.data_history[-100:]]},
+                y: {[d.total_trades for d in self.data_history[-100:]]},
                 type: 'scatter',
-                mode: 'lines',
-                name: 'Account Equity',
+                mode: 'lines+markers',
+                name: 'Total Trades',
                 yaxis: 'y3',
-                line: {{color: '#667eea', width: 2}}
+                line: {{
+                    color: '#667eea',
+                    width: 2,
+                    dash: 'dot'
+                }},
+                marker: {{
+                    size: 8,
+                    color: '#667eea',
+                    line: {{color: '#ffffff', width: 1}}
+                }},
+                hovertemplate: '<b>Trades:</b> %{{y}}<extra></extra>'
             }}
         ];
-        
+
         var performanceLayout = {{
-            title: 'Multi-Metric Performance Dashboard',
-            xaxis: {{title: 'Time', color: '#cccccc'}},
-            yaxis: {{title: 'Win Rate (%)', side: 'left', color: '#00ff88'}},
+            title: {{
+                text: '📊 Multi-Metric Performance Dashboard',
+                font: {{size: 18, color: '#ffffff'}}
+            }},
+            xaxis: {{
+                title: 'Time',
+                color: '#999',
+                gridcolor: 'rgba(255,255,255,0.1)',
+                showgrid: true
+            }},
+            yaxis: {{
+                title: 'Win Rate (%)',
+                side: 'left',
+                color: '#00ff88',
+                gridcolor: 'rgba(255,255,255,0.05)',
+                showgrid: true,
+                range: [0, 100]
+            }},
             yaxis2: {{
                 title: 'Profit Factor',
                 side: 'right',
                 overlaying: 'y',
                 color: '#ffa502',
-                position: 0.85
+                position: 0.85,
+                range: [0, 5]
             }},
             yaxis3: {{
-                title: 'Equity ($)',
+                title: 'Total Trades',
                 side: 'right',
                 overlaying: 'y',
                 color: '#667eea'
             }},
-            plot_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(15,15,35,0.5)',
             paper_bgcolor: 'rgba(0,0,0,0)',
-            font: {{color: '#cccccc'}},
+            font: {{color: '#cccccc', family: 'Segoe UI, Arial'}},
             showlegend: true,
-            legend: {{bgcolor: 'rgba(0,0,0,0.5)'}}
+            legend: {{
+                bgcolor: 'rgba(0,0,0,0.7)',
+                bordercolor: 'rgba(255,255,255,0.2)',
+                borderwidth: 1,
+                orientation: 'h',
+                x: 0.5,
+                y: -0.15,
+                xanchor: 'center'
+            }},
+            hovermode: 'x unified',
+            barmode: 'overlay'
         }};
-        
-        Plotly.newPlot('performance-chart', performanceData, performanceLayout, {{responsive: true}});
+
+        Plotly.newPlot('performance-chart', performanceData, performanceLayout, {{responsive: true, displayModeBar: false}});
         
         // Auto-refresh every 30 seconds
         setTimeout(function() {{ location.reload(); }}, 30000);
@@ -736,7 +1249,154 @@ class EnhancedDashboardGenerator:
 </body>
 </html>
         """
-    
+
+    def _generate_positions_table(self, data: DashboardData) -> str:
+        """Generate table of open positions."""
+        if not data.open_positions_details or len(data.open_positions_details) == 0:
+            return """
+                <div class="table-container">
+                    <h3>📊 Open Positions</h3>
+                    <p style="text-align: center; opacity: 0.6; padding: 20px;">No open positions</p>
+                </div>
+            """
+
+        rows = ""
+        for pos in data.open_positions_details:
+            side_badge = f'<span class="badge badge-long">🟢 LONG</span>' if pos['side'] == 'LONG' else f'<span class="badge badge-short">🔴 SHORT</span>'
+            pnl_class = 'positive' if pos['pnl'] >= 0 else 'negative'
+
+            # Liquidation price если доступно
+            liq_price = f"${pos['liquidation_price']:,.4f}" if pos.get('liquidation_price') else "N/A"
+
+            rows += f"""
+                <tr>
+                    <td><strong>{pos['symbol']}</strong></td>
+                    <td>{side_badge}</td>
+                    <td><strong>{pos['leverage']:.1f}x</strong></td>
+                    <td>${pos['entry_price']:,.4f}</td>
+                    <td>${pos['current_price']:,.4f}</td>
+                    <td>{pos['quantity']:.4f}</td>
+                    <td>${pos['notional']:,.2f}</td>
+                    <td><strong>${pos['margin_used']:,.2f}</strong></td>
+                    <td class="{pnl_class}"><strong>${pos['pnl']:+,.2f}</strong></td>
+                    <td class="{pnl_class}"><strong>{pos['pnl_pct']:+.2f}%</strong></td>
+                    <td style="opacity: 0.8;">{liq_price}</td>
+                </tr>
+            """
+
+        return f"""
+            <div class="table-container">
+                <h3>📊 Open Positions ({len(data.open_positions_details)})</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Leverage</th>
+                            <th>Entry</th>
+                            <th>Current</th>
+                            <th>Quantity</th>
+                            <th>Notional</th>
+                            <th>Margin Used</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                            <th>Liquidation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
+            </div>
+        """
+
+    def _generate_trades_table(self, data: DashboardData) -> str:
+        """Generate table of recent trades."""
+        if not data.recent_trades or len(data.recent_trades) == 0:
+            return """
+                <div class="table-container">
+                    <h3>📈 Recent Trades</h3>
+                    <p style="text-align: center; opacity: 0.6; padding: 20px;">No recent trades</p>
+                </div>
+            """
+
+        rows = ""
+        for trade in reversed(data.recent_trades):  # Latest first
+            side_badge = f'<span class="badge badge-long">BUY</span>' if trade['side'] == 'BUY' or trade['side'] == 'LONG' else f'<span class="badge badge-short">SELL</span>'
+            pnl_class = 'positive' if trade['pnl'] >= 0 else 'negative'
+
+            rows += f"""
+                <tr>
+                    <td>{trade['timestamp']}</td>
+                    <td><strong>{trade['symbol']}</strong></td>
+                    <td>{side_badge}</td>
+                    <td class="{pnl_class}"><strong>${trade['pnl']:+,.2f}</strong></td>
+                    <td class="{pnl_class}"><strong>{trade['pnl_pct']:+.2f}%</strong></td>
+                </tr>
+            """
+
+        return f"""
+            <div class="table-container">
+                <h3>📈 Recent Trades (Last {len(data.recent_trades)})</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
+            </div>
+        """
+
+    def _save_history(self):
+        """Сохраняет историю дашборда в JSON файл."""
+        try:
+            # Конвертируем dataclass объекты в dict
+            history_data = []
+            for data in self.data_history[-100:]:  # Сохраняем только последние 100 точек
+                data_dict = asdict(data)
+                # Конвертируем datetime в строку
+                data_dict['timestamp'] = data.timestamp.isoformat()
+                history_data.append(data_dict)
+
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(history_data, f, indent=2)
+
+            logger.debug(f"📊 [DASHBOARD_HISTORY] Saved {len(history_data)} data points")
+        except Exception as e:
+            logger.debug(f"❌ [DASHBOARD_HISTORY] Failed to save history: {e}")
+
+    def _load_history(self):
+        """Загружает историю дашборда из JSON файла."""
+        try:
+            if not self.history_file.exists():
+                logger.debug("📊 [DASHBOARD_HISTORY] No history file found, starting fresh")
+                return
+
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+
+            # Конвертируем dict обратно в DashboardData
+            for data_dict in history_data:
+                # Конвертируем timestamp обратно в datetime
+                data_dict['timestamp'] = datetime.fromisoformat(data_dict['timestamp'])
+
+                # Создаем DashboardData объект
+                dashboard_data = DashboardData(**data_dict)
+                self.data_history.append(dashboard_data)
+
+            logger.info(f"📊 [DASHBOARD_HISTORY] Loaded {len(self.data_history)} historical points")
+        except Exception as e:
+            logger.warning(f"❌ [DASHBOARD_HISTORY] Failed to load history: {e}")
+            self.data_history = []
+
     def _generate_empty_dashboard(self) -> str:
         """Генерирует дашборд для случая отсутствия данных."""
         return """
