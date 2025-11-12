@@ -75,6 +75,12 @@ try:
 except Exception:  # pragma: no cover
     EnhancedDashboardGenerator = None  # type: ignore
 
+# Telegram Bot Integration
+try:
+    from infra.telegram_bot import TelegramDashboardBot  # type: ignore
+except Exception:  # pragma: no cover
+    TelegramDashboardBot = None  # type: ignore
+
 # DCA and LSTM integration
 try:
     from strategy.dca import DCAManager  # type: ignore
@@ -347,19 +353,30 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
 
-        # Telegram Notifications
+        # Telegram Notifications - NEW: TelegramDashboardBot with trade alerts
+        self.telegram = None
         self.telegram_bot = None
-        self.telegram_trade_notifications = getattr(config, "tg_trade_notifications", True)
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
-            if tg_token and tg_chat_id:
-                from infra.telegram_bot import TelegramDashboardBot
 
-                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id)
-                self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
+            if tg_token and tg_chat_id and TelegramDashboardBot:
+                self.telegram_bot = TelegramDashboardBot(
+                    bot_token=tg_token,
+                    chat_id=tg_chat_id,
+                    config=config
+                )
+                self.logger.info("📱 [TELEGRAM] TelegramDashboardBot initialized (trade notifications enabled)")
+            elif tg_token and tg_chat_id:
+                # Fallback to old notifier if TelegramDashboardBot not available
+                try:
+                    from infra.telegram import init_notifier
+                    self.telegram = init_notifier(tg_token, tg_chat_id)
+                    self.logger.info("[TELEGRAM] Legacy notifier initialized")
+                except:
+                    pass
             else:
-                self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
+                self.logger.info("[TELEGRAM] Not configured (set TG_BOT_TOKEN and TG_CHAT_ID in .env)")
         except Exception as e:
             self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
 
@@ -1852,6 +1869,10 @@ class LiveTradingEngine:
             len(self.symbols),
             ", ".join(self.symbols),
         )
+
+        # Sync existing positions on startup and send Telegram notification
+        await self._sync_existing_positions_on_startup()
+
         # Default: iterate forever; we will sleep 1s between cycles to be gentle.
         while self.running:
             self.iteration += 1
@@ -2009,6 +2030,60 @@ class LiveTradingEngine:
                                             reduceOnly='true'
                                         )
                                         self.logger.info("🤖 [RL_CLOSE] ✅ Position closed per RL advice")
+
+                                        # 📱 NEW: Send Telegram notification for RL close
+                                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                                            try:
+                                                # Get trade info from active positions
+                                                trade_data = self.active_positions.get(symbol, {})
+                                                entry_price = trade_data.get("entry_price", 0.0)
+                                                entry_qty = close_qty
+                                                entry_side = "BUY" if close_side == "SELL" else "SELL"
+
+                                                # Get current price
+                                                current_price = await self._latest_price(symbol)
+
+                                                # Calculate P&L
+                                                if entry_side == "BUY":
+                                                    pnl_usdt = (current_price - entry_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((current_price - entry_price) / entry_price) * 100 * self.leverage
+                                                else:  # SELL
+                                                    pnl_usdt = (entry_price - current_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((entry_price - current_price) / entry_price) * 100 * self.leverage
+
+                                                # Calculate duration
+                                                from datetime import datetime, timezone
+                                                entry_time = trade_data.get("created_time", datetime.now(timezone.utc))
+                                                exit_time = datetime.now(timezone.utc)
+
+                                                if isinstance(entry_time, str):
+                                                    try:
+                                                        entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                                                    except:
+                                                        entry_time = exit_time
+
+                                                duration_seconds = (exit_time - entry_time).total_seconds()
+
+                                                # Prepare trade close info
+                                                trade_close_info = {
+                                                    "symbol": symbol,
+                                                    "side": entry_side,
+                                                    "entry_price": entry_price,
+                                                    "exit_price": current_price,
+                                                    "quantity": entry_qty,
+                                                    "pnl_usdt": pnl_usdt,
+                                                    "pnl_pct": pnl_pct,
+                                                    "duration_seconds": duration_seconds,
+                                                    "exit_reason": f"rl_close: {reason}",
+                                                    "leverage": self.leverage,
+                                                }
+
+                                                # Send notification (await directly to avoid recursion on shutdown)
+                                                await self.telegram_bot.send_trade_closed(trade_close_info)
+                                                self.logger.info("📱 [TELEGRAM] RL close notification sent (P&L: $%.2f)", pnl_usdt)
+                                            except Exception as tg_e:
+                                                self.logger.warning("📱 [TELEGRAM] Failed to send RL close notification: %s", tg_e)
+
                                         # Remove from tracking
                                         self.rl_position_advisor.remove_position(symbol)
                                         if symbol in self.active_positions:
@@ -2600,6 +2675,7 @@ class LiveTradingEngine:
                 "DOGEUSDT": 1.0,  # Whole numbers only
                 "MATICUSDT": 1.0,  # Whole numbers only
                 "LINKUSDT": 0.1,
+                "APTUSDT": 0.1,  # APT step size is 0.1
             }
 
             min_qty = min_qty_map.get(symbol, 0.001)  # Default to 0.001
@@ -2624,6 +2700,7 @@ class LiveTradingEngine:
                 "AVAXUSDT": 0,  # FIXED: AVAX needs 0 decimals like ADA/DOGE
                 "LINKUSDT": 1,
                 "MATICUSDT": 0,
+                "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
             }
             decimal_places = precision_map.get(symbol, 3)
             qty_format = f"{{:.{decimal_places}f}}"
@@ -2873,6 +2950,44 @@ class LiveTradingEngine:
                             market_data=market_data
                         )
 
+                        # 📱 NEW: Send Telegram trade notification
+                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                            try:
+                                # Calculate TP/SL levels for notification
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Prepare trade info
+                                trade_info = {
+                                    "symbol": symbol,
+                                    "side": order_side,
+                                    "entry_price": avg_fill_price,
+                                    "quantity": executed_qty,
+                                    "leverage": self.leverage,
+                                    "margin_used": (executed_qty * avg_fill_price) / self.leverage,
+                                    "notional": executed_qty * avg_fill_price,
+                                    "tp_levels": tp_prices if tp_prices else [],
+                                    "sl_price": sl_price if sl_price else 0.0,
+                                    "signal_strength": strength,
+                                    "regime": regime if regime else "unknown",
+                                }
+
+                                # Send notification (await directly to avoid recursion on shutdown)
+                                await self.telegram_bot.send_trade_opened(trade_info)
+                                self.logger.info("📱 [TELEGRAM] Trade open notification sent for %s", symbol)
+                            except Exception as tg_e:
+                                self.logger.warning("📱 [TELEGRAM] Failed to send trade notification: %s", tg_e)
+
+                        # Update active_positions with accurate fill data (for RL close notifications)
+                        from datetime import datetime, timezone
+                        if symbol in self.active_positions:
+                            self.active_positions[symbol].update({
+                                "entry_price": avg_fill_price,
+                                "quantity": executed_qty,
+                                "created_time": datetime.now(timezone.utc)
+                            })
+
                         # Register TP/SL orders with Exit Tracker if available
                         if (
                             self.exit_tracker
@@ -2965,6 +3080,7 @@ class LiveTradingEngine:
                                 )
                                 self.pending_trades[symbol] = {
                                     "entry_time": datetime.now(timezone.utc),
+                                    "created_time": datetime.now(timezone.utc),  # For Telegram notifications
                                     "entry_price": avg_fill_price,
                                     "quantity": executed_qty,
                                     "side": order_side,
@@ -3645,6 +3761,100 @@ class LiveTradingEngine:
             self.logger.error("[BINANCE] Failed to initialize client: %s", e)
             self._binance_client = None
 
+    async def _sync_existing_positions_on_startup(self) -> None:
+        """
+        Sync existing open positions from exchange on startup and send Telegram notifications.
+        """
+        try:
+            if not self.client:
+                return
+
+            self.logger.info("🔄 [STARTUP] Syncing existing positions from exchange...")
+
+            # Get all positions from Binance
+            positions = self.client.get_positions()
+            existing_positions_found = []
+
+            for pos in positions:
+                symbol = pos.get("symbol", "")
+                position_amt = float(pos.get("positionAmt", 0))
+
+                if abs(position_amt) > 0:  # Active position
+                    entry_price = float(pos.get("entryPrice", 0))
+                    mark_price = float(pos.get("markPrice", 0))
+                    unrealized_pnl = float(pos.get("unRealizedProfit", 0))
+                    leverage = int(pos.get("leverage", 1))
+                    isolated_margin = float(pos.get("isolatedMargin", 0))
+                    notional = abs(float(pos.get("notional", 0)))
+
+                    side = "BUY" if position_amt > 0 else "SELL"
+                    quantity = abs(position_amt)
+
+                    existing_positions_found.append({
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "leverage": leverage,
+                        "margin": isolated_margin,
+                        "notional": notional,
+                    })
+
+                    # Add to active_positions tracking
+                    from datetime import datetime, timezone
+                    self.active_positions[symbol] = {
+                        "side": side,
+                        "entry_price": entry_price,
+                        "quantity": quantity,
+                        "unrealized_pnl": unrealized_pnl,
+                        "created_time": datetime.now(timezone.utc),
+                    }
+
+                    self.logger.info(
+                        "📊 [STARTUP] Found existing position: %s %s %.4f @ $%.2f (P&L: $%.2f)",
+                        side, symbol, quantity, entry_price, unrealized_pnl
+                    )
+
+            # Send Telegram notification about existing positions
+            if existing_positions_found and self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                try:
+                    # Format message about existing positions
+                    message = "📊 <b>EXISTING POSITIONS ON STARTUP</b>\n\n"
+                    message += f"Found {len(existing_positions_found)} open position(s):\n\n"
+
+                    for idx, pos in enumerate(existing_positions_found, 1):
+                        pnl_emoji = "🟢" if pos['unrealized_pnl'] >= 0 else "🔴"
+                        side_emoji = "🟢" if pos['side'] == "BUY" else "🔴"
+
+                        message += f"{side_emoji} <b>{pos['symbol']}</b> ({pos['side']})\n"
+                        message += f"├─ Entry: ${pos['entry_price']:,.2f}\n"
+                        message += f"├─ Current: ${pos['mark_price']:,.2f}\n"
+                        message += f"├─ Quantity: {pos['quantity']:.4f}\n"
+                        message += f"├─ Leverage: {pos['leverage']}x\n"
+                        message += f"├─ Margin: ${pos['margin']:,.2f}\n"
+                        message += f"├─ Notional: ${pos['notional']:,.2f}\n"
+                        message += f"└─ {pnl_emoji} P&L: ${pos['unrealized_pnl']:+,.2f}\n\n"
+
+                    # Calculate total P&L
+                    total_pnl = sum(p['unrealized_pnl'] for p in existing_positions_found)
+                    total_pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    message += f"━━━━━━━━━━━━━━━━━━\n"
+                    message += f"{total_pnl_emoji} <b>Total Unrealized P&L: ${total_pnl:+,.2f}</b>"
+
+                    await self.telegram_bot.send_message(message)
+                    self.logger.info("📱 [TELEGRAM] Sent notification about %d existing positions", len(existing_positions_found))
+
+                except Exception as tg_e:
+                    self.logger.warning("📱 [TELEGRAM] Failed to send startup positions notification: %s", tg_e)
+
+            if not existing_positions_found:
+                self.logger.info("✅ [STARTUP] No existing positions found - starting fresh")
+
+        except Exception as e:
+            self.logger.error("[STARTUP] Failed to sync existing positions: %s", e)
+
     async def _setup_tp_sl_orders(
         self,
         symbol: str,
@@ -4187,6 +4397,7 @@ class LiveTradingEngine:
             "AVAXUSDT": 0,  # FIXED: AVAX needs whole numbers like ADA/DOGE
             "LINKUSDT": 1,
             "MATICUSDT": 0,
+            "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
         }
 
         # Get precision for this symbol, default to 3
@@ -4426,6 +4637,59 @@ class LiveTradingEngine:
                 self.logger.info(
                     f"🎯 [POSITION_CLOSED] Detected closed position: {symbol} @ ~${current_price:.2f}"
                 )
+
+                # 📱 NEW: Send Telegram close notification
+                if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                    try:
+                        from datetime import datetime, timezone
+
+                        # Calculate P&L
+                        entry_qty = pending_trade.get("quantity", 0.0)
+                        pnl_usdt = 0.0
+                        pnl_pct = 0.0
+
+                        if side == "BUY":
+                            pnl_usdt = (current_price - entry_price) * entry_qty
+                            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                        else:  # SELL
+                            pnl_usdt = (entry_price - current_price) * entry_qty
+                            pnl_pct = ((entry_price - current_price) / entry_price) * 100
+
+                        # Apply leverage to P&L
+                        pnl_usdt_leveraged = pnl_usdt * self.leverage
+                        pnl_pct_leveraged = pnl_pct * self.leverage
+
+                        # Calculate duration
+                        entry_time = pending_trade.get("created_time", datetime.now(timezone.utc))
+                        exit_time = datetime.now(timezone.utc)
+
+                        if isinstance(entry_time, str):
+                            try:
+                                entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                            except:
+                                entry_time = exit_time
+
+                        duration_seconds = (exit_time - entry_time).total_seconds()
+
+                        # Prepare trade close info
+                        trade_close_info = {
+                            "symbol": symbol,
+                            "side": side,
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "quantity": entry_qty,
+                            "pnl_usdt": pnl_usdt_leveraged,
+                            "pnl_pct": pnl_pct_leveraged,
+                            "duration_seconds": duration_seconds,
+                            "exit_reason": exit_reason,
+                            "leverage": self.leverage,
+                        }
+
+                        # Send notification (await directly to avoid recursion on shutdown)
+                        await self.telegram_bot.send_trade_closed(trade_close_info)
+                        self.logger.info("📱 [TELEGRAM] Trade close notification sent for %s (P&L: $%.2f)", symbol, pnl_usdt_leveraged)
+                    except Exception as tg_e:
+                        self.logger.warning("📱 [TELEGRAM] Failed to send close notification: %s", tg_e)
 
                 # Notify Exit Manager (which will notify AI system)
                 if self.exit_mgr and hasattr(self.exit_mgr, "notify_position_closed"):
