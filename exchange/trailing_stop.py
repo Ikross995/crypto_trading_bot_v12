@@ -33,24 +33,24 @@ class TrailingStopConfig:
     move_sl_after_tp: List[int] = None  # [1, 2] means move after 1st and 2nd TP
     
     # SL adjustment rules per TP level
-    # 1st TP: Move to 50% between entry and current price
+    # 1st TP: Move to 75% between entry and current price (AGGRESSIVE profit protection)
     # 2nd TP: Move to break-even (entry price)
     # 3rd TP: Keep current or close
-    sl_adjustments: Dict[int, str] = None  # {1: "50%", 2: "breakeven", 3: "close"}
-    
+    sl_adjustments: Dict[int, str] = None  # {1: "75%", 2: "breakeven", 3: "keep"}
+
     # Cooldown between SL updates (seconds)
     update_cooldown: float = 5.0
-    
+
     # Safety buffer (percentage) to avoid immediate SL trigger
     safety_buffer_pct: float = 0.1  # 0.1% buffer
-    
+
     def __post_init__(self):
         if self.move_sl_after_tp is None:
             self.move_sl_after_tp = [1, 2]  # Default: move after 1st and 2nd TP
-        
+
         if self.sl_adjustments is None:
             self.sl_adjustments = {
-                1: "50%",       # After 1st TP: move to 50% protection
+                1: "75%",       # After 1st TP: move to 75% protection (FIXED: more aggressive)
                 2: "breakeven",  # After 2nd TP: move to entry (break-even)
                 3: "keep"        # After 3rd TP: keep current SL
             }
@@ -324,34 +324,43 @@ class TrailingStopManager:
     def _calculate_new_sl(self, entry: float, current: float, side: str, rule: str) -> Optional[float]:
         """
         Calculate new SL price based on adjustment rule.
-        
+
         Args:
             entry: Entry price
             current: Current market price
             side: Position side ("BUY" or "SELL")
-            rule: Adjustment rule ("50%", "breakeven", "close")
-        
+            rule: Adjustment rule ("50%", "75%", "breakeven", "close")
+
         Returns:
             New SL price or None if invalid
         """
         if rule == "breakeven":
             # Move to entry price (break-even)
             return entry
-        
+
         elif rule == "50%":
-            # Move to 50% between entry and current price
+            # Move to 50% between entry and current price (50% of profit protected)
             if side == "BUY":
-                # Long: SL should be below entry
-                # Move from below entry to halfway between entry and current
-                return entry + (current - entry) * 0.5 * 0.5  # 50% of gain protection
+                # Long: SL moves up to protect 50% of gains
+                # FIXED: Was 0.5 * 0.5 = 25%, now correctly 50%
+                return entry + (current - entry) * 0.5
             else:
-                # Short: SL should be above entry
-                return entry - (entry - current) * 0.5 * 0.5
-        
+                # Short: SL moves down to protect 50% of gains
+                return entry - (entry - current) * 0.5
+
+        elif rule == "75%":
+            # Move to 75% between entry and current price (75% of profit protected)
+            if side == "BUY":
+                # Long: SL moves up to protect 75% of gains (more aggressive)
+                return entry + (current - entry) * 0.75
+            else:
+                # Short: SL moves down to protect 75% of gains
+                return entry - (entry - current) * 0.75
+
         elif rule == "close":
             # Close position (return None to indicate close)
             return None
-        
+
         else:
             logger.warning(f"Unknown SL adjustment rule: {rule}")
             return None
