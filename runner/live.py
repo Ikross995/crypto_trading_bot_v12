@@ -1957,6 +1957,60 @@ class LiveTradingEngine:
                                             reduceOnly='true'
                                         )
                                         self.logger.info("🤖 [RL_CLOSE] ✅ Position closed per RL advice")
+
+                                        # 📱 NEW: Send Telegram notification for RL close
+                                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                                            try:
+                                                # Get trade info from active positions
+                                                trade_data = self.active_positions.get(symbol, {})
+                                                entry_price = trade_data.get("entry_price", 0.0)
+                                                entry_qty = close_qty
+                                                entry_side = "BUY" if close_side == "SELL" else "SELL"
+
+                                                # Get current price
+                                                current_price = await self._latest_price(symbol)
+
+                                                # Calculate P&L
+                                                if entry_side == "BUY":
+                                                    pnl_usdt = (current_price - entry_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((current_price - entry_price) / entry_price) * 100 * self.leverage
+                                                else:  # SELL
+                                                    pnl_usdt = (entry_price - current_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((entry_price - current_price) / entry_price) * 100 * self.leverage
+
+                                                # Calculate duration
+                                                from datetime import datetime, timezone
+                                                entry_time = trade_data.get("created_time", datetime.now(timezone.utc))
+                                                exit_time = datetime.now(timezone.utc)
+
+                                                if isinstance(entry_time, str):
+                                                    try:
+                                                        entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                                                    except:
+                                                        entry_time = exit_time
+
+                                                duration_seconds = (exit_time - entry_time).total_seconds()
+
+                                                # Prepare trade close info
+                                                trade_close_info = {
+                                                    "symbol": symbol,
+                                                    "side": entry_side,
+                                                    "entry_price": entry_price,
+                                                    "exit_price": current_price,
+                                                    "quantity": entry_qty,
+                                                    "pnl_usdt": pnl_usdt,
+                                                    "pnl_pct": pnl_pct,
+                                                    "duration_seconds": duration_seconds,
+                                                    "exit_reason": f"rl_close: {reason}",
+                                                    "leverage": self.leverage,
+                                                }
+
+                                                # Send notification asynchronously
+                                                asyncio.create_task(self.telegram_bot.send_trade_closed(trade_close_info))
+                                                self.logger.info("📱 [TELEGRAM] RL close notification sent (P&L: $%.2f)", pnl_usdt)
+                                            except Exception as tg_e:
+                                                self.logger.warning("📱 [TELEGRAM] Failed to send RL close notification: %s", tg_e)
+
                                         # Remove from tracking
                                         self.rl_position_advisor.remove_position(symbol)
                                         if symbol in self.active_positions:
@@ -2850,6 +2904,15 @@ class LiveTradingEngine:
                             except Exception as tg_e:
                                 self.logger.warning("📱 [TELEGRAM] Failed to send trade notification: %s", tg_e)
 
+                        # Update active_positions with accurate fill data (for RL close notifications)
+                        from datetime import datetime, timezone
+                        if symbol in self.active_positions:
+                            self.active_positions[symbol].update({
+                                "entry_price": avg_fill_price,
+                                "quantity": executed_qty,
+                                "created_time": datetime.now(timezone.utc)
+                            })
+
                         # Register TP/SL orders with Exit Tracker if available
                         if (
                             self.exit_tracker
@@ -2942,6 +3005,7 @@ class LiveTradingEngine:
                                 )
                                 self.pending_trades[symbol] = {
                                     "entry_time": datetime.now(timezone.utc),
+                                    "created_time": datetime.now(timezone.utc),  # For Telegram notifications
                                     "entry_price": avg_fill_price,
                                     "quantity": executed_qty,
                                     "side": order_side,
@@ -4368,6 +4432,59 @@ class LiveTradingEngine:
                 self.logger.info(
                     f"🎯 [POSITION_CLOSED] Detected closed position: {symbol} @ ~${current_price:.2f}"
                 )
+
+                # 📱 NEW: Send Telegram close notification
+                if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                    try:
+                        from datetime import datetime, timezone
+
+                        # Calculate P&L
+                        entry_qty = pending_trade.get("quantity", 0.0)
+                        pnl_usdt = 0.0
+                        pnl_pct = 0.0
+
+                        if side == "BUY":
+                            pnl_usdt = (current_price - entry_price) * entry_qty
+                            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                        else:  # SELL
+                            pnl_usdt = (entry_price - current_price) * entry_qty
+                            pnl_pct = ((entry_price - current_price) / entry_price) * 100
+
+                        # Apply leverage to P&L
+                        pnl_usdt_leveraged = pnl_usdt * self.leverage
+                        pnl_pct_leveraged = pnl_pct * self.leverage
+
+                        # Calculate duration
+                        entry_time = pending_trade.get("created_time", datetime.now(timezone.utc))
+                        exit_time = datetime.now(timezone.utc)
+
+                        if isinstance(entry_time, str):
+                            try:
+                                entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                            except:
+                                entry_time = exit_time
+
+                        duration_seconds = (exit_time - entry_time).total_seconds()
+
+                        # Prepare trade close info
+                        trade_close_info = {
+                            "symbol": symbol,
+                            "side": side,
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "quantity": entry_qty,
+                            "pnl_usdt": pnl_usdt_leveraged,
+                            "pnl_pct": pnl_pct_leveraged,
+                            "duration_seconds": duration_seconds,
+                            "exit_reason": exit_reason,
+                            "leverage": self.leverage,
+                        }
+
+                        # Send notification asynchronously
+                        asyncio.create_task(self.telegram_bot.send_trade_closed(trade_close_info))
+                        self.logger.info("📱 [TELEGRAM] Trade close notification sent for %s (P&L: $%.2f)", symbol, pnl_usdt_leveraged)
+                    except Exception as tg_e:
+                        self.logger.warning("📱 [TELEGRAM] Failed to send close notification: %s", tg_e)
 
                 # Notify Exit Manager (which will notify AI system)
                 if self.exit_mgr and hasattr(self.exit_mgr, "notify_position_closed"):
