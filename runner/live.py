@@ -378,7 +378,7 @@ class LiveTradingEngine:
             else:
                 self.logger.info("[TELEGRAM] Not configured (set TG_BOT_TOKEN and TG_CHAT_ID in .env)")
         except Exception as e:
-            self.logger.warning("[TELEGRAM] Failed to initialize: %s", e)
+            self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
 
         # Accounting
         self.equity_usdt = float(getattr(config, "paper_equity", 1000.0))
@@ -393,6 +393,9 @@ class LiveTradingEngine:
 
         # Active positions tracking for DCA
         self.active_positions: Dict[str, Dict] = {}
+
+        # Startup flag - prevents Telegram notifications for existing positions
+        self._startup_loading = True  # Will be set to False after loading existing positions
 
         # Emergency Stop Loss tracking
         self.initial_equity: Optional[float] = None  # Set on first run
@@ -1142,6 +1145,9 @@ class LiveTradingEngine:
         # 🧪 ENHANCED: Market Context Analysis & Pre-Trading Backtest
         await self._initialize_market_context()
 
+        # 📊 Load existing positions from exchange (before starting trading)
+        await self._load_existing_positions()
+
         # Preload historical data if configured
         preload_candles = getattr(self.config, "preload_candles", 0)
         if preload_candles > 0:
@@ -1443,6 +1449,69 @@ class LiveTradingEngine:
                 "⚠️ [MARKET_CONTEXT] Continuing with default trading settings"
             )
             # Don't fail the startup - continue with default settings
+
+    async def _load_existing_positions(self) -> None:
+        """Load existing positions from exchange at startup to prevent duplicate notifications."""
+        try:
+            # Initialize Binance client if not ready
+            if not hasattr(self, "client") or not self.client:
+                await self._init_binance_client()
+
+            if not self.client:
+                self.logger.warning("📊 [STARTUP] Cannot load positions - client not initialized")
+                self._startup_loading = False
+                return
+
+            # Get all positions from exchange
+            positions = self.client.get_positions()
+            existing_count = 0
+
+            for pos in positions:
+                symbol = pos["symbol"]
+                position_amt = float(pos.get("positionAmt", 0))
+
+                # Only track positions with non-zero amount
+                if abs(position_amt) > 0:
+                    entry_price = float(pos.get("entryPrice", 0))
+                    unrealized_pnl = float(pos.get("unRealizedProfit", 0))
+                    mark_price = float(pos.get("markPrice", 0))
+
+                    # Add to active_positions tracking
+                    self.active_positions[symbol] = {
+                        "side": "BUY" if position_amt > 0 else "SELL",
+                        "entry_price": entry_price,
+                        "quantity": abs(position_amt),
+                        "unrealized_pnl": unrealized_pnl,
+                        "created_time": None,  # Unknown for existing positions
+                        "from_startup": True,  # Mark as loaded from startup
+                    }
+                    existing_count += 1
+
+                    self.logger.info(
+                        "📊 [STARTUP] Loaded existing position: %s %s %.3f @ %.4f (P&L: $%.2f)",
+                        "LONG" if position_amt > 0 else "SHORT",
+                        symbol,
+                        abs(position_amt),
+                        entry_price,
+                        unrealized_pnl,
+                    )
+
+            if existing_count > 0:
+                self.logger.info(
+                    "📊 [STARTUP] ✅ Loaded %d existing position(s) - no Telegram notifications sent",
+                    existing_count,
+                )
+            else:
+                self.logger.info("📊 [STARTUP] No existing positions found")
+
+            # IMPORTANT: Set flag to False - now we'll send notifications for NEW positions
+            self._startup_loading = False
+            self.logger.info("📊 [STARTUP] Position loading complete - Telegram notifications enabled")
+
+        except Exception as e:
+            self.logger.warning("📊 [STARTUP] Failed to load existing positions: %s", e)
+            # Still set flag to False to enable notifications
+            self._startup_loading = False
 
     async def _preload_historical_data(self, limit: int) -> None:
         """Preload historical candle data for all symbols before trading starts."""
@@ -3044,6 +3113,41 @@ class LiveTradingEngine:
                             symbol,
                         )
 
+                        # 📱 Send Telegram notification for NEW positions (not startup loaded)
+                        if (
+                            self.telegram_bot
+                            and self.telegram_trade_notifications
+                            and not self._startup_loading
+                        ):
+                            try:
+                                # Calculate leverage and margin
+                                leverage = self.leverage
+                                notional = avg_fill_price * executed_qty
+                                margin_used = notional / leverage
+
+                                trade_info = {
+                                    "symbol": symbol,
+                                    "side": "LONG" if order_side == "BUY" else "SHORT",
+                                    "entry_price": avg_fill_price,
+                                    "quantity": executed_qty,
+                                    "leverage": leverage,
+                                    "notional": notional,
+                                    "margin_used": margin_used,
+                                    "stop_loss": sl_price,
+                                    "take_profit": tp_prices[0] if tp_prices else None,
+                                    "reason": f"Signal strength: {strength:.2f}",
+                                }
+
+                                # Send async (non-blocking)
+                                asyncio.create_task(
+                                    self.telegram_bot.send_trade_opened(trade_info)
+                                )
+                                self.logger.info("📱 [TELEGRAM] Trade opened notification sent")
+                            except Exception as tg_e:
+                                self.logger.warning(
+                                    "📱 [TELEGRAM] Failed to send notification: %s", tg_e
+                                )
+
                         # 🤖 Register position with RL Position Advisor
                         if self.rl_position_advisor:
                             try:
@@ -4615,6 +4719,51 @@ class LiveTradingEngine:
 
                         self.logger.info(
                             f"🧠 [ML_LEARN] Trade {trade_id} sent to ML Learning System for analysis"
+                        )
+
+                # 📱 Send Telegram notification for closed position
+                if self.telegram_bot and self.telegram_trade_notifications:
+                    try:
+                        # Calculate PnL
+                        quantity = pending_trade.get("quantity", 0.0)
+                        if side == "BUY":
+                            pnl = (current_price - entry_price) * quantity
+                        else:  # SELL
+                            pnl = (entry_price - current_price) * quantity
+
+                        pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0
+
+                        # Calculate duration
+                        entry_time = pending_trade.get("entry_time")
+                        duration_str = "Unknown"
+                        if entry_time:
+                            from datetime import datetime, timezone
+                            now = datetime.now(timezone.utc)
+                            duration = now - entry_time
+                            hours = int(duration.total_seconds() // 3600)
+                            minutes = int((duration.total_seconds() % 3600) // 60)
+                            duration_str = f"{hours}h {minutes}m"
+
+                        trade_info = {
+                            "symbol": symbol,
+                            "side": "LONG" if side == "BUY" else "SHORT",
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "quantity": quantity,
+                            "pnl": pnl,
+                            "pnl_pct": pnl_pct,
+                            "duration": duration_str,
+                            "reason": "Take Profit" if "tp" in exit_reason else "Stop Loss" if "sl" in exit_reason else "Manual Close",
+                        }
+
+                        # Send async (non-blocking)
+                        asyncio.create_task(
+                            self.telegram_bot.send_trade_closed(trade_info)
+                        )
+                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent")
+                    except Exception as tg_e:
+                        self.logger.warning(
+                            "📱 [TELEGRAM] Failed to send close notification: %s", tg_e
                         )
 
                 # Clean up pending trade
