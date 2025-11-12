@@ -1488,6 +1488,17 @@ class LiveTradingEngine:
                 # 📱 Send Telegram notification about existing positions at startup
                 if self.telegram_bot and self.telegram_trade_notifications:
                     try:
+                        # Get account balance
+                        account_balance = 0.0
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    break
+                        except Exception as bal_e:
+                            self.logger.debug("Failed to fetch account balance: %s", bal_e)
+
                         # Get current prices from exchange
                         current_prices = {}
                         try:
@@ -1569,7 +1580,7 @@ class LiveTradingEngine:
 ╰─────────────────────╯
 
 <b>Positions:</b> {existing_count} open
-<b>Total Value:</b> ${total_notional:,.2f}
+<b>USDT Balance:</b> {account_balance:,.2f} USDT
 <b>Margin Used:</b> ${total_margin:,.2f}
 <b>Leverage:</b> {self.leverage}x
 
