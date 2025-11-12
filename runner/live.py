@@ -1139,8 +1139,21 @@ class LiveTradingEngine:
         if self.dashboard:
             try:
                 self.logger.info("📊 [DASHBOARD] Generating initial dashboard...")
+
+                # Принудительно получаем свежие данные из portfolio_tracker
+                if self.portfolio_tracker:
+                    try:
+                        self.portfolio_tracker.log_portfolio_summary()
+                        self.logger.info("📊 [DASHBOARD] Portfolio data refreshed for dashboard")
+                    except Exception as pt_e:
+                        self.logger.debug("📊 [DASHBOARD] Portfolio refresh failed: %s", pt_e)
+
+                # Передаём все данные включая enhanced_ai
+                enhanced_ai = getattr(self, 'enhanced_ai', None)
                 dashboard_path = await self.dashboard.update_dashboard(
-                    trading_engine=self, adaptive_learning=self.adaptive_learning
+                    trading_engine=self,
+                    adaptive_learning=self.adaptive_learning,
+                    enhanced_ai=enhanced_ai
                 )
 
                 if dashboard_path:
@@ -1158,7 +1171,7 @@ class LiveTradingEngine:
                             file_url,
                         )
                         self.logger.info(
-                            "📊 [DASHBOARD] 🔄 Will auto-update every 30 seconds during trading"
+                            "📊 [DASHBOARD] 🔄 Auto-updates: every 5s (first 30 iterations), then every 30s"
                         )
                     except Exception as browser_e:
                         self.logger.warning(
@@ -1801,8 +1814,18 @@ class LiveTradingEngine:
                             "[LEARNING_VIZ] Failed to generate visualization: %s", viz_e
                         )
 
-                # 📊 Update Enhanced Dashboard (every 30 iterations ~ 30 seconds)
-                if self.dashboard and self.iteration % 30 == 0:
+                # 📊 Update Enhanced Dashboard
+                # Быстрее в начале (каждые 5 итераций), потом реже (каждые 30)
+                should_update_dashboard = False
+                if self.dashboard:
+                    if self.iteration <= 30:
+                        # Первые 30 итераций - обновлять каждые 5 секунд
+                        should_update_dashboard = self.iteration % 5 == 0
+                    else:
+                        # После 30 итераций - обновлять каждые 30 секунд
+                        should_update_dashboard = self.iteration % 30 == 0
+
+                if should_update_dashboard:
                     try:
                         await self._update_enhanced_dashboard()
                     except Exception as dash_e:
