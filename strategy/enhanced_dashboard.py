@@ -87,6 +87,12 @@ class DashboardData:
     weekly_pnl: float = 0.0
     monthly_pnl: float = 0.0
 
+    # Risk Metrics
+    total_margin_used: float = 0.0
+    margin_usage_pct: float = 0.0
+    free_margin: float = 0.0
+    largest_position_margin: float = 0.0
+
     def __post_init__(self):
         """Initialize list fields after creation."""
         if self.recent_trades is None:
@@ -382,17 +388,37 @@ class EnhancedDashboardGenerator:
             # Детали открытых позиций
             data.open_positions_details = []
             for pos in stats.open_positions[:10]:  # Последние 10
+                # Рассчитываем реальные значения
+                notional_value = pos.notional_value if pos.notional_value else (pos.quantity * pos.current_price)
+                leverage = pos.leverage if pos.leverage and pos.leverage > 0 else 1.0
+                margin_used = notional_value / leverage  # Реальный залог
+
                 data.open_positions_details.append({
                     'symbol': pos.symbol,
                     'side': pos.side,
                     'entry_price': pos.entry_price,
                     'current_price': pos.current_price,
                     'quantity': pos.quantity,
-                    'notional': pos.notional_value,
+                    'notional': notional_value,
+                    'margin_used': margin_used,
                     'pnl': pos.unrealized_pnl,
                     'pnl_pct': pos.unrealized_pnl_pct,
-                    'leverage': pos.leverage
+                    'leverage': leverage,
+                    'liquidation_price': getattr(pos, 'liquidation_price', None)
                 })
+
+            # Рассчитываем risk metrics
+            if data.open_positions_details:
+                data.total_margin_used = sum(pos['margin_used'] for pos in data.open_positions_details)
+                data.largest_position_margin = max((pos['margin_used'] for pos in data.open_positions_details), default=0.0)
+
+                # Margin usage % от account balance
+                if data.account_balance > 0:
+                    data.margin_usage_pct = (data.total_margin_used / data.account_balance) * 100
+                    data.free_margin = data.account_balance - data.total_margin_used
+                else:
+                    data.margin_usage_pct = 0.0
+                    data.free_margin = 0.0
 
             # Последние сделки (из portfolio_tracker history если есть)
             if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
@@ -830,57 +856,6 @@ class EnhancedDashboardGenerator:
             </div>
         </div>
 
-        <!-- 🧠 GRU Predictions & ML Learning -->
-        <div class="main-grid">
-            <div class="card">
-                <h3>🔮 GRU Price Prediction</h3>
-                {self._generate_gru_section(latest)}
-            </div>
-
-            <div class="card">
-                <h3>🧠 ML Learning Progress</h3>
-                <div class="metric">
-                    <span class="metric-label">📚 Samples Collected</span>
-                    <span class="metric-value">{latest.ml_samples_collected}/{latest.ml_samples_needed}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Progress</span>
-                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden;">
-                        <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: {(latest.ml_samples_collected / latest.ml_samples_needed * 100):.1f}%; transition: width 0.3s;"></div>
-                    </div>
-                    <span class="metric-value">{(latest.ml_samples_collected / latest.ml_samples_needed * 100):.1f}%</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">🎯 Prediction Accuracy</span>
-                    <span class="metric-value">{latest.ml_prediction_accuracy:.1%}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">💰 Avg PnL Prediction</span>
-                    <span class="metric-value {'positive' if latest.ml_avg_pnl_prediction >= 0 else 'negative'}">{latest.ml_avg_pnl_prediction:+.2f}%</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>📊 Open Positions</h3>
-                <div class="metric">
-                    <span class="metric-label">🎯 Active Positions</span>
-                    <span class="metric-value">{latest.open_positions:,}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">💵 Total Value</span>
-                    <span class="metric-value">${latest.total_position_value:,.2f}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">📈 Largest Position</span>
-                    <span class="metric-value">${latest.largest_position:,.2f}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">💎 Available Balance</span>
-                    <span class="metric-value">${latest.available_balance:,.2f}</span>
-                </div>
-            </div>
-        </div>
-
         <!-- 📊 Extended Trading Stats -->
         <div class="main-grid">
             <div class="card">
@@ -939,6 +914,42 @@ class EnhancedDashboardGenerator:
                 <div class="metric">
                     <span class="metric-label">Monthly %</span>
                     <span class="metric-value {'positive' if latest.monthly_pnl >= 0 else 'negative'}">{(latest.monthly_pnl/latest.account_balance*100 if latest.account_balance > 0 else 0):+.2f}%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⚠️ Risk Metrics -->
+        <div class="main-grid">
+            <div class="card">
+                <h3>💰 Total Margin Used</h3>
+                <div class="metric">
+                    <span class="metric-label">Used Margin</span>
+                    <span class="metric-value">${latest.total_margin_used:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Free Margin</span>
+                    <span class="metric-value positive">${latest.free_margin:,.2f}</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📊 Margin Usage</h3>
+                <div class="metric">
+                    <span class="metric-label">Usage %</span>
+                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
+                        <div style="background: {'linear-gradient(90deg, #ff4757 0%, #ffa502 100%)' if latest.margin_usage_pct > 80 else 'linear-gradient(90deg, #ffa502 0%, #00ff88 100%)' if latest.margin_usage_pct > 50 else 'linear-gradient(90deg, #00ff88 0%, #00d9ff 100%)'}; height: 100%; width: {min(latest.margin_usage_pct, 100):.1f}%; transition: width 0.3s;"></div>
+                    </div>
+                    <span class="metric-value {'negative' if latest.margin_usage_pct > 80 else 'positive' if latest.margin_usage_pct < 50 else ''}">{latest.margin_usage_pct:.1f}%</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🎯 Largest Position</h3>
+                <div class="metric">
+                    <span class="metric-label">Margin Required</span>
+                    <span class="metric-value">${latest.largest_position_margin:,.2f}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">% of Balance</span>
+                    <span class="metric-value">{(latest.largest_position_margin/latest.account_balance*100 if latest.account_balance > 0 else 0):.1f}%</span>
                 </div>
             </div>
         </div>
@@ -1239,60 +1250,6 @@ class EnhancedDashboardGenerator:
 </html>
         """
 
-    def _generate_gru_section(self, data: DashboardData) -> str:
-        """Generate GRU prediction section HTML."""
-        if data.gru_prediction and data.gru_current_price:
-            price_change = data.gru_prediction - data.gru_current_price
-            price_change_pct = (price_change / data.gru_current_price) * 100
-
-            # Direction emoji and color
-            if data.gru_direction == "LONG":
-                direction_emoji = "📈"
-                direction_color = "#00ff88"
-            elif data.gru_direction == "SHORT":
-                direction_emoji = "📉"
-                direction_color = "#ff4757"
-            else:
-                direction_emoji = "➡️"
-                direction_color = "#ffa502"
-
-            return f"""
-                <div class="metric">
-                    <span class="metric-label">💵 Current Price</span>
-                    <span class="metric-value">${data.gru_current_price:,.2f}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">🔮 Predicted Price</span>
-                    <span class="metric-value">${data.gru_prediction:,.2f}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">📊 Expected Change</span>
-                    <span class="metric-value {'positive' if price_change >= 0 else 'negative'}">{price_change:+,.2f} ({price_change_pct:+.2f}%)</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">🎯 Direction</span>
-                    <span class="metric-value" style="color: {direction_color}; font-size: 1.5em;">{direction_emoji} {data.gru_direction}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">💪 Confidence</span>
-                    <div style="background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin-top: 5px;">
-                        <div style="background: linear-gradient(90deg, #00ff88 0%, #00d9ff 100%); height: 100%; width: {(data.gru_confidence or 0) * 100:.1f}%; transition: width 0.3s;"></div>
-                    </div>
-                    <span class="metric-value">{(data.gru_confidence or 0) * 100:.1f}%</span>
-                </div>
-            """
-        else:
-            return """
-                <div class="metric">
-                    <span class="metric-label">ℹ️ Status</span>
-                    <span class="metric-value" style="opacity: 0.6;">Waiting for prediction...</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">⏳ Info</span>
-                    <span class="metric-value" style="opacity: 0.6; font-size: 0.9em;">GRU model will predict next price movement</span>
-                </div>
-            """
-
     def _generate_positions_table(self, data: DashboardData) -> str:
         """Generate table of open positions."""
         if not data.open_positions_details or len(data.open_positions_details) == 0:
@@ -1308,17 +1265,22 @@ class EnhancedDashboardGenerator:
             side_badge = f'<span class="badge badge-long">🟢 LONG</span>' if pos['side'] == 'LONG' else f'<span class="badge badge-short">🔴 SHORT</span>'
             pnl_class = 'positive' if pos['pnl'] >= 0 else 'negative'
 
+            # Liquidation price если доступно
+            liq_price = f"${pos['liquidation_price']:,.4f}" if pos.get('liquidation_price') else "N/A"
+
             rows += f"""
                 <tr>
                     <td><strong>{pos['symbol']}</strong></td>
                     <td>{side_badge}</td>
-                    <td>{pos['leverage']}x</td>
+                    <td><strong>{pos['leverage']:.1f}x</strong></td>
                     <td>${pos['entry_price']:,.4f}</td>
                     <td>${pos['current_price']:,.4f}</td>
                     <td>{pos['quantity']:.4f}</td>
                     <td>${pos['notional']:,.2f}</td>
+                    <td><strong>${pos['margin_used']:,.2f}</strong></td>
                     <td class="{pnl_class}"><strong>${pos['pnl']:+,.2f}</strong></td>
                     <td class="{pnl_class}"><strong>{pos['pnl_pct']:+.2f}%</strong></td>
+                    <td style="opacity: 0.8;">{liq_price}</td>
                 </tr>
             """
 
@@ -1331,12 +1293,14 @@ class EnhancedDashboardGenerator:
                             <th>Symbol</th>
                             <th>Side</th>
                             <th>Leverage</th>
-                            <th>Entry Price</th>
-                            <th>Current Price</th>
+                            <th>Entry</th>
+                            <th>Current</th>
                             <th>Quantity</th>
                             <th>Notional</th>
+                            <th>Margin Used</th>
                             <th>P&L</th>
                             <th>P&L %</th>
+                            <th>Liquidation</th>
                         </tr>
                     </thead>
                     <tbody>
