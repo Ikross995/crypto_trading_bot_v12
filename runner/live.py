@@ -1488,10 +1488,20 @@ class LiveTradingEngine:
                 # 📱 Send Telegram notification about existing positions at startup
                 if self.telegram_bot and self.telegram_trade_notifications:
                     try:
+                        # Get current prices from exchange
+                        current_prices = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                ticker = self.client.get_ticker_price(symbol)
+                                current_prices[symbol] = float(ticker.get("price", 0))
+                        except Exception as price_e:
+                            self.logger.debug("Failed to fetch current prices: %s", price_e)
+
                         # Prepare positions summary
                         positions_list = []
                         total_pnl = 0.0
                         total_margin = 0.0
+                        total_notional = 0.0
 
                         for symbol, pos_data in self.active_positions.items():
                             side = pos_data["side"]
@@ -1499,57 +1509,172 @@ class LiveTradingEngine:
                             quantity = pos_data["quantity"]
                             pnl = pos_data["unrealized_pnl"]
 
-                            # Calculate margin used
+                            # Calculate values
                             notional = entry_price * quantity
                             margin = notional / self.leverage
+                            roi_pct = (pnl / margin * 100) if margin > 0 else 0
+
+                            # Get current price
+                            current_price = current_prices.get(symbol, entry_price)
+                            price_change_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+                            # Estimate liquidation price (simplified)
+                            if side == "BUY":
+                                liq_price = entry_price * (1 - 0.9 / self.leverage)  # 90% margin loss
+                            else:
+                                liq_price = entry_price * (1 + 0.9 / self.leverage)
 
                             total_pnl += pnl
                             total_margin += margin
+                            total_notional += notional
 
                             positions_list.append({
                                 "symbol": symbol,
                                 "side": "LONG" if side == "BUY" else "SHORT",
                                 "entry_price": entry_price,
+                                "current_price": current_price,
                                 "quantity": quantity,
                                 "pnl": pnl,
+                                "roi_pct": roi_pct,
+                                "price_change_pct": price_change_pct,
                                 "margin": margin,
-                                "notional": notional
+                                "notional": notional,
+                                "leverage": self.leverage,
+                                "liq_price": liq_price
                             })
 
-                        # Sort by PnL (highest first)
-                        positions_list.sort(key=lambda x: x["pnl"], reverse=True)
+                        # Sort by ROI% (highest first)
+                        positions_list.sort(key=lambda x: x["roi_pct"], reverse=True)
 
-                        # Build message
-                        pnl_emoji = "💰" if total_pnl >= 0 else "📉"
-                        message = f"""<b>🚀 BOT STARTED - EXISTING POSITIONS</b>
+                        # Calculate statistics
+                        avg_roi = total_pnl / total_margin * 100 if total_margin > 0 else 0
+                        best_pos = positions_list[0] if positions_list else None
+                        worst_pos = positions_list[-1] if positions_list else None
+                        winning_count = sum(1 for p in positions_list if p["pnl"] > 0)
+                        losing_count = sum(1 for p in positions_list if p["pnl"] < 0)
 
-━━━━━━━━━━━━━━━━━━━━
-<b>📊 PORTFOLIO SUMMARY</b>
-━━━━━━━━━━━━━━━━━━━━
+                        # Build beautiful message
+                        from datetime import datetime
+                        current_time = datetime.now().strftime("%H:%M:%S")
 
-Open Positions: <b>{existing_count}</b>
-Total P&L: <b>{pnl_emoji} ${total_pnl:+,.2f}</b>
-Total Margin Used: <b>${total_margin:,.2f}</b>
+                        # Header with box
+                        message = f"""╔═══════════════════════╗
+║  <b>🤖 TRADING BOT ONLINE</b>  ║
+╚═══════════════════════╝
 
-━━━━━━━━━━━━━━━━━━━━
-<b>📈 POSITION DETAILS</b>
-━━━━━━━━━━━━━━━━━━━━
+⏰ <i>Started at {current_time} UTC</i>
+
+╭─────────────────────╮
+│ <b>💼 PORTFOLIO OVERVIEW</b> │
+╰─────────────────────╯
+
+<b>Positions:</b> {existing_count} open
+<b>Total Value:</b> ${total_notional:,.2f}
+<b>Margin Used:</b> ${total_margin:,.2f}
+<b>Leverage:</b> {self.leverage}x
+
 """
 
-                        # Add each position
+                        # P&L Section with visual indicator
+                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                        roi_emoji = "🚀" if avg_roi > 5 else "📈" if avg_roi > 2 else "✅" if avg_roi > 0 else "⚠️" if avg_roi > -2 else "📉"
+
+                        # Progress bar for P&L
+                        bar_length = 10
+                        if avg_roi >= 0:
+                            filled = min(int(avg_roi / 2), bar_length)  # 2% per segment
+                            bar = "█" * filled + "░" * (bar_length - filled)
+                        else:
+                            filled = min(int(abs(avg_roi) / 2), bar_length)
+                            bar = "▓" * filled + "░" * (bar_length - filled)
+
+                        message += f"""╭─────────────────────╮
+│ <b>{roi_emoji} PERFORMANCE</b>      │
+╰─────────────────────╯
+
+<b>Total P&L:</b> {pnl_emoji} <b>${total_pnl:+,.2f}</b>
+<b>ROI:</b> <b>{avg_roi:+.2f}%</b>
+[{bar}] {avg_roi:+.1f}%
+
+<b>Winners:</b> {winning_count} 🎯  |  <b>Losers:</b> {losing_count} 💤
+
+"""
+
+                        # Best/Worst positions
+                        if best_pos:
+                            best_emoji = "🏆" if best_pos["roi_pct"] > 10 else "⭐" if best_pos["roi_pct"] > 5 else "✨"
+                            message += f"""<b>{best_emoji} Best:</b> {best_pos["symbol"]} <b>{best_pos["roi_pct"]:+.2f}%</b>
+"""
+                        if worst_pos:
+                            worst_emoji = "💎" if worst_pos["roi_pct"] >= 0 else "⚡"
+                            message += f"""<b>{worst_emoji} Worst:</b> {worst_pos["symbol"]} <b>{worst_pos["roi_pct"]:+.2f}%</b>
+
+"""
+
+                        # Position details
+                        message += """╔════════════════════════╗
+║  <b>📊 ACTIVE POSITIONS</b>   ║
+╚════════════════════════╝
+
+"""
+
+                        # Add each position with rich details
                         for i, pos in enumerate(positions_list, 1):
-                            side_emoji = "🟢" if pos["side"] == "LONG" else "🔴"
-                            pnl_emoji = "💚" if pos["pnl"] >= 0 else "💔"
+                            # Position type emoji
+                            direction_emoji = "🎯" if pos["side"] == "LONG" else "🎲"
 
-                            message += f"""
-<b>{i}. {pos["symbol"]}</b> {side_emoji} {pos["side"]}
-Entry: ${pos["entry_price"]:,.4f} × {pos["quantity"]:.3f}
-P&L: {pnl_emoji} <b>${pos["pnl"]:+,.2f}</b>
-Margin: ${pos["margin"]:.2f}
+                            # P&L emoji based on ROI
+                            if pos["roi_pct"] > 10:
+                                status_emoji = "🚀"
+                            elif pos["roi_pct"] > 5:
+                                status_emoji = "📈"
+                            elif pos["roi_pct"] > 2:
+                                status_emoji = "✅"
+                            elif pos["roi_pct"] > 0:
+                                status_emoji = "🔹"
+                            elif pos["roi_pct"] > -2:
+                                status_emoji = "⚠️"
+                            elif pos["roi_pct"] > -5:
+                                status_emoji = "📉"
+                            else:
+                                status_emoji = "🔥"
+
+                            # Price change emoji
+                            if pos["price_change_pct"] > 5:
+                                price_emoji = "🔥"
+                            elif pos["price_change_pct"] > 2:
+                                price_emoji = "⬆️"
+                            elif pos["price_change_pct"] > 0:
+                                price_emoji = "↗️"
+                            elif pos["price_change_pct"] > -2:
+                                price_emoji = "↘️"
+                            elif pos["price_change_pct"] > -5:
+                                price_emoji = "⬇️"
+                            else:
+                                price_emoji = "❄️"
+
+                            message += f"""╭──────────────────╮
+│ <b>{i}. {pos["symbol"]}</b> {direction_emoji} {pos["side"]}
+╰──────────────────╯
+<b>Entry:</b> ${pos["entry_price"]:,.4f}
+<b>Now:</b> ${pos["current_price"]:,.4f} {price_emoji} <b>{pos["price_change_pct"]:+.2f}%</b>
+<b>Qty:</b> {pos["quantity"]:.4f} | <b>Leverage:</b> {pos["leverage"]}x
+
+{status_emoji} <b>P&L: ${pos["pnl"]:+,.2f}</b> (<b>{pos["roi_pct"]:+.2f}%</b>)
+💵 <b>Margin:</b> ${pos["margin"]:.2f}
+⚡ <b>Liq:</b> ${pos["liq_price"]:,.4f}
+
 """
 
-                        message += "\n━━━━━━━━━━━━━━━━━━━━"
-                        message += "\n\n<i>✅ Monitoring active. You'll receive updates when positions close.</i>"
+                        # Footer
+                        message += """╔═══════════════════════╗
+║  <b>🎯 MONITORING ACTIVE</b> ║
+╚═══════════════════════╝
+
+<i>✅ You will receive updates for:
+• New position opens
+• Position closures with P&L
+• Important market events</i>"""
 
                         # Send async
                         asyncio.create_task(
@@ -1560,6 +1685,8 @@ Margin: ${pos["margin"]:.2f}
                         self.logger.warning(
                             "📱 [TELEGRAM] Failed to send startup summary: %s", tg_e
                         )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
             else:
                 self.logger.info("📊 [STARTUP] No existing positions found")
 
