@@ -4756,6 +4756,22 @@ class LiveTradingEngine:
                         except Exception:
                             pass
 
+                        # Get open orders info (TP/SL that were set)
+                        tp_orders = []
+                        sl_orders = []
+                        try:
+                            orders = self.client.get_open_orders(symbol)
+                            for order in orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+                        except Exception:
+                            pass
+
                         # Calculate PnL
                         quantity = pending_trade.get("quantity", 0.0)
                         if side == "BUY":
@@ -4764,6 +4780,12 @@ class LiveTradingEngine:
                             pnl = (entry_price - current_price) * quantity
 
                         pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0
+
+                        # Calculate ROI from margin
+                        leverage = self.leverage
+                        notional = entry_price * quantity
+                        margin_used = notional / leverage
+                        roi_pct = (pnl / margin_used * 100) if margin_used > 0 else 0
 
                         # Calculate duration
                         entry_time = pending_trade.get("entry_time")
@@ -4784,9 +4806,14 @@ class LiveTradingEngine:
                             "quantity": quantity,
                             "pnl": pnl,
                             "pnl_pct": pnl_pct,
+                            "roi_pct": roi_pct,
+                            "margin_used": margin_used,
+                            "leverage": leverage,
                             "duration": duration_str,
                             "reason": "Take Profit" if "tp" in exit_reason else "Stop Loss" if "sl" in exit_reason else "Manual Close",
                             "account_balance": account_balance,
+                            "tp_orders": tp_orders,
+                            "sl_orders": sl_orders,
                         }
 
                         # Send async (non-blocking)

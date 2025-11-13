@@ -369,28 +369,29 @@ Margin: ${pos['margin_used']:,.2f}
         """Форматирует сообщение о закрытии позиции."""
         from datetime import datetime
 
-        # Emojis based on P&L
+        # Emojis based on ROI
         pnl = trade.get('pnl', 0)
         pnl_pct = trade.get('pnl_pct', 0)
+        roi_pct = trade.get('roi_pct', pnl_pct)  # Use ROI if available, fallback to pnl_pct
 
-        if pnl >= 0:
-            if pnl_pct > 10:
+        if roi_pct >= 0:
+            if roi_pct > 10:
                 result_emoji = "🚀"
                 status = "HUGE WIN"
-            elif pnl_pct > 5:
+            elif roi_pct > 5:
                 result_emoji = "🎯"
                 status = "GREAT WIN"
-            elif pnl_pct > 2:
+            elif roi_pct > 2:
                 result_emoji = "✅"
                 status = "WIN"
             else:
                 result_emoji = "✔️"
                 status = "SMALL WIN"
         else:
-            if pnl_pct < -10:
+            if roi_pct < -10:
                 result_emoji = "🔥"
                 status = "BIG LOSS"
-            elif pnl_pct < -5:
+            elif roi_pct < -5:
                 result_emoji = "📉"
                 status = "LOSS"
             else:
@@ -415,6 +416,12 @@ Margin: ${pos['margin_used']:,.2f}
 <b>Quantity:</b> {trade['quantity']:.4f}
 """
 
+        # Show leverage and margin if available
+        if trade.get('leverage'):
+            message += f"<b>Leverage:</b> {trade['leverage']}x"
+            if trade.get('margin_used'):
+                message += f" | <b>Margin:</b> ${trade['margin_used']:.2f}\n"
+
         # Price movement
         price_change = trade['exit_price'] - trade['entry_price']
         price_change_pct = (price_change / trade['entry_price'] * 100) if trade['entry_price'] > 0 else 0
@@ -424,32 +431,65 @@ Margin: ${pos['margin_used']:,.2f}
             change_emoji = "⬇️" if price_change_pct < -2 else "↘️"
         message += f"\n{change_emoji} <b>Price Move:</b> ${price_change:+,.4f} ({price_change_pct:+.2f}%)"
 
+        # Show limit orders that were set
+        tp_orders = trade.get('tp_orders', [])
+        sl_orders = trade.get('sl_orders', [])
+        if tp_orders or sl_orders:
+            message += "\n\n╭─────────────────────╮\n│ <b>📋 LIMIT ORDERS SET</b> │\n╰─────────────────────╯\n"
+
+            if tp_orders:
+                tp_count = len(tp_orders)
+                tp_badge = f" ({tp_count}x)" if tp_count > 1 else ""
+                first_tp = tp_orders[0] if tp_orders else 0
+                tp_dist = ((first_tp - trade['entry_price']) / trade['entry_price'] * 100) if trade['entry_price'] > 0 else 0
+                message += f"\n🎯 <b>TP:</b> ${first_tp:,.4f}{tp_badge} ({tp_dist:+.2f}%)"
+
+            if sl_orders:
+                first_sl = sl_orders[0] if sl_orders else 0
+                sl_dist = ((first_sl - trade['entry_price']) / trade['entry_price'] * 100) if trade['entry_price'] > 0 else 0
+                message += f"\n🛡️ <b>SL:</b> ${first_sl:,.4f} ({sl_dist:+.2f}%)"
+
         # Result section
         pnl_bar = ""
-        if pnl_pct >= 0:
-            filled = min(int(pnl_pct / 2), 10)
+        if roi_pct >= 0:
+            filled = min(int(roi_pct / 2), 10)
             pnl_bar = "█" * filled + "░" * (10 - filled)
         else:
-            filled = min(int(abs(pnl_pct) / 2), 10)
+            filled = min(int(abs(roi_pct) / 2), 10)
             pnl_bar = "▓" * filled + "░" * (10 - filled)
 
         message += f"\n\n╭─────────────────────╮\n│ <b>{result_emoji} {status}</b>\n╰─────────────────────╯\n"
         message += f"\n<b>P&L:</b> ${pnl:+,.2f} USDT"
-        message += f"\n<b>ROI:</b> {pnl_pct:+.2f}%"
-        message += f"\n[{pnl_bar}] {pnl_pct:+.1f}%"
+        message += f"\n<b>ROI:</b> {roi_pct:+.2f}%"
+        message += f"\n[{pnl_bar}] {roi_pct:+.1f}%"
 
-        # Duration
+        # Duration and exit reason
         if trade.get('duration'):
             message += f"\n\n⏱️ <b>Duration:</b> {trade['duration']}"
 
-        # Exit reason
         if trade.get('reason'):
-            reason_emoji = "🎯" if "Profit" in trade['reason'] else "🛡️" if "Stop" in trade['reason'] else "👤"
-            message += f"\n{reason_emoji} <b>Exit:</b> <i>{trade['reason']}</i>"
+            reason = trade['reason']
+            # Better emoji for manual close
+            if "Manual" in reason:
+                reason_emoji = "👤"
+                reason_text = "Manual Close"
+            elif "Profit" in reason:
+                reason_emoji = "🎯"
+                reason_text = "Take Profit Hit"
+            elif "Stop" in reason:
+                reason_emoji = "🛡️"
+                reason_text = "Stop Loss Hit"
+            else:
+                reason_emoji = "📝"
+                reason_text = reason
+            message += f"\n{reason_emoji} <b>Exit:</b> <i>{reason_text}</i>"
 
-        # Balance if available
+        # ALWAYS show balance at the bottom
+        message += "\n\n╭─────────────────────╮\n│ <b>💰 ACCOUNT STATUS</b>   │\n╰─────────────────────╯\n"
         if trade.get('account_balance'):
-            message += f"\n\n💰 <b>Balance:</b> {trade['account_balance']:,.2f} USDT"
+            message += f"\n<b>Balance:</b> {trade['account_balance']:,.2f} USDT"
+        else:
+            message += f"\n<b>Balance:</b> <i>Not available</i>"
 
         message += "\n\n╚════════════════════════╝"
 
@@ -510,9 +550,12 @@ Margin: ${pos['margin_used']:,.2f}
         message += f"\n<b>Est. P&L:</b> ${pnl:+,.2f} USDT"
         message += f"\n<b>Est. ROI:</b> {pnl_pct:+.2f}%"
 
-        # Balance if available
+        # ALWAYS show balance at the bottom
+        message += "\n\n╭─────────────────────╮\n│ <b>💰 ACCOUNT STATUS</b>   │\n╰─────────────────────╯\n"
         if order.get('account_balance'):
-            message += f"\n\n💰 <b>Balance:</b> {order['account_balance']:,.2f} USDT"
+            message += f"\n<b>Balance:</b> {order['account_balance']:,.2f} USDT"
+        else:
+            message += f"\n<b>Balance:</b> <i>Not available</i>"
 
         message += "\n\n╚════════════════════════╝"
 
