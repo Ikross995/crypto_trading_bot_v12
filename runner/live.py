@@ -353,30 +353,19 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
 
-        # Telegram Notifications - NEW: TelegramDashboardBot with trade alerts
-        self.telegram = None
+        # Telegram Notifications
         self.telegram_bot = None
+        self.telegram_trade_notifications = getattr(config, "tg_trade_notifications", True)
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
+            if tg_token and tg_chat_id:
+                from infra.telegram_bot import TelegramDashboardBot
 
-            if tg_token and tg_chat_id and TelegramDashboardBot:
-                self.telegram_bot = TelegramDashboardBot(
-                    bot_token=tg_token,
-                    chat_id=tg_chat_id,
-                    config=config
-                )
-                self.logger.info("📱 [TELEGRAM] TelegramDashboardBot initialized (trade notifications enabled)")
-            elif tg_token and tg_chat_id:
-                # Fallback to old notifier if TelegramDashboardBot not available
-                try:
-                    from infra.telegram import init_notifier
-                    self.telegram = init_notifier(tg_token, tg_chat_id)
-                    self.logger.info("[TELEGRAM] Legacy notifier initialized")
-                except:
-                    pass
+                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id)
+                self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
             else:
-                self.logger.info("[TELEGRAM] Not configured (set TG_BOT_TOKEN and TG_CHAT_ID in .env)")
+                self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
         except Exception as e:
             self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
 
@@ -1498,9 +1487,271 @@ class LiveTradingEngine:
 
             if existing_count > 0:
                 self.logger.info(
-                    "📊 [STARTUP] ✅ Loaded %d existing position(s) - no Telegram notifications sent",
+                    "📊 [STARTUP] ✅ Loaded %d existing position(s)",
                     existing_count,
                 )
+
+                # 📱 Send Telegram notification about existing positions at startup
+                if self.telegram_bot and self.telegram_trade_notifications:
+                    try:
+                        # Get account balance
+                        account_balance = 0.0
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    break
+                        except Exception as bal_e:
+                            self.logger.debug("Failed to fetch account balance: %s", bal_e)
+
+                        # Get current prices from exchange
+                        current_prices = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                ticker = self.client.get_ticker_price(symbol)
+                                current_prices[symbol] = float(ticker.get("price", 0))
+                        except Exception as price_e:
+                            self.logger.debug("Failed to fetch current prices: %s", price_e)
+
+                        # Get open orders (TP/SL limit orders)
+                        all_open_orders = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                orders = self.client.get_open_orders(symbol)
+                                all_open_orders[symbol] = orders
+                        except Exception as orders_e:
+                            self.logger.debug("Failed to fetch open orders: %s", orders_e)
+
+                        # Prepare positions summary
+                        positions_list = []
+                        total_pnl = 0.0
+                        total_margin = 0.0
+                        total_notional = 0.0
+
+                        for symbol, pos_data in self.active_positions.items():
+                            side = pos_data["side"]
+                            entry_price = pos_data["entry_price"]
+                            quantity = pos_data["quantity"]
+                            pnl = pos_data["unrealized_pnl"]
+
+                            # Calculate values
+                            notional = entry_price * quantity
+                            margin = notional / self.leverage
+                            roi_pct = (pnl / margin * 100) if margin > 0 else 0
+
+                            # Get current price
+                            current_price = current_prices.get(symbol, entry_price)
+                            price_change_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+                            # Estimate liquidation price (simplified)
+                            if side == "BUY":
+                                liq_price = entry_price * (1 - 0.9 / self.leverage)  # 90% margin loss
+                            else:
+                                liq_price = entry_price * (1 + 0.9 / self.leverage)
+
+                            total_pnl += pnl
+                            total_margin += margin
+                            total_notional += notional
+
+                            # Extract TP/SL orders
+                            tp_orders = []
+                            sl_orders = []
+                            open_orders = all_open_orders.get(symbol, [])
+                            for order in open_orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+
+                            # Sort TP orders (closest first for LONG, furthest first for SHORT)
+                            if side == "BUY":
+                                tp_orders.sort()  # Ascending for LONG
+                            else:
+                                tp_orders.sort(reverse=True)  # Descending for SHORT
+
+                            # Get first TP and SL
+                            first_tp = tp_orders[0] if tp_orders else None
+                            first_sl = sl_orders[0] if sl_orders else None
+
+                            positions_list.append({
+                                "symbol": symbol,
+                                "side": "LONG" if side == "BUY" else "SHORT",
+                                "entry_price": entry_price,
+                                "current_price": current_price,
+                                "quantity": quantity,
+                                "pnl": pnl,
+                                "roi_pct": roi_pct,
+                                "price_change_pct": price_change_pct,
+                                "margin": margin,
+                                "notional": notional,
+                                "leverage": self.leverage,
+                                "liq_price": liq_price,
+                                "tp_price": first_tp,
+                                "sl_price": first_sl,
+                                "tp_count": len(tp_orders),
+                                "sl_count": len(sl_orders)
+                            })
+
+                        # Sort by ROI% (highest first)
+                        positions_list.sort(key=lambda x: x["roi_pct"], reverse=True)
+
+                        # Calculate statistics
+                        avg_roi = total_pnl / total_margin * 100 if total_margin > 0 else 0
+                        best_pos = positions_list[0] if positions_list else None
+                        worst_pos = positions_list[-1] if positions_list else None
+                        winning_count = sum(1 for p in positions_list if p["pnl"] > 0)
+                        losing_count = sum(1 for p in positions_list if p["pnl"] < 0)
+
+                        # Build beautiful message
+                        from datetime import datetime
+                        current_time = datetime.now().strftime("%H:%M:%S")
+
+                        # Header with box
+                        message = f"""╔═══════════════════════╗
+║  <b>🤖 TRADING BOT ONLINE</b>  ║
+╚═══════════════════════╝
+
+⏰ <i>Started at {current_time} UTC</i>
+
+╭─────────────────────╮
+│ <b>💼 PORTFOLIO OVERVIEW</b> │
+╰─────────────────────╯
+
+<b>Positions:</b> {existing_count} open
+<b>USDT Balance:</b> {account_balance:,.2f} USDT
+<b>Margin Used:</b> ${total_margin:,.2f}
+<b>Leverage:</b> {self.leverage}x
+
+"""
+
+                        # P&L Section with visual indicator
+                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                        roi_emoji = "🚀" if avg_roi > 5 else "📈" if avg_roi > 2 else "✅" if avg_roi > 0 else "⚠️" if avg_roi > -2 else "📉"
+
+                        # Progress bar for P&L
+                        bar_length = 10
+                        if avg_roi >= 0:
+                            filled = min(int(avg_roi / 2), bar_length)  # 2% per segment
+                            bar = "█" * filled + "░" * (bar_length - filled)
+                        else:
+                            filled = min(int(abs(avg_roi) / 2), bar_length)
+                            bar = "▓" * filled + "░" * (bar_length - filled)
+
+                        message += f"""╭─────────────────────╮
+│ <b>{roi_emoji} PERFORMANCE</b>      │
+╰─────────────────────╯
+
+<b>Total P&L:</b> {pnl_emoji} <b>${total_pnl:+,.2f}</b>
+<b>ROI:</b> <b>{avg_roi:+.2f}%</b>
+[{bar}] {avg_roi:+.1f}%
+
+<b>Winners:</b> {winning_count} 🎯  |  <b>Losers:</b> {losing_count} 💤
+
+"""
+
+                        # Best/Worst positions
+                        if best_pos:
+                            best_emoji = "🏆" if best_pos["roi_pct"] > 10 else "⭐" if best_pos["roi_pct"] > 5 else "✨"
+                            message += f"""<b>{best_emoji} Best:</b> {best_pos["symbol"]} <b>{best_pos["roi_pct"]:+.2f}%</b>
+"""
+                        if worst_pos:
+                            worst_emoji = "💎" if worst_pos["roi_pct"] >= 0 else "⚡"
+                            message += f"""<b>{worst_emoji} Worst:</b> {worst_pos["symbol"]} <b>{worst_pos["roi_pct"]:+.2f}%</b>
+
+"""
+
+                        # Position details
+                        message += """╔════════════════════════╗
+║  <b>📊 ACTIVE POSITIONS</b>   ║
+╚════════════════════════╝
+
+"""
+
+                        # Add each position with rich details
+                        for i, pos in enumerate(positions_list, 1):
+                            # Position type emoji
+                            direction_emoji = "🎯" if pos["side"] == "LONG" else "🎲"
+
+                            # P&L emoji based on ROI
+                            if pos["roi_pct"] > 10:
+                                status_emoji = "🚀"
+                            elif pos["roi_pct"] > 5:
+                                status_emoji = "📈"
+                            elif pos["roi_pct"] > 2:
+                                status_emoji = "✅"
+                            elif pos["roi_pct"] > 0:
+                                status_emoji = "🔹"
+                            elif pos["roi_pct"] > -2:
+                                status_emoji = "⚠️"
+                            elif pos["roi_pct"] > -5:
+                                status_emoji = "📉"
+                            else:
+                                status_emoji = "🔥"
+
+                            # Price change emoji
+                            if pos["price_change_pct"] > 5:
+                                price_emoji = "🔥"
+                            elif pos["price_change_pct"] > 2:
+                                price_emoji = "⬆️"
+                            elif pos["price_change_pct"] > 0:
+                                price_emoji = "↗️"
+                            elif pos["price_change_pct"] > -2:
+                                price_emoji = "↘️"
+                            elif pos["price_change_pct"] > -5:
+                                price_emoji = "⬇️"
+                            else:
+                                price_emoji = "❄️"
+
+                            # Build TP/SL info
+                            tp_sl_info = ""
+                            if pos["tp_price"]:
+                                tp_distance = ((pos["tp_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                tp_badge = f" ({pos['tp_count']}x)" if pos["tp_count"] > 1 else ""
+                                tp_sl_info += f"🎯 <b>TP:</b> ${pos['tp_price']:,.4f} ({tp_distance:+.2f}%){tp_badge}\n"
+                            if pos["sl_price"]:
+                                sl_distance = ((pos["sl_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                sl_badge = f" ({pos['sl_count']}x)" if pos["sl_count"] > 1 else ""
+                                tp_sl_info += f"🛡️ <b>SL:</b> ${pos['sl_price']:,.4f} ({sl_distance:+.2f}%){sl_badge}\n"
+
+                            message += f"""╭──────────────────╮
+│ <b>{i}. {pos["symbol"]}</b>  {direction_emoji}  <b>{pos["side"]}</b>
+╰──────────────────╯
+<b>Entry:</b> ${pos["entry_price"]:,.4f}
+<b>Now:</b> ${pos["current_price"]:,.4f} {price_emoji} <b>{pos["price_change_pct"]:+.2f}%</b>
+<b>Qty:</b> {pos["quantity"]:.4f} | <b>Leverage:</b> {pos["leverage"]}x
+
+{status_emoji} <b>P&L: ${pos["pnl"]:+,.2f}</b> (<b>{pos["roi_pct"]:+.2f}%</b>)
+💵 <b>Margin:</b> ${pos["margin"]:.2f}
+{tp_sl_info}⚡ <b>Liq:</b> ${pos["liq_price"]:,.4f}
+
+"""
+
+                        # Footer
+                        message += """╔═══════════════════════╗
+║  <b>🎯 MONITORING ACTIVE</b> ║
+╚═══════════════════════╝
+
+<i>✅ You will receive updates for:
+• New position opens
+• Position closures with P&L
+• Important market events</i>"""
+
+                        # Send async
+                        asyncio.create_task(
+                            self.telegram_bot.send_message(message, parse_mode="HTML")
+                        )
+                        self.logger.info("📱 [TELEGRAM] Startup positions summary sent")
+                    except Exception as tg_e:
+                        self.logger.warning(
+                            "📱 [TELEGRAM] Failed to send startup summary: %s", tg_e
+                        )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
             else:
                 self.logger.info("📊 [STARTUP] No existing positions found")
 
@@ -3120,10 +3371,29 @@ class LiveTradingEngine:
                             and not self._startup_loading
                         ):
                             try:
+                                # Get account balance
+                                account_balance = 0.0
+                                try:
+                                    account_info = self.client.get_account()
+                                    for asset in account_info.get("assets", []):
+                                        if asset.get("asset") == "USDT":
+                                            account_balance = float(asset.get("walletBalance", 0))
+                                            break
+                                except Exception:
+                                    pass
+
                                 # Calculate leverage and margin
                                 leverage = self.leverage
                                 notional = avg_fill_price * executed_qty
                                 margin_used = notional / leverage
+
+                                # Calculate distances for TP/SL
+                                tp_distance = None
+                                sl_distance = None
+                                if tp_prices and tp_prices[0]:
+                                    tp_distance = ((tp_prices[0] - avg_fill_price) / avg_fill_price * 100)
+                                if sl_price:
+                                    sl_distance = ((sl_price - avg_fill_price) / avg_fill_price * 100)
 
                                 trade_info = {
                                     "symbol": symbol,
@@ -3135,6 +3405,10 @@ class LiveTradingEngine:
                                     "margin_used": margin_used,
                                     "stop_loss": sl_price,
                                     "take_profit": tp_prices[0] if tp_prices else None,
+                                    "tp_distance": tp_distance,
+                                    "sl_distance": sl_distance,
+                                    "tp_count": len(tp_prices) if tp_prices else 0,
+                                    "account_balance": account_balance,
                                     "reason": f"Signal strength: {strength:.2f}",
                                 }
 
@@ -4724,6 +4998,33 @@ class LiveTradingEngine:
                 # 📱 Send Telegram notification for closed position
                 if self.telegram_bot and self.telegram_trade_notifications:
                     try:
+                        # Get account balance
+                        account_balance = 0.0
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    break
+                        except Exception:
+                            pass
+
+                        # Get open orders info (TP/SL that were set)
+                        tp_orders = []
+                        sl_orders = []
+                        try:
+                            orders = self.client.get_open_orders(symbol)
+                            for order in orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+                        except Exception:
+                            pass
+
                         # Calculate PnL
                         quantity = pending_trade.get("quantity", 0.0)
                         if side == "BUY":
@@ -4732,6 +5033,12 @@ class LiveTradingEngine:
                             pnl = (entry_price - current_price) * quantity
 
                         pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0
+
+                        # Calculate ROI from margin
+                        leverage = self.leverage
+                        notional = entry_price * quantity
+                        margin_used = notional / leverage
+                        roi_pct = (pnl / margin_used * 100) if margin_used > 0 else 0
 
                         # Calculate duration
                         entry_time = pending_trade.get("entry_time")
@@ -4752,19 +5059,27 @@ class LiveTradingEngine:
                             "quantity": quantity,
                             "pnl": pnl,
                             "pnl_pct": pnl_pct,
+                            "roi_pct": roi_pct,
+                            "margin_used": margin_used,
+                            "leverage": leverage,
                             "duration": duration_str,
                             "reason": "Take Profit" if "tp" in exit_reason else "Stop Loss" if "sl" in exit_reason else "Manual Close",
+                            "account_balance": account_balance,
+                            "tp_orders": tp_orders,
+                            "sl_orders": sl_orders,
                         }
 
                         # Send async (non-blocking)
                         asyncio.create_task(
                             self.telegram_bot.send_trade_closed(trade_info)
                         )
-                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent")
+                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent for %s", symbol)
                     except Exception as tg_e:
                         self.logger.warning(
                             "📱 [TELEGRAM] Failed to send close notification: %s", tg_e
                         )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
 
                 # Clean up pending trade
                 if hasattr(self, "pending_trades") and symbol in self.pending_trades:
