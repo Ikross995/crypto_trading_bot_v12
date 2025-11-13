@@ -3266,10 +3266,29 @@ class LiveTradingEngine:
                             and not self._startup_loading
                         ):
                             try:
+                                # Get account balance
+                                account_balance = 0.0
+                                try:
+                                    account_info = self.client.get_account()
+                                    for asset in account_info.get("assets", []):
+                                        if asset.get("asset") == "USDT":
+                                            account_balance = float(asset.get("walletBalance", 0))
+                                            break
+                                except Exception:
+                                    pass
+
                                 # Calculate leverage and margin
                                 leverage = self.leverage
                                 notional = avg_fill_price * executed_qty
                                 margin_used = notional / leverage
+
+                                # Calculate distances for TP/SL
+                                tp_distance = None
+                                sl_distance = None
+                                if tp_prices and tp_prices[0]:
+                                    tp_distance = ((tp_prices[0] - avg_fill_price) / avg_fill_price * 100)
+                                if sl_price:
+                                    sl_distance = ((sl_price - avg_fill_price) / avg_fill_price * 100)
 
                                 trade_info = {
                                     "symbol": symbol,
@@ -3281,6 +3300,10 @@ class LiveTradingEngine:
                                     "margin_used": margin_used,
                                     "stop_loss": sl_price,
                                     "take_profit": tp_prices[0] if tp_prices else None,
+                                    "tp_distance": tp_distance,
+                                    "sl_distance": sl_distance,
+                                    "tp_count": len(tp_prices) if tp_prices else 0,
+                                    "account_balance": account_balance,
                                     "reason": f"Signal strength: {strength:.2f}",
                                 }
 
@@ -4722,6 +4745,17 @@ class LiveTradingEngine:
                 # 📱 Send Telegram notification for closed position
                 if self.telegram_bot and self.telegram_trade_notifications:
                     try:
+                        # Get account balance
+                        account_balance = 0.0
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    break
+                        except Exception:
+                            pass
+
                         # Calculate PnL
                         quantity = pending_trade.get("quantity", 0.0)
                         if side == "BUY":
@@ -4752,17 +4786,20 @@ class LiveTradingEngine:
                             "pnl_pct": pnl_pct,
                             "duration": duration_str,
                             "reason": "Take Profit" if "tp" in exit_reason else "Stop Loss" if "sl" in exit_reason else "Manual Close",
+                            "account_balance": account_balance,
                         }
 
                         # Send async (non-blocking)
                         asyncio.create_task(
                             self.telegram_bot.send_trade_closed(trade_info)
                         )
-                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent")
+                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent for %s", symbol)
                     except Exception as tg_e:
                         self.logger.warning(
                             "📱 [TELEGRAM] Failed to send close notification: %s", tg_e
                         )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
 
                 # Clean up pending trade
                 if hasattr(self, "pending_trades") and symbol in self.pending_trades:

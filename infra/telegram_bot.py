@@ -259,6 +259,32 @@ Margin: ${pos['margin_used']:,.2f}
             logger.error(f"❌ [TELEGRAM] Error sending trade closed notification: {e}")
             return False
 
+    async def send_tp_sl_triggered(self, order_info: Dict[str, Any]) -> bool:
+        """
+        Отправить уведомление о срабатывании TP/SL ордера.
+
+        Args:
+            order_info: {
+                'symbol': str,
+                'side': str (LONG/SHORT),
+                'order_type': str (TP/SL),
+                'trigger_price': float,
+                'entry_price': float,
+                'quantity': float,
+                'pnl': float (estimated),
+                'level': int (TP1, TP2, etc)
+            }
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            message = self._format_tp_sl_triggered_message(order_info)
+            return await self.send_message(message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending TP/SL notification: {e}")
+            return False
+
     async def send_position_update(self, position_info: Dict[str, Any]) -> bool:
         """
         Отправить обновление по открытой позиции.
@@ -287,78 +313,208 @@ Margin: ${pos['margin_used']:,.2f}
 
     def _format_trade_opened_message(self, trade: Dict[str, Any]) -> str:
         """Форматирует сообщение об открытии позиции."""
-        side_emoji = "🟢" if trade['side'] == 'LONG' else "🔴"
+        from datetime import datetime
 
-        message = f"""
-<b>🎯 NEW TRADE OPENED</b>
+        side_emoji = "🎯" if trade['side'] == 'LONG' else "🎲"
+        direction_emoji = "📈" if trade['side'] == 'LONG' else "📉"
 
-<b>{side_emoji} {trade['side']} {trade['symbol']}</b>
+        message = f"""╔════════════════════════╗
+║  <b>🚀 NEW POSITION OPENED</b> ║
+╚════════════════════════╝
 
-━━━━━━━━━━━━━━━━━━━━
-<b>📊 ENTRY DETAILS</b>
-━━━━━━━━━━━━━━━━━━━━
+<b>{side_emoji}  {trade['side']}  {trade['symbol']}</b>  {direction_emoji}
+⏰ <i>{datetime.now().strftime('%H:%M:%S UTC')}</i>
 
-Entry Price: <b>${trade['entry_price']:,.4f}</b>
-Quantity: <b>{trade['quantity']:.4f}</b>
-Leverage: <b>{trade.get('leverage', 1):.0f}x</b>
+╭─────────────────────╮
+│ <b>💼 POSITION DETAILS</b>  │
+╰─────────────────────╯
 
-Notional: <b>${trade.get('notional', 0):,.2f}</b>
-Margin Used: <b>${trade.get('margin_used', 0):,.2f}</b>
+<b>Entry:</b> ${trade['entry_price']:,.4f}
+<b>Quantity:</b> {trade['quantity']:.4f}
+<b>Leverage:</b> {trade.get('leverage', 1):.0f}x
+
+<b>Position Size:</b> ${trade.get('notional', 0):,.2f}
+<b>Margin Used:</b> ${trade.get('margin_used', 0):,.2f}
 """
 
-        # Stop Loss / Take Profit
+        # Stop Loss / Take Profit with distances
+        message += "\n╭─────────────────────╮\n│ <b>🎯 PROTECTION ORDERS</b> │\n╰─────────────────────╯\n"
+
         if trade.get('stop_loss'):
-            sl_dist = abs((trade['stop_loss'] - trade['entry_price']) / trade['entry_price'] * 100)
-            message += f"\n🛡️ Stop Loss: <b>${trade['stop_loss']:,.4f}</b> ({sl_dist:.2f}%)"
+            sl_dist = trade.get('sl_distance', 0)
+            message += f"\n🛡️ <b>Stop Loss:</b> ${trade['stop_loss']:,.4f}"
+            message += f"\n   Distance: <b>{sl_dist:+.2f}%</b>"
 
         if trade.get('take_profit'):
-            tp_dist = abs((trade['take_profit'] - trade['entry_price']) / trade['entry_price'] * 100)
-            message += f"\n💎 Take Profit: <b>${trade['take_profit']:,.4f}</b> ({tp_dist:.2f}%)"
+            tp_dist = trade.get('tp_distance', 0)
+            tp_count = trade.get('tp_count', 1)
+            tp_badge = f" ({tp_count}x)" if tp_count > 1 else ""
+            message += f"\n\n💎 <b>Take Profit:</b> ${trade['take_profit']:,.4f}{tp_badge}"
+            message += f"\n   Target: <b>{tp_dist:+.2f}%</b>"
+
+        # Account info
+        if trade.get('account_balance'):
+            message += f"\n\n╭─────────────────────╮\n│ <b>💰 ACCOUNT STATUS</b>   │\n╰─────────────────────╯\n"
+            message += f"\n<b>Balance:</b> {trade['account_balance']:,.2f} USDT"
 
         # Reason
         if trade.get('reason'):
-            message += f"\n\n📝 Reason: <i>{trade['reason']}</i>"
+            message += f"\n\n📝 <i>{trade['reason']}</i>"
 
-        message += "\n\n━━━━━━━━━━━━━━━━━━━━"
+        message += "\n\n╚════════════════════════╝"
 
         return message
 
     def _format_trade_closed_message(self, trade: Dict[str, Any]) -> str:
         """Форматирует сообщение о закрытии позиции."""
-        side_emoji = "🟢" if trade['side'] == 'LONG' else "🔴"
-        pnl_emoji = "💰" if trade['pnl'] >= 0 else "📉"
-        result_emoji = "✅" if trade['pnl'] >= 0 else "❌"
+        from datetime import datetime
 
-        message = f"""
-<b>{result_emoji} TRADE CLOSED</b>
+        # Emojis based on P&L
+        pnl = trade.get('pnl', 0)
+        pnl_pct = trade.get('pnl_pct', 0)
 
-<b>{side_emoji} {trade['side']} {trade['symbol']}</b>
+        if pnl >= 0:
+            if pnl_pct > 10:
+                result_emoji = "🚀"
+                status = "HUGE WIN"
+            elif pnl_pct > 5:
+                result_emoji = "🎯"
+                status = "GREAT WIN"
+            elif pnl_pct > 2:
+                result_emoji = "✅"
+                status = "WIN"
+            else:
+                result_emoji = "✔️"
+                status = "SMALL WIN"
+        else:
+            if pnl_pct < -10:
+                result_emoji = "🔥"
+                status = "BIG LOSS"
+            elif pnl_pct < -5:
+                result_emoji = "📉"
+                status = "LOSS"
+            else:
+                result_emoji = "⚠️"
+                status = "SMALL LOSS"
 
-━━━━━━━━━━━━━━━━━━━━
-<b>📊 TRADE SUMMARY</b>
-━━━━━━━━━━━━━━━━━━━━
+        side_emoji = "🎯" if trade['side'] == 'LONG' else "🎲"
 
-Entry: <b>${trade['entry_price']:,.4f}</b>
-Exit: <b>${trade['exit_price']:,.4f}</b>
-Quantity: <b>{trade['quantity']:.4f}</b>
+        message = f"""╔════════════════════════╗
+║  <b>{result_emoji} POSITION CLOSED</b>  ║
+╚════════════════════════╝
 
-━━━━━━━━━━━━━━━━━━━━
-<b>{pnl_emoji} RESULT</b>
-━━━━━━━━━━━━━━━━━━━━
+<b>{side_emoji}  {trade['side']}  {trade['symbol']}</b>
+⏰ <i>{datetime.now().strftime('%H:%M:%S UTC')}</i>
 
-P&L: <b>${trade['pnl']:+,.2f}</b>
-P&L %: <b>{trade['pnl_pct']:+.2f}%</b>
+╭─────────────────────╮
+│ <b>📊 TRADE SUMMARY</b>    │
+╰─────────────────────╯
+
+<b>Entry:</b> ${trade['entry_price']:,.4f}
+<b>Exit:</b> ${trade['exit_price']:,.4f}
+<b>Quantity:</b> {trade['quantity']:.4f}
 """
+
+        # Price movement
+        price_change = trade['exit_price'] - trade['entry_price']
+        price_change_pct = (price_change / trade['entry_price'] * 100) if trade['entry_price'] > 0 else 0
+        if price_change >= 0:
+            change_emoji = "⬆️" if price_change_pct > 2 else "↗️"
+        else:
+            change_emoji = "⬇️" if price_change_pct < -2 else "↘️"
+        message += f"\n{change_emoji} <b>Price Move:</b> ${price_change:+,.4f} ({price_change_pct:+.2f}%)"
+
+        # Result section
+        pnl_bar = ""
+        if pnl_pct >= 0:
+            filled = min(int(pnl_pct / 2), 10)
+            pnl_bar = "█" * filled + "░" * (10 - filled)
+        else:
+            filled = min(int(abs(pnl_pct) / 2), 10)
+            pnl_bar = "▓" * filled + "░" * (10 - filled)
+
+        message += f"\n\n╭─────────────────────╮\n│ <b>{result_emoji} {status}</b>\n╰─────────────────────╯\n"
+        message += f"\n<b>P&L:</b> ${pnl:+,.2f} USDT"
+        message += f"\n<b>ROI:</b> {pnl_pct:+.2f}%"
+        message += f"\n[{pnl_bar}] {pnl_pct:+.1f}%"
 
         # Duration
         if trade.get('duration'):
-            message += f"\n⏱️ Duration: <b>{trade['duration']}</b>"
+            message += f"\n\n⏱️ <b>Duration:</b> {trade['duration']}"
 
         # Exit reason
         if trade.get('reason'):
-            message += f"\n📝 Reason: <i>{trade['reason']}</i>"
+            reason_emoji = "🎯" if "Profit" in trade['reason'] else "🛡️" if "Stop" in trade['reason'] else "👤"
+            message += f"\n{reason_emoji} <b>Exit:</b> <i>{trade['reason']}</i>"
 
-        message += "\n\n━━━━━━━━━━━━━━━━━━━━"
+        # Balance if available
+        if trade.get('account_balance'):
+            message += f"\n\n💰 <b>Balance:</b> {trade['account_balance']:,.2f} USDT"
+
+        message += "\n\n╚════════════════════════╝"
+
+        return message
+
+    def _format_tp_sl_triggered_message(self, order: Dict[str, Any]) -> str:
+        """Форматирует сообщение о срабатывании TP/SL ордера."""
+        from datetime import datetime
+
+        order_type = order.get('order_type', 'TP')
+        side_emoji = "🎯" if order['side'] == 'LONG' else "🎲"
+
+        if order_type == 'TP':
+            event_emoji = "💎"
+            event_title = "TAKE PROFIT HIT"
+            level_info = f"TP{order.get('level', 1)}"
+        else:
+            event_emoji = "🛡️"
+            event_title = "STOP LOSS HIT"
+            level_info = "SL"
+
+        pnl = order.get('pnl', 0)
+        entry_price = order.get('entry_price', 0)
+        trigger_price = order.get('trigger_price', 0)
+        quantity = order.get('quantity', 0)
+
+        # Calculate percentage
+        pnl_pct = (pnl / (entry_price * quantity) * 100) if entry_price * quantity > 0 else 0
+
+        message = f"""╔════════════════════════╗
+║  <b>{event_emoji} {event_title}</b>  ║
+╚════════════════════════╝
+
+<b>{side_emoji}  {order['side']}  {order['symbol']}</b>  {level_info}
+⏰ <i>{datetime.now().strftime('%H:%M:%S UTC')}</i>
+
+╭─────────────────────╮
+│ <b>📊 ORDER DETAILS</b>    │
+╰─────────────────────╯
+
+<b>Entry:</b> ${entry_price:,.4f}
+<b>Trigger:</b> ${trigger_price:,.4f}
+<b>Qty:</b> {quantity:.4f}
+"""
+
+        # Price movement
+        price_change = trigger_price - entry_price
+        price_change_pct = (price_change / entry_price * 100) if entry_price > 0 else 0
+        if price_change >= 0:
+            change_emoji = "⬆️" if price_change_pct > 2 else "↗️"
+        else:
+            change_emoji = "⬇️" if price_change_pct < -2 else "↘️"
+        message += f"\n{change_emoji} <b>Move:</b> ${price_change:+,.4f} ({price_change_pct:+.2f}%)"
+
+        # PnL estimate
+        pnl_emoji = "💰" if pnl >= 0 else "📉"
+        message += f"\n\n╭─────────────────────╮\n│ <b>{pnl_emoji} PARTIAL RESULT</b>  │\n╰─────────────────────╯\n"
+        message += f"\n<b>Est. P&L:</b> ${pnl:+,.2f} USDT"
+        message += f"\n<b>Est. ROI:</b> {pnl_pct:+.2f}%"
+
+        # Balance if available
+        if order.get('account_balance'):
+            message += f"\n\n💰 <b>Balance:</b> {order['account_balance']:,.2f} USDT"
+
+        message += "\n\n╚════════════════════════╝"
 
         return message
 
