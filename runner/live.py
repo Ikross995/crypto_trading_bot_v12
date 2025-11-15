@@ -933,10 +933,12 @@ class LiveTradingEngine:
             # NOTE: If GRU consistently gives extreme predictions, it needs retraining
             # on more recent data. Old training data may not reflect current price ranges.
             max_change_pct = 5.0  # Conservative limit
+            was_clamped = False
 
             if abs(price_change_pct) > max_change_pct:
                 original_prediction = predicted_price
                 original_change = price_change_pct
+                was_clamped = True
 
                 # Clamp prediction to realistic range
                 if price_change_pct > 0:
@@ -947,9 +949,17 @@ class LiveTradingEngine:
                 price_change_pct = ((predicted_price - current_price) / current_price) * 100
 
                 self.logger.warning(
-                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%)",
+                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%) - MODEL NEEDS RETRAINING!",
                     symbol, original_prediction, original_change, predicted_price, price_change_pct
                 )
+
+                # Warn if prediction is extremely off (>20% error)
+                if abs(original_change) > 20:
+                    self.logger.error(
+                        "⛔ [GRU_CRITICAL] %s: Model prediction >20%% off (%+.2f%%)! Training data is outdated. "
+                        "Retrain with: python -m training.train_gru_pytorch --symbol %s",
+                        symbol, original_change, symbol
+                    )
 
             if abs(price_change_pct) < 0.1:
                 direction = "NEUTRAL"
@@ -960,7 +970,16 @@ class LiveTradingEngine:
 
             # Confidence based on price change magnitude (0-1 scale)
             # Larger price changes = higher confidence
+            # BUT: Significantly reduce confidence if prediction was clamped
             confidence = min(abs(price_change_pct) / 2.0, 1.0)  # Cap at 100%
+
+            if was_clamped:
+                # Reduce confidence by 80% if prediction was unrealistic
+                confidence *= 0.2
+                self.logger.warning(
+                    "⚠️ [GRU_CONFIDENCE] %s: Confidence reduced to %.1f%% due to extreme prediction clamping",
+                    symbol, confidence * 100
+                )
 
             result = {
                 'predicted_price': predicted_price,

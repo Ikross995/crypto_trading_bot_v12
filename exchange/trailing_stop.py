@@ -158,14 +158,19 @@ class TrailingStopManager:
             if filled_count > pos_data["tp_filled"]:
                 logger.info(f"[TRAIL_SL] {symbol}: Detected {filled_count} TP fills "
                            f"(was {pos_data['tp_filled']})")
-                
+
+                # ALWAYS update tp_filled to prevent repeated detection
+                pos_data["tp_filled"] = filled_count
+
                 # Update SL based on filled count
                 updated = await self._update_stop_loss(symbol, filled_count)
-                
+
                 if updated:
-                    pos_data["tp_filled"] = filled_count
                     pos_data["last_update"] = now
                     return True
+                else:
+                    # Even if SL wasn't updated, mark as checked to avoid spam
+                    pos_data["last_update"] = now
             
         except Exception as e:
             logger.error(f"[TRAIL_SL] Failed to check/update {symbol}: {e}")
