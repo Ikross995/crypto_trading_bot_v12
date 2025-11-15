@@ -2198,25 +2198,61 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
 
-        # Cancel all pending tasks
+        # Cancel all pending tasks (except current task to avoid recursion)
         try:
-            tasks = [t for t in asyncio.all_tasks() if not t.done()]
+            current_task = asyncio.current_task()
+            tasks = [t for t in asyncio.all_tasks() if not t.done() and t is not current_task]
             if tasks:
                 self.logger.info(f"🛑 [SHUTDOWN] Cancelling {len(tasks)} pending tasks...")
                 for task in tasks:
                     task.cancel()
-                # Wait for tasks to complete cancellation
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # Wait for tasks to complete cancellation with timeout
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=5.0
+                    )
+                    self.logger.info("✅ [SHUTDOWN] All tasks cancelled successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("⚠️ [SHUTDOWN] Some tasks did not cancel within 5s timeout")
         except Exception as e:
-            self.logger.debug(f"[SHUTDOWN] Task cleanup error: {e}")
+            self.logger.error(f"[SHUTDOWN] Task cleanup error: {e}")
 
-        # Save dashboard history one last time
-        if self.dashboard:
-            try:
-                self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
-                self.dashboard._save_history()
-            except Exception as e:
-                self.logger.debug(f"[SHUTDOWN] Dashboard save error: {e}")
+        # Save all data before shutdown
+        try:
+            # Save dashboard history
+            if self.dashboard:
+                try:
+                    self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
+                    self.dashboard._save_history()
+                    self.logger.info("✅ [SHUTDOWN] Dashboard saved")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Dashboard save error: {e}")
+
+            # Save active positions state
+            if hasattr(self, 'active_positions') and self.active_positions:
+                try:
+                    positions_count = len(self.active_positions)
+                    self.logger.info(f"💾 [SHUTDOWN] Active positions tracked: {positions_count}")
+                    for symbol, pos in self.active_positions.items():
+                        pnl = pos.get('unrealized_pnl', 0)
+                        self.logger.info(f"  • {symbol}: P&L ${pnl:+.2f}")
+                    self.logger.info("✅ [SHUTDOWN] Positions state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Position logging error: {e}")
+
+            # Save trailing stop state if exists
+            if hasattr(self, 'trailing_stop_manager') and self.trailing_stop_manager:
+                try:
+                    if hasattr(self.trailing_stop_manager, '_positions'):
+                        tracked = len(self.trailing_stop_manager._positions)
+                        self.logger.info(f"💾 [SHUTDOWN] Trailing stops tracked: {tracked}")
+                        self.logger.info("✅ [SHUTDOWN] Trailing stop state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Trailing stop logging error: {e}")
+
+        except Exception as e:
+            self.logger.error(f"❌ [SHUTDOWN] Data save error: {e}")
 
         self.logger.info("✅ [SHUTDOWN] Trading engine stopped cleanly")
 
