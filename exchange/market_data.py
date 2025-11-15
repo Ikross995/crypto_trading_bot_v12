@@ -119,6 +119,7 @@ class MarketDataProvider:
                 c = _to_float(row[4]) or o
                 v = _to_float(row[5]) or 0.0
                 out.append({
+                    "timestamp": open_time,  # Primary field for compatibility
                     "open_time": open_time,
                     "close_time": close_time,
                     "open": float(o),

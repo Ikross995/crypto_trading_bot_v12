@@ -708,8 +708,12 @@ class SignalGenerator:
                     rows = []
                     for candle in market_data:
                         if isinstance(candle, dict) and 'close' in candle:
-                            # Extract timestamp
-                            ts = candle.get('timestamp', candle.get('time', pd.Timestamp.now()))
+                            # Extract timestamp - try multiple field names
+                            ts = candle.get('timestamp', candle.get('time', candle.get('open_time', None)))
+                            if ts is None:
+                                self.logger.warning(f"⚠️ Candle missing timestamp field! Using current time (this will break indicators). Candle keys: {candle.keys()}")
+                                ts = pd.Timestamp.now()
+
                             if isinstance(ts, (int, float)):
                                 # Convert timestamp to datetime
                                 ts = pd.to_datetime(ts, unit='ms' if ts > 1e10 else 's')

@@ -94,11 +94,11 @@ class TrailingStopManager:
         logger.info(f"  Move SL after TP levels: {self.config.move_sl_after_tp}")
         logger.info(f"  SL adjustments: {self.config.sl_adjustments}")
     
-    def register_position(self, symbol: str, entry_price: float, side: str, 
+    def register_position(self, symbol: str, entry_price: float, side: str,
                           tp_levels: List[float], initial_sl: float) -> None:
         """
         Register a new position for trailing stop management.
-        
+
         Args:
             symbol: Trading pair
             entry_price: Entry price of position
@@ -106,22 +106,31 @@ class TrailingStopManager:
             tp_levels: List of take profit prices
             initial_sl: Initial stop loss price
         """
+        # Check if position already exists to preserve tp_filled state
+        existing_tp_filled = 0
+        existing_last_update = time.time()
+        if symbol in self._positions:
+            existing_tp_filled = self._positions[symbol].get("tp_filled", 0)
+            existing_last_update = self._positions[symbol].get("last_update", time.time())
+            logger.debug(f"[TRAIL_SL] {symbol}: Re-registering position, preserving tp_filled={existing_tp_filled}")
+
         self._positions[symbol] = {
             "entry": entry_price,
             "side": side.upper(),
             "tp_levels": tp_levels,
-            "tp_filled": 0,  # Number of TPs filled
+            "tp_filled": existing_tp_filled,  # Preserve existing state or start at 0
             "last_sl": initial_sl,
-            "last_update": time.time(),
+            "last_update": existing_last_update,  # Preserve last update time
             "total_tps": len(tp_levels)
         }
-        
-        # Reset filled TP cache
-        self._filled_tps[symbol] = set()
-        
+
+        # Only reset filled TP cache for completely new positions
+        if existing_tp_filled == 0 and symbol not in self._filled_tps:
+            self._filled_tps[symbol] = set()
+
         logger.info(f"[TRAIL_SL] Registered position for {symbol}: "
                    f"entry={entry_price:.4f}, side={side}, "
-                   f"TPs={len(tp_levels)}, initial_sl={initial_sl:.4f}")
+                   f"TPs={len(tp_levels)}, initial_sl={initial_sl:.4f}, tp_filled={existing_tp_filled}")
     
     def unregister_position(self, symbol: str) -> None:
         """Remove position from tracking (when closed)."""
@@ -158,14 +167,19 @@ class TrailingStopManager:
             if filled_count > pos_data["tp_filled"]:
                 logger.info(f"[TRAIL_SL] {symbol}: Detected {filled_count} TP fills "
                            f"(was {pos_data['tp_filled']})")
-                
+
+                # ALWAYS update tp_filled to prevent repeated detection
+                pos_data["tp_filled"] = filled_count
+
                 # Update SL based on filled count
                 updated = await self._update_stop_loss(symbol, filled_count)
-                
+
                 if updated:
-                    pos_data["tp_filled"] = filled_count
                     pos_data["last_update"] = now
                     return True
+                else:
+                    # Even if SL wasn't updated, mark as checked to avoid spam
+                    pos_data["last_update"] = now
             
         except Exception as e:
             logger.error(f"[TRAIL_SL] Failed to check/update {symbol}: {e}")

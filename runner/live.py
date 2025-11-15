@@ -933,10 +933,12 @@ class LiveTradingEngine:
             # NOTE: If GRU consistently gives extreme predictions, it needs retraining
             # on more recent data. Old training data may not reflect current price ranges.
             max_change_pct = 5.0  # Conservative limit
+            was_clamped = False
 
             if abs(price_change_pct) > max_change_pct:
                 original_prediction = predicted_price
                 original_change = price_change_pct
+                was_clamped = True
 
                 # Clamp prediction to realistic range
                 if price_change_pct > 0:
@@ -947,9 +949,17 @@ class LiveTradingEngine:
                 price_change_pct = ((predicted_price - current_price) / current_price) * 100
 
                 self.logger.warning(
-                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%)",
+                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%) - MODEL NEEDS RETRAINING!",
                     symbol, original_prediction, original_change, predicted_price, price_change_pct
                 )
+
+                # Warn if prediction is extremely off (>20% error)
+                if abs(original_change) > 20:
+                    self.logger.error(
+                        "⛔ [GRU_CRITICAL] %s: Model prediction >20%% off (%+.2f%%)! Training data is outdated. "
+                        "Retrain with: python -m training.train_gru_pytorch --symbol %s",
+                        symbol, original_change, symbol
+                    )
 
             if abs(price_change_pct) < 0.1:
                 direction = "NEUTRAL"
@@ -960,7 +970,16 @@ class LiveTradingEngine:
 
             # Confidence based on price change magnitude (0-1 scale)
             # Larger price changes = higher confidence
+            # BUT: Significantly reduce confidence if prediction was clamped
             confidence = min(abs(price_change_pct) / 2.0, 1.0)  # Cap at 100%
+
+            if was_clamped:
+                # Reduce confidence by 80% if prediction was unrealistic
+                confidence *= 0.2
+                self.logger.warning(
+                    "⚠️ [GRU_CONFIDENCE] %s: Confidence reduced to %.1f%% due to extreme prediction clamping",
+                    symbol, confidence * 100
+                )
 
             result = {
                 'predicted_price': predicted_price,
@@ -1607,61 +1626,145 @@ class LiveTradingEngine:
                         winning_count = sum(1 for p in positions_list if p["pnl"] > 0)
                         losing_count = sum(1 for p in positions_list if p["pnl"] < 0)
 
-                        # Build beautiful message
+                        # Build beautiful motivating message
                         from datetime import datetime
                         current_time = datetime.now().strftime("%H:%M:%S")
 
+                        # Motivational greeting based on performance
+                        if avg_roi > 5:
+                            greeting = "Excellent performance! 🌟"
+                        elif avg_roi > 2:
+                            greeting = "Great job! Keep it up! 💪"
+                        elif avg_roi > 0:
+                            greeting = "Building wealth steadily! 📈"
+                        elif avg_roi > -2:
+                            greeting = "Trading smart, stay focused! 🎯"
+                        else:
+                            greeting = "Patience pays off! 💎"
+
                         # Header with box
                         message = f"""╔═══════════════════════╗
-║  <b>🤖 TRADING BOT ONLINE</b>  ║
+║  <b>⚡ BOT IS LIVE!</b>  ║
 ╚═══════════════════════╝
 
-⏰ <i>Started at {current_time} UTC</i>
+🚀 <b>{greeting}</b>
+⏰ <i>Session started at {current_time} UTC</i>
 
 ╭─────────────────────╮
-│ <b>💼 PORTFOLIO OVERVIEW</b> │
+│ <b>💰 ACCOUNT STATUS</b>   │
 ╰─────────────────────╯
 
-<b>Positions:</b> {existing_count} open
-<b>USDT Balance:</b> {account_balance:,.2f} USDT
-<b>Margin Used:</b> ${total_margin:,.2f}
-<b>Leverage:</b> {self.leverage}x
-
+<b>💵 Balance:</b> {account_balance:,.2f} USDT
+<b>📊 Active Positions:</b> {existing_count}
+<b>⚡ Leverage:</b> {self.leverage}x
+<b>💼 Margin in Use:</b> ${total_margin:,.2f}
 """
 
-                        # P&L Section with visual indicator
-                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                        roi_emoji = "🚀" if avg_roi > 5 else "📈" if avg_roi > 2 else "✅" if avg_roi > 0 else "⚠️" if avg_roi > -2 else "📉"
+                        # Capital utilization
+                        if account_balance > 0:
+                            capital_used = (total_margin / account_balance * 100) if account_balance > 0 else 0
+                            util_bar_length = 15
+                            util_filled = min(int(capital_used / 5), util_bar_length)  # 5% per segment
+                            util_bar = "█" * util_filled + "░" * (util_bar_length - util_filled)
+                            message += f"<b>📈 Capital Used:</b> {capital_used:.1f}%\n[{util_bar}]\n"
 
-                        # Progress bar for P&L
-                        bar_length = 10
+                        message += "\n"
+
+                        # P&L Section with motivational indicators
+                        pnl_emoji = "💰" if total_pnl >= 0 else "📊"
+
+                        # Determine motivation level
+                        if avg_roi > 10:
+                            roi_emoji = "🌟"
+                            performance_status = "OUTSTANDING"
+                            motivation_msg = "Incredible returns! 🏆"
+                        elif avg_roi > 5:
+                            roi_emoji = "🚀"
+                            performance_status = "EXCELLENT"
+                            motivation_msg = "Strong performance! 💪"
+                        elif avg_roi > 2:
+                            roi_emoji = "📈"
+                            performance_status = "VERY GOOD"
+                            motivation_msg = "Solid gains! 👍"
+                        elif avg_roi > 0:
+                            roi_emoji = "✅"
+                            performance_status = "POSITIVE"
+                            motivation_msg = "Profitable trades! 💵"
+                        elif avg_roi > -2:
+                            roi_emoji = "📊"
+                            performance_status = "LEARNING"
+                            motivation_msg = "Building experience! 🎓"
+                        elif avg_roi > -5:
+                            roi_emoji = "⚠️"
+                            performance_status = "ADJUSTING"
+                            motivation_msg = "Staying disciplined! 🛡️"
+                        else:
+                            roi_emoji = "🎯"
+                            performance_status = "PROTECTED"
+                            motivation_msg = "Stops did their job! 🛡️"
+
+                        # Enhanced progress bar
+                        bar_length = 15
                         if avg_roi >= 0:
-                            filled = min(int(avg_roi / 2), bar_length)  # 2% per segment
+                            filled = min(int(avg_roi / 1.5), bar_length)
                             bar = "█" * filled + "░" * (bar_length - filled)
                         else:
-                            filled = min(int(abs(avg_roi) / 2), bar_length)
-                            bar = "▓" * filled + "░" * (bar_length - filled)
+                            filled = min(int(abs(avg_roi) / 1.5), bar_length)
+                            bar = "▓" * filled + "·" * (bar_length - filled)
 
                         message += f"""╭─────────────────────╮
-│ <b>{roi_emoji} PERFORMANCE</b>      │
+│ <b>{roi_emoji} {performance_status}</b>
 ╰─────────────────────╯
 
-<b>Total P&L:</b> {pnl_emoji} <b>${total_pnl:+,.2f}</b>
-<b>ROI:</b> <b>{avg_roi:+.2f}%</b>
-[{bar}] {avg_roi:+.1f}%
+{pnl_emoji} <b>Total P&L:</b> ${total_pnl:+,.2f} USDT
+📈 <b>Portfolio ROI:</b> {avg_roi:+.2f}%
+[{bar}] {abs(avg_roi):.1f}%
 
-<b>Winners:</b> {winning_count} 🎯  |  <b>Losers:</b> {losing_count} 💤
+💬 <i>{motivation_msg}</i>
 
 """
 
-                        # Best/Worst positions
+                        # Win/Loss ratio with encouragement
+                        win_rate = (winning_count / existing_count * 100) if existing_count > 0 else 0
+                        if win_rate >= 60:
+                            wr_emoji = "🏆"
+                            wr_status = "Excellent!"
+                        elif win_rate >= 50:
+                            wr_emoji = "✅"
+                            wr_status = "Good ratio!"
+                        else:
+                            wr_emoji = "🎯"
+                            wr_status = "Quality over quantity!"
+
+                        message += f"""<b>{wr_emoji} Win Rate:</b> {win_rate:.0f}% <i>({wr_status})</i>
+<b>🎯 Winners:</b> {winning_count}  |  <b>📚 Learning:</b> {losing_count}
+
+"""
+
+                        # Best/Worst positions with celebration
                         if best_pos:
-                            best_emoji = "🏆" if best_pos["roi_pct"] > 10 else "⭐" if best_pos["roi_pct"] > 5 else "✨"
-                            message += f"""<b>{best_emoji} Best:</b> {best_pos["symbol"]} <b>{best_pos["roi_pct"]:+.2f}%</b>
+                            if best_pos["roi_pct"] > 15:
+                                best_emoji = "🏆"
+                                best_label = "STAR PERFORMER"
+                            elif best_pos["roi_pct"] > 10:
+                                best_emoji = "🌟"
+                                best_label = "TOP WINNER"
+                            elif best_pos["roi_pct"] > 5:
+                                best_emoji = "⭐"
+                                best_label = "Great Trade"
+                            else:
+                                best_emoji = "✨"
+                                best_label = "Leading"
+                            message += f"""<b>{best_emoji} {best_label}:</b> {best_pos["symbol"]} <b>{best_pos["roi_pct"]:+.2f}%</b>
 """
                         if worst_pos:
-                            worst_emoji = "💎" if worst_pos["roi_pct"] >= 0 else "⚡"
-                            message += f"""<b>{worst_emoji} Worst:</b> {worst_pos["symbol"]} <b>{worst_pos["roi_pct"]:+.2f}%</b>
+                            if worst_pos["roi_pct"] >= 0:
+                                worst_emoji = "💎"
+                                worst_label = "Holding Strong"
+                            else:
+                                worst_emoji = "🛡️"
+                                worst_label = "Under Review"
+                            message += f"""<b>{worst_emoji} {worst_label}:</b> {worst_pos["symbol"]} <b>{worst_pos["roi_pct"]:+.2f}%</b>
 
 """
 
@@ -1731,15 +1834,18 @@ class LiveTradingEngine:
 
 """
 
-                        # Footer
+                        # Footer with motivation
                         message += """╔═══════════════════════╗
-║  <b>🎯 MONITORING ACTIVE</b> ║
+║  <b>🎯 SYSTEM READY</b> ║
 ╚═══════════════════════╝
 
-<i>✅ You will receive updates for:
-• New position opens
-• Position closures with P&L
-• Important market events</i>"""
+<b>🔔 Active Monitoring:</b>
+✅ New trade entries
+✅ Position exits with P&L
+✅ TP/SL triggers
+✅ Real-time updates
+
+💡 <i>Trade smart, stay patient, build wealth!</i>"""
 
                         # Send async
                         asyncio.create_task(
@@ -2092,25 +2198,61 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
 
-        # Cancel all pending tasks
+        # Cancel all pending tasks (except current task to avoid recursion)
         try:
-            tasks = [t for t in asyncio.all_tasks() if not t.done()]
+            current_task = asyncio.current_task()
+            tasks = [t for t in asyncio.all_tasks() if not t.done() and t is not current_task]
             if tasks:
                 self.logger.info(f"🛑 [SHUTDOWN] Cancelling {len(tasks)} pending tasks...")
                 for task in tasks:
                     task.cancel()
-                # Wait for tasks to complete cancellation
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # Wait for tasks to complete cancellation with timeout
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=5.0
+                    )
+                    self.logger.info("✅ [SHUTDOWN] All tasks cancelled successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("⚠️ [SHUTDOWN] Some tasks did not cancel within 5s timeout")
         except Exception as e:
-            self.logger.debug(f"[SHUTDOWN] Task cleanup error: {e}")
+            self.logger.error(f"[SHUTDOWN] Task cleanup error: {e}")
 
-        # Save dashboard history one last time
-        if self.dashboard:
-            try:
-                self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
-                self.dashboard._save_history()
-            except Exception as e:
-                self.logger.debug(f"[SHUTDOWN] Dashboard save error: {e}")
+        # Save all data before shutdown
+        try:
+            # Save dashboard history
+            if self.dashboard:
+                try:
+                    self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
+                    self.dashboard._save_history()
+                    self.logger.info("✅ [SHUTDOWN] Dashboard saved")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Dashboard save error: {e}")
+
+            # Save active positions state
+            if hasattr(self, 'active_positions') and self.active_positions:
+                try:
+                    positions_count = len(self.active_positions)
+                    self.logger.info(f"💾 [SHUTDOWN] Active positions tracked: {positions_count}")
+                    for symbol, pos in self.active_positions.items():
+                        pnl = pos.get('unrealized_pnl', 0)
+                        self.logger.info(f"  • {symbol}: P&L ${pnl:+.2f}")
+                    self.logger.info("✅ [SHUTDOWN] Positions state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Position logging error: {e}")
+
+            # Save trailing stop state if exists
+            if hasattr(self, 'trailing_stop_manager') and self.trailing_stop_manager:
+                try:
+                    if hasattr(self.trailing_stop_manager, '_positions'):
+                        tracked = len(self.trailing_stop_manager._positions)
+                        self.logger.info(f"💾 [SHUTDOWN] Trailing stops tracked: {tracked}")
+                        self.logger.info("✅ [SHUTDOWN] Trailing stop state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Trailing stop logging error: {e}")
+
+        except Exception as e:
+            self.logger.error(f"❌ [SHUTDOWN] Data save error: {e}")
 
         self.logger.info("✅ [SHUTDOWN] Trading engine stopped cleanly")
 
@@ -3372,15 +3514,16 @@ class LiveTradingEngine:
                         ):
                             try:
                                 # Get account balance
-                                account_balance = 0.0
+                                account_balance = None
                                 try:
                                     account_info = self.client.get_account()
                                     for asset in account_info.get("assets", []):
                                         if asset.get("asset") == "USDT":
                                             account_balance = float(asset.get("walletBalance", 0))
+                                            self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
                                             break
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    self.logger.warning(f"Failed to fetch account balance: {e}")
 
                                 # Calculate leverage and margin
                                 leverage = self.leverage
@@ -4999,15 +5142,16 @@ class LiveTradingEngine:
                 if self.telegram_bot and self.telegram_trade_notifications:
                     try:
                         # Get account balance
-                        account_balance = 0.0
+                        account_balance = None
                         try:
                             account_info = self.client.get_account()
                             for asset in account_info.get("assets", []):
                                 if asset.get("asset") == "USDT":
                                     account_balance = float(asset.get("walletBalance", 0))
+                                    self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
                                     break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.logger.warning(f"Failed to fetch account balance: {e}")
 
                         # Get open orders info (TP/SL that were set)
                         tp_orders = []
