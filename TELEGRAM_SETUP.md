@@ -585,3 +585,121 @@ TG_TRADE_NOTIFICATIONS=true  # Только сделки
 **🎉 Готово! Теперь ты можешь полностью управлять ботом через Telegram!**
 
 **💡 Совет:** Начни с `/menu` - это самый удобный способ взаимодействия с ботом!
+
+---
+
+## 📊 Copy Trading Integration
+
+### Новые возможности копитрейдинга
+
+Бот теперь поддерживает полную систему копитрейдинга! Это позволяет:
+
+- **Мастер-трейдерам**: Делиться сделками и зарабатывать на успешных копировщиках
+- **Копировщикам**: Автоматически копировать сделки опытных трейдеров
+
+### 🚀 Быстрый старт с копитрейдингом
+
+```python
+from infra.copy_trading import CopyTradingEngine, CopierAccount
+from decimal import Decimal
+
+# 1. Создать движок копитрейдинга
+copy_engine = CopyTradingEngine()
+
+# 2. Добавить копировщика
+copier = CopierAccount(
+    user_id=1,
+    email="copier@example.com",
+    api_key="binance_api_key",
+    api_secret="binance_api_secret",
+    position_mode='fixed_ratio',
+    copy_ratio=Decimal('0.1')  # 10% от размера мастера
+)
+
+copier.settings = {
+    'copy_ratio': 0.1,
+    'max_position_size': 1000,  # Максимум $1000 на позицию
+    'max_open_positions': 10,   # Максимум 10 позиций
+    'max_daily_loss': -500      # Дневной лимит -$500
+}
+
+copy_engine.add_copier(copier)
+
+# 3. Запустить обработку
+await copy_engine.start_polling()
+```
+
+### 📱 Уведомления для копировщиков
+
+Копировщики получают автоматические уведомления:
+
+**При копировании сделки:**
+```
+╔════════════════════════╗
+║  📋 TRADE COPIED!  ║
+╚════════════════════════╝
+
+🟢 BTCUSDT  │  LONG 📈
+⏰ From: @MasterTrader
+
+📊 YOUR POSITION
+Entry Price: $40,250.00
+Quantity: 0.0025 (10% от мастера)
+Position Size: $100.63
+⚡ Leverage: 10x
+
+💰 ACCOUNT
+💵 Balance: 5,000.00 USDT
+📊 Position Size: 2.01% от баланса
+```
+
+**При закрытии скопированной сделки:**
+```
+╔════════════════════════╗
+║  ✅ COPY TRADE CLOSED  ║
+╚════════════════════════╝
+
+🟢 BTCUSDT  │  LONG
+⏰ Following: @MasterTrader
+
+📊 PERFORMANCE
+💰 Your P&L: +$1.25 USDT
+📈 Your ROI: +12.43%
+
+📊 Master's Stats:
+💰 Master P&L: +$12.50 USDT
+📈 Copy accuracy: 100%
+```
+
+### 💰 Система монетизации
+
+**Для мастер-трейдеров:**
+- 10% от прибыли копировщиков
+- Еженедельные выплаты
+- High Water Mark модель (честно для всех)
+
+**Пример расчета:**
+```
+📊 Weekly Settlement
+
+Копировщик заработал: +$150.00
+Ваша доля (10%): +$15.00
+
+Total payment: $15.00 USDT
+Status: ✅ Completed
+```
+
+### 📚 Полная документация
+
+Для детальной настройки системы копитрейдинга смотри:
+**[COPY_TRADING_SETUP.md](./COPY_TRADING_SETUP.md)**
+
+Там найдешь:
+- Архитектуру системы
+- Настройку режимов копирования
+- Риск-менеджмент
+- API reference
+- Безопасность
+- Примеры использования
+
+---
