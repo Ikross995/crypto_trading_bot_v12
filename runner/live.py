@@ -1516,11 +1516,7 @@ class LiveTradingEngine:
                         # Get account balance
                         account_balance = 0.0
                         try:
-                            account_info = self.client.get_account()
-                            for asset in account_info.get("assets", []):
-                                if asset.get("asset") == "USDT":
-                                    account_balance = float(asset.get("walletBalance", 0))
-                                    break
+                            account_balance = self.client.get_account_balance()
                         except Exception as bal_e:
                             self.logger.debug("Failed to fetch account balance: %s", bal_e)
 
@@ -3520,12 +3516,8 @@ class LiveTradingEngine:
                                 # Get account balance
                                 account_balance = None
                                 try:
-                                    account_info = self.client.get_account()
-                                    for asset in account_info.get("assets", []):
-                                        if asset.get("asset") == "USDT":
-                                            account_balance = float(asset.get("walletBalance", 0))
-                                            self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
-                                            break
+                                    account_balance = self.client.get_account_balance()
+                                    self.logger.debug(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
                                 except Exception as e:
                                     self.logger.warning(f"Failed to fetch account balance: {e}")
 
@@ -3877,11 +3869,8 @@ class LiveTradingEngine:
             # Get account balance
             account_balance = 0.0
             try:
-                account_info = self.client.get_account()
-                for asset in account_info.get("assets", []):
-                    if asset.get("asset") == "USDT":
-                        account_balance = float(asset.get("walletBalance", 0))
-                        break
+                account_balance = self.client.get_account_balance()
+                self.logger.debug(f"📊 Fetched account balance: ${account_balance:,.2f} USDT")
             except Exception as bal_e:
                 self.logger.debug(f"Failed to fetch balance: {bal_e}")
 
@@ -5220,12 +5209,8 @@ class LiveTradingEngine:
                         # Get account balance
                         account_balance = None
                         try:
-                            account_info = self.client.get_account()
-                            for asset in account_info.get("assets", []):
-                                if asset.get("asset") == "USDT":
-                                    account_balance = float(asset.get("walletBalance", 0))
-                                    self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
-                                    break
+                            account_balance = self.client.get_account_balance()
+                            self.logger.debug(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
                         except Exception as e:
                             self.logger.warning(f"Failed to fetch account balance: {e}")
 

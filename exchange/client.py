@@ -389,7 +389,20 @@ class BinanceClient:
         # REST fallback
         return self._rest("POST", "/fapi/v1/order", params)
 
+    def get_account_info(self) -> Dict[str, Any]:
+        """Get full account information (Futures API v2/account endpoint)."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_account)
+            except Exception:
+                pass
+        try:
+            return self._rest("GET", "/fapi/v2/account", {})
+        except Exception:
+            return {}
+
     def get_account_balance(self) -> float:
+        """Get USDT balance as float."""
         if self.client:
             try:
                 acc = self.safe_call(self.client.futures_account_balance)

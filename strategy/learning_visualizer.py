@@ -171,7 +171,7 @@ class LearningVisualizer:
                 return {}
             
             # Информация об аккаунте
-            account_info = trading_engine.client.get_account()
+            account_info = trading_engine.client.get_account_info()
             
             # Балансы
             total_wallet_balance = float(account_info.get('totalWalletBalance', 0))
