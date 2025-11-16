@@ -12,8 +12,353 @@ import asyncio
 import aiohttp
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 from loguru import logger
+
+
+class TelegramUpdateHandler:
+    """Handles incoming updates from Telegram (commands, callbacks, messages)."""
+
+    def __init__(self, bot: 'TelegramDashboardBot', trading_engine: Any = None):
+        self.bot = bot
+        self.trading_engine = trading_engine
+        self.last_update_id = 0
+        self.running = False
+
+        # Callback handlers
+        self.callback_handlers: Dict[str, Callable] = {}
+        self.command_handlers: Dict[str, Callable] = {}
+
+        # Register default handlers
+        self._register_default_handlers()
+
+    def _register_default_handlers(self):
+        """Register default command and callback handlers."""
+        # Commands
+        self.command_handlers['/start'] = self.handle_start_command
+        self.command_handlers['/help'] = self.handle_help_command
+        self.command_handlers['/menu'] = self.handle_menu_command
+        self.command_handlers['/status'] = self.handle_status_command
+        self.command_handlers['/positions'] = self.handle_positions_command
+        self.command_handlers['/stats'] = self.handle_stats_command
+
+        # Callback queries
+        self.callback_handlers['menu_main'] = self.handle_menu_main
+        self.callback_handlers['menu_portfolio'] = self.handle_menu_portfolio
+        self.callback_handlers['menu_stats'] = self.handle_menu_stats
+        self.callback_handlers['menu_trades'] = self.handle_menu_trades
+        self.callback_handlers['menu_history'] = self.handle_menu_history
+        self.callback_handlers['menu_settings'] = self.handle_menu_settings
+        self.callback_handlers['menu_wallet'] = self.handle_menu_wallet
+        self.callback_handlers['menu_refresh'] = self.handle_menu_refresh
+
+    async def start_polling(self):
+        """Start polling for updates."""
+        self.running = True
+        logger.info("📱 [TELEGRAM] Starting update polling...")
+
+        while self.running:
+            try:
+                updates = await self.get_updates()
+
+                for update in updates:
+                    await self.process_update(update)
+
+            except Exception as e:
+                logger.error(f"📱 [TELEGRAM] Error in polling: {e}")
+
+            await asyncio.sleep(1)  # Poll every second
+
+    async def stop_polling(self):
+        """Stop polling for updates."""
+        self.running = False
+        logger.info("📱 [TELEGRAM] Stopped update polling")
+
+    async def get_updates(self) -> list:
+        """Get updates from Telegram."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.bot.base_url}/getUpdates"
+                params = {
+                    "offset": self.last_update_id + 1,
+                    "timeout": 30,
+                }
+
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=35)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        updates = data.get("result", [])
+
+                        if updates:
+                            self.last_update_id = updates[-1]["update_id"]
+
+                        return updates
+                    return []
+        except Exception as e:
+            logger.debug(f"📱 [TELEGRAM] Get updates error: {e}")
+            return []
+
+    async def process_update(self, update: Dict[str, Any]):
+        """Process incoming update."""
+        try:
+            # Handle callback query (button press)
+            if "callback_query" in update:
+                await self.handle_callback_query(update["callback_query"])
+
+            # Handle command
+            elif "message" in update:
+                message = update["message"]
+                if "text" in message and message["text"].startswith("/"):
+                    await self.handle_command(message)
+
+        except Exception as e:
+            logger.error(f"📱 [TELEGRAM] Error processing update: {e}")
+
+    async def handle_callback_query(self, callback: Dict[str, Any]):
+        """Handle callback query from inline button."""
+        try:
+            callback_id = callback["id"]
+            data = callback.get("data", "")
+            message = callback.get("message", {})
+            message_id = message.get("message_id")
+
+            logger.info(f"📱 [TELEGRAM] Callback: {data}")
+
+            # Answer callback query (removes loading state)
+            await self.answer_callback_query(callback_id)
+
+            # Execute handler
+            if data in self.callback_handlers:
+                await self.callback_handlers[data](message_id)
+            else:
+                logger.warning(f"📱 [TELEGRAM] No handler for callback: {data}")
+
+        except Exception as e:
+            logger.error(f"📱 [TELEGRAM] Error handling callback: {e}")
+
+    async def handle_command(self, message: Dict[str, Any]):
+        """Handle command message."""
+        try:
+            text = message.get("text", "")
+            command = text.split()[0].lower()
+
+            logger.info(f"📱 [TELEGRAM] Command: {command}")
+
+            if command in self.command_handlers:
+                await self.command_handlers[command]()
+            else:
+                await self.bot.send_message(f"Unknown command: {command}\nUse /help for available commands")
+
+        except Exception as e:
+            logger.error(f"📱 [TELEGRAM] Error handling command: {e}")
+
+    async def answer_callback_query(self, callback_id: str, text: str = ""):
+        """Answer callback query."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.bot.base_url}/answerCallbackQuery"
+                data = {"callback_query_id": callback_id}
+                if text:
+                    data["text"] = text
+
+                await session.post(url, json=data)
+        except Exception as e:
+            logger.debug(f"Error answering callback: {e}")
+
+    # Command Handlers
+    async def handle_start_command(self):
+        """Handle /start command."""
+        welcome_text = """
+🤖 <b>Welcome to AI Trading Bot!</b>
+
+This bot helps you monitor and manage your automated trading.
+
+<b>Available commands:</b>
+/menu - Show main menu
+/status - Current bot status
+/positions - Open positions
+/stats - Trading statistics
+/help - Show this help
+
+Use /menu to start navigating with buttons!
+        """
+        await self.bot.send_message(welcome_text)
+
+    async def handle_help_command(self):
+        """Handle /help command."""
+        help_text = """
+<b>📚 Available Commands:</b>
+
+/start - Welcome message
+/menu - Show interactive menu
+/status - Bot status and account info
+/positions - List open positions
+/stats - Trading statistics
+/help - This help message
+
+<b>🎯 Tips:</b>
+• Use /menu for button navigation
+• Dashboard updates automatically every 5 min
+• Tap buttons to navigate menus
+        """
+        await self.bot.send_message(help_text)
+
+    async def handle_menu_command(self):
+        """Handle /menu command."""
+        await self.bot.send_main_menu()
+
+    async def handle_status_command(self):
+        """Handle /status command."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+            running = getattr(self.trading_engine, 'running', False)
+
+            status_text = f"""
+<b>🤖 Bot Status</b>
+
+Status: {'🟢 Running' if running else '🔴 Stopped'}
+Balance: ${balance:,.2f} USDT
+
+Use /menu for detailed info
+            """
+            await self.bot.send_message(status_text)
+        except Exception as e:
+            await self.bot.send_message(f"Error getting status: {e}")
+
+    async def handle_positions_command(self):
+        """Handle /positions command."""
+        await self.handle_menu_trades(None)
+
+    async def handle_stats_command(self):
+        """Handle /stats command."""
+        await self.handle_menu_stats(None)
+
+    # Callback Handlers
+    async def handle_menu_main(self, message_id: Optional[int]):
+        """Handle main menu callback."""
+        await self.bot.send_main_menu()
+
+    async def handle_menu_portfolio(self, message_id: Optional[int]):
+        """Handle portfolio menu callback."""
+        if not self.trading_engine:
+            return
+
+        try:
+            balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+
+            portfolio_data = {
+                'balance': balance,
+                'equity': balance,
+                'total_pnl': 0.0,
+                'roi_pct': 0.0,
+            }
+
+            # Try to get real data from portfolio tracker
+            if hasattr(self.trading_engine, 'portfolio_tracker') and self.trading_engine.portfolio_tracker:
+                try:
+                    stats = self.trading_engine.portfolio_tracker.get_stats()
+                    if stats:
+                        portfolio_data['total_pnl'] = stats.get('total_pnl', 0.0)
+                        initial = getattr(self.trading_engine.config, 'paper_equity', 1000.0)
+                        portfolio_data['roi_pct'] = ((balance - initial) / initial * 100) if initial > 0 else 0.0
+                except Exception:
+                    pass
+
+            await self.bot.send_portfolio_menu(portfolio_data)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading portfolio: {e}")
+
+    async def handle_menu_stats(self, message_id: Optional[int]):
+        """Handle stats menu callback."""
+        if not self.trading_engine:
+            return
+
+        try:
+            stats_data = {
+                'total_trades': 0,
+                'win_rate': 0.0,
+                'profit_factor': 0.0,
+                'sharpe_ratio': 0.0,
+            }
+
+            if hasattr(self.trading_engine, 'portfolio_tracker') and self.trading_engine.portfolio_tracker:
+                try:
+                    stats = self.trading_engine.portfolio_tracker.get_stats()
+                    if stats:
+                        stats_data['total_trades'] = stats.get('total_trades', 0)
+                        winning = stats.get('winning_trades', 0)
+                        total = stats_data['total_trades']
+                        stats_data['win_rate'] = (winning / total) if total > 0 else 0.0
+                except Exception:
+                    pass
+
+            await self.bot.send_stats_menu(stats_data)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading stats: {e}")
+
+    async def handle_menu_trades(self, message_id: Optional[int]):
+        """Handle active trades menu callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            positions = []
+            if hasattr(self.trading_engine, 'active_positions'):
+                positions = list(self.trading_engine.active_positions.keys())
+
+            if positions:
+                text = "<b>📝 ACTIVE POSITIONS</b>\n\n"
+                for symbol in positions[:10]:  # Max 10
+                    text += f"• {symbol}\n"
+
+                if len(positions) > 10:
+                    text += f"\n<i>... and {len(positions) - 10} more</i>"
+            else:
+                text = "<b>📝 ACTIVE POSITIONS</b>\n\n<i>No open positions</i>"
+
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading positions: {e}")
+
+    async def handle_menu_history(self, message_id: Optional[int]):
+        """Handle history menu callback."""
+        text = "<b>📜 TRADE HISTORY</b>\n\n<i>Coming soon...</i>"
+        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+        await self.bot.send_message_with_keyboard(text, keyboard)
+
+    async def handle_menu_settings(self, message_id: Optional[int]):
+        """Handle settings menu callback."""
+        text = "<b>⚙️ SETTINGS</b>\n\n<i>Coming soon...</i>"
+        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+        await self.bot.send_message_with_keyboard(text, keyboard)
+
+    async def handle_menu_wallet(self, message_id: Optional[int]):
+        """Handle wallet menu callback."""
+        if not self.trading_engine:
+            return
+
+        balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+
+        text = f"""
+<b>💰 WALLET</b>
+
+Balance: ${balance:,.2f} USDT
+
+<i>More features coming soon...</i>
+        """
+        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+        await self.bot.send_message_with_keyboard(text, keyboard)
+
+    async def handle_menu_refresh(self, message_id: Optional[int]):
+        """Handle refresh callback."""
+        await self.bot.send_message("🔄 Refreshing...")
+        await self.handle_menu_main(None)
 
 
 class TelegramDashboardBot:
@@ -681,6 +1026,182 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
                         return False
         except Exception as e:
             logger.error(f"❌ [TELEGRAM] Connection test failed: {e}")
+            return False
+
+    async def send_message_with_keyboard(
+        self, text: str, keyboard: list, parse_mode: str = "HTML"
+    ) -> bool:
+        """
+        Отправить сообщение с Inline клавиатурой.
+
+        Args:
+            text: Текст сообщения
+            keyboard: Inline клавиатура (список списков кнопок)
+                     Формат: [[{"text": "Button 1", "callback_data": "btn1"}, ...], ...]
+            parse_mode: Режим парсинга ("HTML" или "Markdown")
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/sendMessage"
+                data = {
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                    "reply_markup": {"inline_keyboard": keyboard},
+                }
+
+                async with session.post(url, json=data) as response:
+                    if response.status == 200:
+                        logger.info("📤 [TELEGRAM] Message with keyboard sent successfully")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"❌ [TELEGRAM] Failed to send message with keyboard: {error_text}"
+                        )
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending message with keyboard: {e}")
+            return False
+
+    async def send_main_menu(self) -> bool:
+        """Отправить главное меню с Inline клавиатурой."""
+        menu_text = """
+<b>🤖 Trading Bot Menu</b>
+
+Выберите действие:
+        """
+
+        keyboard = [
+            [
+                {"text": "📊 Портфолио", "callback_data": "menu_portfolio"},
+                {"text": "📈 Статистика", "callback_data": "menu_stats"},
+            ],
+            [
+                {"text": "📝 Активные сделки", "callback_data": "menu_trades"},
+                {"text": "📜 История", "callback_data": "menu_history"},
+            ],
+            [
+                {"text": "⚙️ Настройки", "callback_data": "menu_settings"},
+                {"text": "💰 Кошелек", "callback_data": "menu_wallet"},
+            ],
+            [
+                {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(menu_text, keyboard)
+
+    async def send_portfolio_menu(self, portfolio_data: Dict[str, Any]) -> bool:
+        """Отправить меню портфолио."""
+        balance = portfolio_data.get("balance", 0.0)
+        equity = portfolio_data.get("equity", 0.0)
+        pnl = portfolio_data.get("total_pnl", 0.0)
+        roi = portfolio_data.get("roi_pct", 0.0)
+
+        pnl_emoji = "💰" if pnl >= 0 else "📉"
+        roi_emoji = "🟢" if roi >= 0 else "🔴"
+
+        text = f"""
+<b>💼 ПОРТФОЛИО</b>
+
+💵 <b>Баланс:</b> ${balance:,.2f} USDT
+💎 <b>Equity:</b> ${equity:,.2f} USDT
+{pnl_emoji} <b>P&L:</b> ${pnl:+,.2f} ({roi:+.2f}%)
+{roi_emoji} <b>ROI:</b> {roi:+.2f}%
+
+━━━━━━━━━━━━━━━━━━━━
+        """
+
+        keyboard = [
+            [
+                {"text": "📊 Детали", "callback_data": "portfolio_details"},
+                {"text": "📈 График", "callback_data": "portfolio_chart"},
+            ],
+            [
+                {"text": "🔙 Назад", "callback_data": "menu_main"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(text, keyboard)
+
+    async def send_stats_menu(self, stats_data: Dict[str, Any]) -> bool:
+        """Отправить меню статистики."""
+        total_trades = stats_data.get("total_trades", 0)
+        win_rate = stats_data.get("win_rate", 0.0) * 100
+        profit_factor = stats_data.get("profit_factor", 0.0)
+        sharpe = stats_data.get("sharpe_ratio", 0.0)
+
+        text = f"""
+<b>📊 СТАТИСТИКА</b>
+
+🔢 <b>Всего сделок:</b> {total_trades}
+📈 <b>Win Rate:</b> {win_rate:.1f}%
+💹 <b>Profit Factor:</b> {profit_factor:.2f}
+📉 <b>Sharpe Ratio:</b> {sharpe:.2f}
+
+━━━━━━━━━━━━━━━━━━━━
+        """
+
+        keyboard = [
+            [
+                {"text": "🏆 Лучшие сделки", "callback_data": "stats_best"},
+                {"text": "💔 Худшие сделки", "callback_data": "stats_worst"},
+            ],
+            [
+                {"text": "📅 По дням", "callback_data": "stats_daily"},
+                {"text": "📆 По неделям", "callback_data": "stats_weekly"},
+            ],
+            [
+                {"text": "🔙 Назад", "callback_data": "menu_main"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(text, keyboard)
+
+    async def edit_message(
+        self, message_id: int, text: str, keyboard: list = None, parse_mode: str = "HTML"
+    ) -> bool:
+        """
+        Редактировать существующее сообщение.
+
+        Args:
+            message_id: ID сообщения для редактирования
+            text: Новый текст
+            keyboard: Новая Inline клавиатура (опционально)
+            parse_mode: Режим парсинга
+
+        Returns:
+            True если успешно отредактировано
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/editMessageText"
+                data = {
+                    "chat_id": self.chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                }
+
+                if keyboard:
+                    data["reply_markup"] = {"inline_keyboard": keyboard}
+
+                async with session.post(url, json=data) as response:
+                    if response.status == 200:
+                        logger.info("📝 [TELEGRAM] Message edited successfully")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ [TELEGRAM] Failed to edit message: {error_text}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error editing message: {e}")
             return False
 
 
