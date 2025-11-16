@@ -355,14 +355,16 @@ class LiveTradingEngine:
 
         # Telegram Notifications
         self.telegram_bot = None
+        self.telegram_update_handler = None
         self.telegram_trade_notifications = getattr(config, "tg_trade_notifications", True)
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
             if tg_token and tg_chat_id:
-                from infra.telegram_bot import TelegramDashboardBot
+                from infra.telegram_bot import TelegramDashboardBot, TelegramUpdateHandler
 
                 self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id)
+                self.telegram_update_handler = TelegramUpdateHandler(self.telegram_bot, self)
                 self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
             else:
                 self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
@@ -1223,6 +1225,11 @@ class LiveTradingEngine:
         if self.telegram_bot and getattr(self.config, "tg_dashboard_enabled", False):
             asyncio.create_task(self._telegram_dashboard_task())
             self.logger.info("📱 [TELEGRAM] Dashboard update task started")
+
+        # Start Telegram update polling for commands and button presses
+        if self.telegram_update_handler:
+            asyncio.create_task(self.telegram_update_handler.start_polling())
+            self.logger.info("📱 [TELEGRAM] Update polling started - commands and buttons are active")
 
         await self._run_trading_loop()
 
@@ -2385,6 +2392,14 @@ class LiveTradingEngine:
                 self.metrics.stop()  # type: ignore
             except Exception as e:
                 self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
+
+        # Stop Telegram update polling
+        if self.telegram_update_handler:
+            try:
+                await self.telegram_update_handler.stop_polling()
+                self.logger.info("📱 [TELEGRAM] Update polling stopped")
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Telegram polling stop error: {e}")
 
         # Cancel all pending tasks (except current task to avoid recursion)
         try:
