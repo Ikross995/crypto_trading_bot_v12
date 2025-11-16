@@ -165,20 +165,21 @@ class TrailingStopManager:
             filled_count = await self._count_filled_tps(symbol)
             
             if filled_count > pos_data["tp_filled"]:
-                logger.info(f"[TRAIL_SL] {symbol}: Detected {filled_count} TP fills "
-                           f"(was {pos_data['tp_filled']})")
-
                 # ALWAYS update tp_filled to prevent repeated detection
+                old_filled = pos_data["tp_filled"]
                 pos_data["tp_filled"] = filled_count
 
                 # Update SL based on filled count
                 updated = await self._update_stop_loss(symbol, filled_count)
 
                 if updated:
+                    logger.info(f"✅ [TRAIL_SL] {symbol}: TP{filled_count} filled → SL adjusted")
                     pos_data["last_update"] = now
                     return True
                 else:
-                    # Even if SL wasn't updated, mark as checked to avoid spam
+                    # Log only if this is actual progress (not no-SL-adjustment case)
+                    if filled_count < 3:  # Don't log when all TPs done
+                        logger.debug(f"[TRAIL_SL] {symbol}: TP{filled_count} filled (no SL adjustment needed)")
                     pos_data["last_update"] = now
             
         except Exception as e:
@@ -201,9 +202,14 @@ class TrailingStopManager:
             exit_orders = self.order_manager._exit_orders.get(symbol, {})
             tp_orders = exit_orders.get("take_profits", [])
         
-        # Fallback: If no TP orders from order manager, use simplified logic 
+        # Fallback: If no TP orders from order manager, use simplified logic
         if not tp_orders:
-            logger.debug(f"[TRAIL_SL] {symbol}: No TP orders from order manager, using fallback logic")
+            # Reduced log level to avoid spam - only log once per symbol
+            if not hasattr(self, '_fallback_logged'):
+                self._fallback_logged = set()
+            if symbol not in self._fallback_logged:
+                logger.debug(f"[TRAIL_SL] {symbol}: Using fallback TP counting logic")
+                self._fallback_logged.add(symbol)
             
             # Get position data and count TP orders from open orders
             pos_data = self._positions.get(symbol, {})
@@ -224,9 +230,14 @@ class TrailingStopManager:
                 
                 # Filled TPs = Total expected - Still open
                 filled_count = max(0, total_expected_tps - remaining_tp_orders)
-                
-                logger.debug(f"[TRAIL_SL] {symbol}: Fallback count - Expected TPs: {total_expected_tps}, "
-                           f"Remaining: {remaining_tp_orders}, Filled: {filled_count}")
+
+                # Only log if count changed or first time
+                if not hasattr(self, '_last_filled_count'):
+                    self._last_filled_count = {}
+                if self._last_filled_count.get(symbol, -1) != filled_count:
+                    logger.debug(f"[TRAIL_SL] {symbol}: TP status - Expected: {total_expected_tps}, "
+                               f"Remaining: {remaining_tp_orders}, Filled: {filled_count}")
+                    self._last_filled_count[symbol] = filled_count
                 
                 return filled_count
                 

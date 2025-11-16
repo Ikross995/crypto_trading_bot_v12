@@ -2293,6 +2293,10 @@ class LiveTradingEngine:
                 if self.iteration % 10 == 0:
                     await self._update_all_positions_pnl()
 
+                # 📊 PERIODIC STATUS SUMMARY - Clear overview every 30 iterations (~30 seconds)
+                if self.iteration % 30 == 0:
+                    await self._print_status_summary()
+
                 # Monitor TP fills for RL Position Advisor (every 5 iterations ~ 5 seconds)
                 if self.rl_position_advisor and self.iteration % 5 == 0:
                     try:
@@ -3866,6 +3870,78 @@ class LiveTradingEngine:
 
         except Exception as e:
             self.logger.debug("[PNL_UPDATE_ALL] Error updating all positions: %s", e)
+
+    async def _print_status_summary(self) -> None:
+        """Print clear status summary with balance and positions every 30 seconds."""
+        try:
+            # Get account balance
+            account_balance = 0.0
+            try:
+                account_info = self.client.get_account()
+                for asset in account_info.get("assets", []):
+                    if asset.get("asset") == "USDT":
+                        account_balance = float(asset.get("walletBalance", 0))
+                        break
+            except Exception as bal_e:
+                self.logger.debug(f"Failed to fetch balance: {bal_e}")
+
+            # Calculate total P&L and count positions
+            total_pnl = 0.0
+            winning_positions = 0
+            losing_positions = 0
+            position_details = []
+
+            for symbol, pos in self.active_positions.items():
+                pnl = pos.get("unrealized_pnl", 0.0)
+                total_pnl += pnl
+
+                if pnl > 0:
+                    winning_positions += 1
+                    status = "🟢"
+                elif pnl < 0:
+                    losing_positions += 1
+                    status = "🔴"
+                else:
+                    status = "⚪"
+
+                # Calculate ROI
+                entry_price = pos.get("entry_price", 1)
+                quantity = pos.get("quantity", 0)
+                notional = entry_price * quantity
+                margin = notional / self.leverage
+                roi_pct = (pnl / margin * 100) if margin > 0 else 0
+
+                position_details.append({
+                    "symbol": symbol,
+                    "pnl": pnl,
+                    "roi_pct": roi_pct,
+                    "status": status
+                })
+
+            # Sort by ROI (highest first)
+            position_details.sort(key=lambda x: x["roi_pct"], reverse=True)
+
+            # Print summary
+            self.logger.info("=" * 60)
+            self.logger.info(f"📊 STATUS SUMMARY - Iteration #{self.iteration}")
+            self.logger.info("=" * 60)
+            self.logger.info(f"💰 Balance: ${account_balance:,.2f} USDT")
+            self.logger.info(f"📈 Total P&L: ${total_pnl:+,.2f} USDT ({(total_pnl/account_balance*100) if account_balance > 0 else 0:+.2f}%)")
+            self.logger.info(f"📊 Positions: {len(self.active_positions)} active (🟢{winning_positions} 🔴{losing_positions})")
+
+            if position_details:
+                self.logger.info("-" * 60)
+                for pos in position_details[:5]:  # Show top 5
+                    self.logger.info(
+                        f"  {pos['status']} {pos['symbol']:10s} | P&L: ${pos['pnl']:+7.2f} | ROI: {pos['roi_pct']:+6.2f}%"
+                    )
+                if len(position_details) > 5:
+                    self.logger.info(f"  ... and {len(position_details) - 5} more positions")
+
+            self.logger.info("=" * 60)
+
+        except Exception as e:
+            self.logger.error(f"[STATUS_SUMMARY] Error: {e}")
 
     async def _monitor_tp_fills(self) -> None:
         """Monitor take-profit order fills and notify RL Position Advisor."""
