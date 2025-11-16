@@ -615,14 +615,14 @@ class IMBASignalIntegration:
         # Combine all sections
         full_log = header + regime_info + voting_info + signals_info + contrib_info + exchange_info + fear_greed_info + btc_d_info + decision + footer
         
-        # Log it with safe encoding for Windows
+        # Log it with safe encoding for Windows - DEBUG level only
         try:
-            logger.info(full_log)
+            logger.debug(full_log)
         except UnicodeEncodeError:
             # Fallback for Windows console (cp1251)
             # Remove emojis and special characters
             safe_log = full_log.encode('ascii', 'ignore').decode('ascii')
-            logger.info(safe_log)
+            logger.debug(safe_log)
     
     def convert_to_trading_signal(self, imba_result: Dict[str, Any], symbol: str):
         """

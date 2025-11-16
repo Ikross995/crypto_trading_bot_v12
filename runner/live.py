@@ -820,7 +820,7 @@ class LiveTradingEngine:
                 'limit': limit
             }
 
-            self.logger.info("🌐 [REAL_DATA] Fetching %d candles for %s from Binance MAINNET", limit, symbol)
+            self.logger.debug("🌐 [REAL_DATA] Fetching %d candles for %s from Binance MAINNET", limit, symbol)
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -880,7 +880,7 @@ class LiveTradingEngine:
                 self.logger.warning("🧠 [GRU_DEBUG] %s: GRU model not loaded", symbol)
                 return None
 
-            self.logger.info("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
+            self.logger.debug("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
 
             # Debug: Check data order and range
             if 'close' in candles_df.columns:
@@ -910,7 +910,7 @@ class LiveTradingEngine:
                 self.logger.warning("🧠 [GRU_DEBUG] %s: Prediction returned None", symbol)
                 return None
 
-            self.logger.info("🧠 [GRU_DEBUG] %s: Prediction successful: $%.2f", symbol, predicted_price)
+            self.logger.debug("🧠 [GRU_DEBUG] %s: Prediction successful: $%.2f", symbol, predicted_price)
 
             # Get current price
             current_price = float(candles_df['close'].iloc[-1])

@@ -189,9 +189,9 @@ class MarketDataProvider:
                     from datetime import datetime
                     first_dt = datetime.fromtimestamp(first_ts / 1000) if first_ts else "Invalid"
                     last_dt = datetime.fromtimestamp(last_ts / 1000) if last_ts else "Invalid"
-                    log.info(f"[GET_CANDLES] {sym}: Got {len(normalized)} candles via HTTP fallback")
-                    log.info(f"[GET_CANDLES] {sym}: Range {first_dt} → {last_dt}")
-                    log.info(f"[GET_CANDLES] {sym}: Latest OHLC: {normalized[-1].get('open')}/{normalized[-1].get('high')}/{normalized[-1].get('low')}/{normalized[-1].get('close')}")
+                    log.debug(f"[GET_CANDLES] {sym}: Got {len(normalized)} candles via HTTP fallback")
+                    log.debug(f"[GET_CANDLES] {sym}: Range {first_dt} → {last_dt}")
+                    log.debug(f"[GET_CANDLES] {sym}: Latest OHLC: {normalized[-1].get('open')}/{normalized[-1].get('high')}/{normalized[-1].get('low')}/{normalized[-1].get('close')}")
                 return normalized
         except Exception as e:
             log.error(f"[GET_CANDLES] {sym}: HTTP fallback failed: {e}")

@@ -62,38 +62,38 @@ class AIStatusMonitor:
         conf_emoji = "⭐" if confidence > 0.7 else "✨" if confidence > 0.4 else "💫"
         trade_emoji = "✅" if should_trade else "🚫"
         
-        logger.info("=" * 80)
-        logger.info("🧠 [AI_PREDICTION] #%d - %s", self.predictions_made, symbol)
-        logger.info("=" * 80)
-        
+        logger.debug("=" * 80)
+        logger.debug("🧠 [AI_PREDICTION] #%d - %s", self.predictions_made, symbol)
+        logger.debug("=" * 80)
+
         # 🧠 Cold start information
         if self.predictions_made < 50:
-            logger.info("🎯 [COLD_START] Exploration mode: %d/50 samples - IMBA signals only", self.predictions_made)
+            logger.debug("🎯 [COLD_START] Exploration mode: %d/50 samples - IMBA signals only", self.predictions_made)
         elif self.predictions_made < 200:
             progress = (self.predictions_made - 50) / 150
-            logger.info("🎓 [LEARNING] Learning mode: %d/200 samples - Gradual ML integration (%.1f%%)", 
+            logger.debug("🎓 [LEARNING] Learning mode: %d/200 samples - Gradual ML integration (%.1f%%)",
                        self.predictions_made, progress * 100)
-        logger.info("%s Expected PnL: %+.2f%%", pnl_emoji, expected_pnl)
-        logger.info("%s Win Probability: %.0f%%", prob_emoji, win_prob)
-        logger.info("%s ML Confidence: %.2f", conf_emoji, confidence)
-        logger.info("🛡️ Risk Level: %s", risk_level.upper())
-        logger.info("%s Decision: %s", trade_emoji, "TRADE" if should_trade else "SKIP")
-        logger.info("⚡ Processing: %.2fms", processing_time * 1000)
-        logger.info("=" * 80)
-        
-        # Track approvals vs blocks
+        logger.debug("%s Expected PnL: %+.2f%%", pnl_emoji, expected_pnl)
+        logger.debug("%s Win Probability: %.0f%%", prob_emoji, win_prob)
+        logger.debug("%s ML Confidence: %.2f", conf_emoji, confidence)
+        logger.debug("🛡️ Risk Level: %s", risk_level.upper())
+        logger.debug("%s Decision: %s", trade_emoji, "TRADE" if should_trade else "SKIP")
+        logger.debug("⚡ Processing: %.2fms", processing_time * 1000)
+        logger.debug("=" * 80)
+
+        # Track approvals vs blocks - only log final decision
         if should_trade:
             self.ai_approvals += 1
-            logger.info("🎯 [AI_DECISION] APPROVED for trading (Total: %d)", self.ai_approvals)
+            logger.debug("🎯 [AI_DECISION] APPROVED for trading (Total: %d)", self.ai_approvals)
         else:
             self.ai_blocks += 1
-            logger.info("🚫 [AI_DECISION] BLOCKED trade (Total: %d blocks)", self.ai_blocks)
-        
-        # Show approval rate
+            logger.debug("🚫 [AI_DECISION] BLOCKED trade (Total: %d blocks)", self.ai_blocks)
+
+        # Show approval rate only in debug
         total_decisions = self.ai_approvals + self.ai_blocks
         if total_decisions > 0:
             approval_rate = (self.ai_approvals / total_decisions) * 100
-            logger.info("📊 [AI_STATS] Approval Rate: %.1f%% (%d/%d)", 
+            logger.debug("📊 [AI_STATS] Approval Rate: %.1f%% (%d/%d)",
                        approval_rate, self.ai_approvals, total_decisions)
     
     def log_position_adjustment(self, symbol: str, original_strength: float, 
@@ -112,10 +112,10 @@ class AIStatusMonitor:
             adj_emoji = "➡️"
             adj_text = "UNCHANGED"
         
-        logger.info("🎛️ [ML_SIZING] %s %s position size:", adj_emoji, adj_text)
-        logger.info("    Signal: %.2f → %.2f (ML × %.2f)", 
+        logger.debug("🎛️ [ML_SIZING] %s %s position size:", adj_emoji, adj_text)
+        logger.debug("    Signal: %.2f → %.2f (ML × %.2f)",
                    original_strength, new_strength, ml_multiplier)
-        logger.info("    Total adjustments: %d", self.ml_adjustments)
+        logger.debug("    Total adjustments: %d", self.ml_adjustments)
     
     def log_learning_event(self, symbol: str, trade_outcome: Dict[str, Any], 
                           models_updated: List[str], learning_time: float):

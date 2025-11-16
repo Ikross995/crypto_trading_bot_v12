@@ -66,8 +66,13 @@ class COMBOSignalIntegration:
 
             # Проверка существования
             if not ensemble_path.exists():
-                logger.warning(f"❌ Ensemble models not found for {symbol}: {ensemble_path}")
-                logger.warning(f"   Run training first: python run_full_combo_system_multi.py --quick --symbols {symbol}")
+                # Only warn once per symbol to avoid spam
+                if not hasattr(self, '_ensemble_warnings'):
+                    self._ensemble_warnings = set()
+                if symbol not in self._ensemble_warnings:
+                    logger.warning(f"❌ Ensemble models not found for {symbol}: {ensemble_path}")
+                    logger.warning(f"   Run training first: python run_full_combo_system_multi.py --quick --symbols {symbol}")
+                    self._ensemble_warnings.add(symbol)
                 return False
 
             if not rl_agent_path.exists():
