@@ -469,6 +469,22 @@ def live(
     config_file: str | None = typer.Option(
         None, "--config", help="Config file path"
     ),
+    # Telegram Bot Options
+    tg_enabled: bool = typer.Option(
+        False, "--tg-enabled", help="Enable Telegram notifications and dashboard updates"
+    ),
+    tg_bot_token: str | None = typer.Option(
+        None, "--tg-bot-token", help="Telegram bot token from @BotFather"
+    ),
+    tg_chat_id: str | None = typer.Option(
+        None, "--tg-chat-id", help="Telegram chat/group ID for notifications"
+    ),
+    tg_dashboard_interval: int | None = typer.Option(
+        None, "--tg-interval", help="Dashboard update interval in seconds (default: 300)"
+    ),
+    tg_trade_notifications: bool = typer.Option(
+        True, "--tg-trades/--no-tg-trades", help="Send trade open/close notifications (default: True)"
+    ),
 ) -> None:
     """
     Run live trading mode.
@@ -516,6 +532,31 @@ def live(
         config.symbol = symbols[0]  # Use first as primary
     if timeframe:
         config.timeframe = timeframe
+
+    # Configure Telegram settings from CLI arguments
+    if tg_enabled or tg_bot_token or tg_chat_id:
+        if tg_bot_token:
+            config.tg_bot_token = tg_bot_token
+        if tg_chat_id:
+            config.tg_chat_id = tg_chat_id
+        if tg_dashboard_interval:
+            config.tg_dashboard_interval = tg_dashboard_interval
+
+        # Enable dashboard updates if token and chat_id are provided
+        if config.tg_bot_token and config.tg_chat_id:
+            config.tg_dashboard_enabled = tg_enabled
+            config.tg_trade_notifications = tg_trade_notifications
+
+            console.print("[cyan]📱 Telegram Integration ENABLED[/cyan]")
+            console.print(f"[cyan]   - Bot Token: {config.tg_bot_token[:10]}...{config.tg_bot_token[-5:]}[/cyan]")
+            console.print(f"[cyan]   - Chat ID: {config.tg_chat_id}[/cyan]")
+            if config.tg_dashboard_enabled:
+                console.print(f"[cyan]   - Dashboard updates every {config.tg_dashboard_interval}s[/cyan]")
+            if config.tg_trade_notifications:
+                console.print("[cyan]   - Trade notifications: ON[/cyan]")
+        else:
+            console.print("[yellow]⚠️  Telegram: Missing bot token or chat ID[/yellow]")
+            console.print("[yellow]   Set TG_BOT_TOKEN and TG_CHAT_ID in .env or use --tg-bot-token and --tg-chat-id[/yellow]")
 
     console.print("[green]Starting Live Trading Mode[/green]")
     print_config_summary()

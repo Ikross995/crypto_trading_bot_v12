@@ -683,6 +683,182 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
             logger.error(f"❌ [TELEGRAM] Connection test failed: {e}")
             return False
 
+    async def send_message_with_keyboard(
+        self, text: str, keyboard: list, parse_mode: str = "HTML"
+    ) -> bool:
+        """
+        Отправить сообщение с Inline клавиатурой.
+
+        Args:
+            text: Текст сообщения
+            keyboard: Inline клавиатура (список списков кнопок)
+                     Формат: [[{"text": "Button 1", "callback_data": "btn1"}, ...], ...]
+            parse_mode: Режим парсинга ("HTML" или "Markdown")
+
+        Returns:
+            True если успешно отправлено
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/sendMessage"
+                data = {
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                    "reply_markup": {"inline_keyboard": keyboard},
+                }
+
+                async with session.post(url, json=data) as response:
+                    if response.status == 200:
+                        logger.info("📤 [TELEGRAM] Message with keyboard sent successfully")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"❌ [TELEGRAM] Failed to send message with keyboard: {error_text}"
+                        )
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error sending message with keyboard: {e}")
+            return False
+
+    async def send_main_menu(self) -> bool:
+        """Отправить главное меню с Inline клавиатурой."""
+        menu_text = """
+<b>🤖 Trading Bot Menu</b>
+
+Выберите действие:
+        """
+
+        keyboard = [
+            [
+                {"text": "📊 Портфолио", "callback_data": "menu_portfolio"},
+                {"text": "📈 Статистика", "callback_data": "menu_stats"},
+            ],
+            [
+                {"text": "📝 Активные сделки", "callback_data": "menu_trades"},
+                {"text": "📜 История", "callback_data": "menu_history"},
+            ],
+            [
+                {"text": "⚙️ Настройки", "callback_data": "menu_settings"},
+                {"text": "💰 Кошелек", "callback_data": "menu_wallet"},
+            ],
+            [
+                {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(menu_text, keyboard)
+
+    async def send_portfolio_menu(self, portfolio_data: Dict[str, Any]) -> bool:
+        """Отправить меню портфолио."""
+        balance = portfolio_data.get("balance", 0.0)
+        equity = portfolio_data.get("equity", 0.0)
+        pnl = portfolio_data.get("total_pnl", 0.0)
+        roi = portfolio_data.get("roi_pct", 0.0)
+
+        pnl_emoji = "💰" if pnl >= 0 else "📉"
+        roi_emoji = "🟢" if roi >= 0 else "🔴"
+
+        text = f"""
+<b>💼 ПОРТФОЛИО</b>
+
+💵 <b>Баланс:</b> ${balance:,.2f} USDT
+💎 <b>Equity:</b> ${equity:,.2f} USDT
+{pnl_emoji} <b>P&L:</b> ${pnl:+,.2f} ({roi:+.2f}%)
+{roi_emoji} <b>ROI:</b> {roi:+.2f}%
+
+━━━━━━━━━━━━━━━━━━━━
+        """
+
+        keyboard = [
+            [
+                {"text": "📊 Детали", "callback_data": "portfolio_details"},
+                {"text": "📈 График", "callback_data": "portfolio_chart"},
+            ],
+            [
+                {"text": "🔙 Назад", "callback_data": "menu_main"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(text, keyboard)
+
+    async def send_stats_menu(self, stats_data: Dict[str, Any]) -> bool:
+        """Отправить меню статистики."""
+        total_trades = stats_data.get("total_trades", 0)
+        win_rate = stats_data.get("win_rate", 0.0) * 100
+        profit_factor = stats_data.get("profit_factor", 0.0)
+        sharpe = stats_data.get("sharpe_ratio", 0.0)
+
+        text = f"""
+<b>📊 СТАТИСТИКА</b>
+
+🔢 <b>Всего сделок:</b> {total_trades}
+📈 <b>Win Rate:</b> {win_rate:.1f}%
+💹 <b>Profit Factor:</b> {profit_factor:.2f}
+📉 <b>Sharpe Ratio:</b> {sharpe:.2f}
+
+━━━━━━━━━━━━━━━━━━━━
+        """
+
+        keyboard = [
+            [
+                {"text": "🏆 Лучшие сделки", "callback_data": "stats_best"},
+                {"text": "💔 Худшие сделки", "callback_data": "stats_worst"},
+            ],
+            [
+                {"text": "📅 По дням", "callback_data": "stats_daily"},
+                {"text": "📆 По неделям", "callback_data": "stats_weekly"},
+            ],
+            [
+                {"text": "🔙 Назад", "callback_data": "menu_main"},
+            ],
+        ]
+
+        return await self.send_message_with_keyboard(text, keyboard)
+
+    async def edit_message(
+        self, message_id: int, text: str, keyboard: list = None, parse_mode: str = "HTML"
+    ) -> bool:
+        """
+        Редактировать существующее сообщение.
+
+        Args:
+            message_id: ID сообщения для редактирования
+            text: Новый текст
+            keyboard: Новая Inline клавиатура (опционально)
+            parse_mode: Режим парсинга
+
+        Returns:
+            True если успешно отредактировано
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/editMessageText"
+                data = {
+                    "chat_id": self.chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                }
+
+                if keyboard:
+                    data["reply_markup"] = {"inline_keyboard": keyboard}
+
+                async with session.post(url, json=data) as response:
+                    if response.status == 200:
+                        logger.info("📝 [TELEGRAM] Message edited successfully")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ [TELEGRAM] Failed to edit message: {error_text}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"❌ [TELEGRAM] Error editing message: {e}")
+            return False
+
 
 # Пример использования
 async def main():

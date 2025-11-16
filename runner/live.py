@@ -1219,6 +1219,11 @@ class LiveTradingEngine:
                     "📊 [DASHBOARD] Failed to initialize on startup: %s", dash_e
                 )
 
+        # Start Telegram dashboard update task in background
+        if self.telegram_bot and getattr(self.config, "tg_dashboard_enabled", False):
+            asyncio.create_task(self._telegram_dashboard_task())
+            self.logger.info("📱 [TELEGRAM] Dashboard update task started")
+
         await self._run_trading_loop()
 
     async def _initialize_market_context(self) -> None:
@@ -2185,6 +2190,189 @@ class LiveTradingEngine:
                 )
 
         self.logger.info("[PRELOAD] COMPLETE: Historical data preload finished!")
+
+    async def _telegram_dashboard_task(self) -> None:
+        """Background task to send periodic dashboard updates to Telegram."""
+        if not self.telegram_bot:
+            return
+
+        self.logger.info("📱 [TELEGRAM] Starting dashboard update task...")
+
+        interval = getattr(self.config, "tg_dashboard_interval", 300)
+
+        # Wait a bit before first update to let system stabilize
+        await asyncio.sleep(30)
+
+        while self.running:
+            try:
+                # Prepare dashboard data
+                dashboard_data = await self._generate_telegram_dashboard_data()
+
+                if dashboard_data:
+                    # Send dashboard update
+                    success = await self.telegram_bot.send_dashboard_update(dashboard_data)
+
+                    if success:
+                        self.logger.info(f"📱 [TELEGRAM] Dashboard update sent successfully")
+                    else:
+                        self.logger.warning(f"📱 [TELEGRAM] Failed to send dashboard update")
+                else:
+                    self.logger.debug("📱 [TELEGRAM] No dashboard data available yet")
+
+            except Exception as e:
+                self.logger.error(f"📱 [TELEGRAM] Error in dashboard task: {e}")
+
+            # Wait for next update
+            await asyncio.sleep(interval)
+
+    async def _generate_telegram_dashboard_data(self) -> Optional[Any]:
+        """Generate dashboard data for Telegram bot."""
+        try:
+            from datetime import datetime
+            from dataclasses import dataclass
+
+            @dataclass
+            class DashboardData:
+                timestamp: datetime
+                account_balance: float
+                equity: float
+                total_pnl: float
+                roi_pct: float
+                hourly_pnl: float
+                total_trades: int
+                winning_trades: int
+                losing_trades: int
+                win_rate: float
+                profit_factor: float
+                sharpe_ratio: float
+                best_trade: float
+                worst_trade: float
+                win_streak: int
+                loss_streak: int
+                max_win_streak: int
+                max_loss_streak: int
+                risk_score: float
+                total_margin_used: float
+                margin_usage_pct: float
+                free_margin: float
+                open_positions_details: list
+
+            # Get account balance
+            balance = self.equity_usdt
+
+            # Get trade statistics from portfolio tracker
+            stats = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'total_pnl': 0.0,
+                'best_trade': 0.0,
+                'worst_trade': 0.0,
+                'win_streak': 0,
+                'loss_streak': 0,
+                'max_win_streak': 0,
+                'max_loss_streak': 0,
+            }
+
+            if self.portfolio_tracker:
+                try:
+                    portfolio_stats = self.portfolio_tracker.get_stats()
+                    if portfolio_stats:
+                        stats['total_trades'] = portfolio_stats.get('total_trades', 0)
+                        stats['winning_trades'] = portfolio_stats.get('winning_trades', 0)
+                        stats['losing_trades'] = portfolio_stats.get('losing_trades', 0)
+                        stats['total_pnl'] = portfolio_stats.get('total_pnl', 0.0)
+                        stats['best_trade'] = portfolio_stats.get('best_trade', 0.0)
+                        stats['worst_trade'] = portfolio_stats.get('worst_trade', 0.0)
+                except Exception:
+                    pass
+
+            # Calculate metrics
+            win_rate = (stats['winning_trades'] / stats['total_trades']) if stats['total_trades'] > 0 else 0.0
+
+            initial_balance = getattr(self.config, 'paper_equity', 1000.0)
+            roi_pct = ((balance - initial_balance) / initial_balance * 100) if initial_balance > 0 else 0.0
+
+            # Get open positions
+            open_positions = []
+            total_margin = 0.0
+
+            if hasattr(self, 'active_positions'):
+                for symbol, pos_data in self.active_positions.items():
+                    try:
+                        entry_price = pos_data.get('entry_price', 0.0)
+                        quantity = pos_data.get('quantity', 0.0)
+                        side = pos_data.get('side', 'LONG')
+                        leverage = pos_data.get('leverage', self.leverage)
+
+                        # Get current price
+                        current_price = 0.0
+                        if hasattr(self, 'client') and self.client:
+                            try:
+                                ticker = await self.client.get_ticker_price(symbol)
+                                current_price = float(ticker.get('price', 0))
+                            except Exception:
+                                current_price = entry_price
+
+                        # Calculate P&L
+                        if side == 'LONG':
+                            pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
+                        else:
+                            pnl_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0.0
+
+                        pnl = quantity * (current_price - entry_price) * leverage if side == 'LONG' else quantity * (entry_price - current_price) * leverage
+                        margin_used = (quantity * entry_price) / leverage if leverage > 0 else 0.0
+                        total_margin += margin_used
+
+                        open_positions.append({
+                            'symbol': symbol,
+                            'side': side,
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'quantity': quantity,
+                            'leverage': leverage,
+                            'pnl': pnl,
+                            'pnl_pct': pnl_pct,
+                            'margin_used': margin_used,
+                        })
+                    except Exception as e:
+                        self.logger.debug(f"Error processing position {symbol}: {e}")
+
+            margin_usage_pct = (total_margin / balance * 100) if balance > 0 else 0.0
+            free_margin = balance - total_margin
+
+            # Create dashboard data object
+            data = DashboardData(
+                timestamp=datetime.utcnow(),
+                account_balance=balance,
+                equity=balance + sum(p['pnl'] for p in open_positions),
+                total_pnl=stats['total_pnl'],
+                roi_pct=roi_pct,
+                hourly_pnl=0.0,  # TODO: Calculate from recent trades
+                total_trades=stats['total_trades'],
+                winning_trades=stats['winning_trades'],
+                losing_trades=stats['losing_trades'],
+                win_rate=win_rate,
+                profit_factor=0.0,  # TODO: Calculate
+                sharpe_ratio=0.0,  # TODO: Calculate
+                best_trade=stats['best_trade'],
+                worst_trade=stats['worst_trade'],
+                win_streak=stats['win_streak'],
+                loss_streak=stats['loss_streak'],
+                max_win_streak=stats['max_win_streak'],
+                max_loss_streak=stats['max_loss_streak'],
+                risk_score=margin_usage_pct,  # Simple risk score based on margin usage
+                total_margin_used=total_margin,
+                margin_usage_pct=margin_usage_pct,
+                free_margin=free_margin,
+                open_positions_details=open_positions,
+            )
+
+            return data
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate dashboard data: {e}")
+            return None
 
     async def stop(self) -> None:
         """Gracefully stop trading engine and cleanup resources."""
