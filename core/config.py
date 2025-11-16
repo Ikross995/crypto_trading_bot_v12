@@ -369,6 +369,10 @@ class Config(BaseModel):
             # Notifications
             'tg_bot_token': os.getenv('TG_BOT_TOKEN', ''),
             'tg_chat_id': os.getenv('TG_CHAT_ID', ''),
+            'tg_dashboard_enabled': os.getenv('TG_DASHBOARD_ENABLED', 'false').lower() == 'true',
+            'tg_dashboard_interval': int(os.getenv('TG_DASHBOARD_INTERVAL', '300')),
+            'tg_trade_notifications': os.getenv('TG_TRADE_NOTIFICATIONS', 'true').lower() == 'true',
+            'tg_position_updates': os.getenv('TG_POSITION_UPDATES', 'false').lower() == 'true',
 
             # File Paths
             'kl_persist': os.getenv('KL_PERSIST', 'data/klines.csv'),

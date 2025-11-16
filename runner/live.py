@@ -5324,14 +5324,15 @@ class LiveTradingEngine:
                     )
 
                     # Send Telegram alert if available
-                    if self.telegram:
+                    if self.telegram_bot:
                         try:
-                            await self.telegram.send_alert(
-                                f"🚨🚨🚨 EMERGENCY STOP LOSS TRIGGERED! 🚨🚨🚨\n\n"
+                            await self.telegram_bot.send_message(
+                                f"🚨🚨🚨 <b>EMERGENCY STOP LOSS TRIGGERED!</b> 🚨🚨🚨\n\n"
                                 f"Initial: ${self.initial_equity:.2f}\n"
                                 f"Current: ${current_equity:.2f}\n"
                                 f"Loss: {loss_pct:.2f}%\n\n"
-                                f"🛑 Bot halted automatically!"
+                                f"🛑 Bot halted automatically!",
+                                parse_mode="HTML"
                             )
                         except Exception as tg_e:
                             self.logger.error(f"Failed to send Telegram alert: {tg_e}")
