@@ -9,11 +9,30 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request, make_response
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder='telegram_webapp', static_url_path='')
 CORS(app)  # Enable CORS for Telegram Web App
+
+
+# Middleware для обработки ngrok предупреждений
+@app.before_request
+def add_ngrok_headers():
+    """Добавляет заголовки для обхода страницы предупреждения ngrok."""
+    # Получаем запрос с правильными заголовками
+    pass
+
+
+@app.after_request
+def after_request(response):
+    """Добавляет необходимые заголовки в ответ."""
+    # Добавляем заголовок для обхода ngrok warning
+    response.headers['ngrok-skip-browser-warning'] = 'true'
+    # Добавляем кастомный User-Agent если нужно
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,ngrok-skip-browser-warning'
+    return response
 
 # Global state - будет обновляться из торгового бота
 dashboard_data = {
@@ -59,6 +78,19 @@ def index():
     return send_from_directory('telegram_webapp', 'dashboard.html')
 
 
+@app.route('/enhanced')
+def enhanced_dashboard():
+    """Enhanced дашборд из data/learning_reports."""
+    try:
+        enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
+        if enhanced_path.exists():
+            return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
+        else:
+            return jsonify({'error': 'Enhanced dashboard not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/dashboard')
 def get_dashboard():
     """API endpoint для получения данных дашборда."""
@@ -99,11 +131,18 @@ def run_server(host='0.0.0.0', port=8080):
 🌐 Local URL:     http://localhost:{port}
 🌐 Network URL:   http://{host}:{port}
 
-📊 Dashboard:     http://localhost:{port}/
+📊 Dashboards:
+   • Main:        http://localhost:{port}/
+   • Enhanced:    http://localhost:{port}/enhanced
+
 🔌 API:           http://localhost:{port}/api/dashboard
+💚 Health:        http://localhost:{port}/api/health
 
 💡 Для доступа из Telegram используй ngrok:
    ngrok http {port}
+
+   Затем добавь в .env:
+   TG_WEBAPP_URL=https://your-ngrok-url.ngrok-free.app
 
 🔄 Автоматическое обновление данных из файла:
    data/dashboard_state.json
