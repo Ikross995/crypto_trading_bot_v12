@@ -52,6 +52,10 @@ class TelegramUpdateHandler:
         self.callback_handlers['menu_wallet'] = self.handle_menu_wallet
         self.callback_handlers['menu_refresh'] = self.handle_menu_refresh
 
+        # Portfolio sub-menus
+        self.callback_handlers['portfolio_details'] = self.handle_portfolio_details
+        self.callback_handlers['portfolio_chart'] = self.handle_portfolio_chart
+
     async def start_polling(self):
         """Start polling for updates."""
         self.running = True
@@ -205,7 +209,7 @@ Use /menu to start navigating with buttons!
 
     async def handle_menu_command(self):
         """Handle /menu command."""
-        await self.bot.send_main_menu()
+        await self.bot.send_main_menu(webapp_url=self.bot.webapp_url)
 
     async def handle_status_command(self):
         """Handle /status command."""
@@ -240,7 +244,7 @@ Use /menu for detailed info
     # Callback Handlers
     async def handle_menu_main(self, message_id: Optional[int]):
         """Handle main menu callback."""
-        await self.bot.send_main_menu()
+        await self.bot.send_main_menu(webapp_url=self.bot.webapp_url)
 
     async def handle_menu_portfolio(self, message_id: Optional[int]):
         """Handle portfolio menu callback."""
@@ -248,13 +252,23 @@ Use /menu for detailed info
             return
 
         try:
+            # Get current balance (updated value)
             balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+
+            # Get initial balance for ROI calculation
+            initial = getattr(self.trading_engine, 'initial_equity', None)
+            if initial is None:
+                initial = getattr(self.trading_engine.config, 'paper_equity', 1000.0)
+
+            # Calculate P&L and ROI
+            total_pnl = balance - initial
+            roi_pct = ((balance - initial) / initial * 100) if initial > 0 else 0.0
 
             portfolio_data = {
                 'balance': balance,
                 'equity': balance,
-                'total_pnl': 0.0,
-                'roi_pct': 0.0,
+                'total_pnl': total_pnl,
+                'roi_pct': roi_pct,
             }
 
             # Try to get real data from portfolio tracker
@@ -262,9 +276,8 @@ Use /menu for detailed info
                 try:
                     stats = self.trading_engine.portfolio_tracker.get_stats()
                     if stats:
-                        portfolio_data['total_pnl'] = stats.get('total_pnl', 0.0)
-                        initial = getattr(self.trading_engine.config, 'paper_equity', 1000.0)
-                        portfolio_data['roi_pct'] = ((balance - initial) / initial * 100) if initial > 0 else 0.0
+                        portfolio_data['total_pnl'] = stats.get('total_pnl', total_pnl)
+                        # portfolio_tracker might have better P&L data
                 except Exception:
                     pass
 
@@ -360,20 +373,67 @@ Balance: ${balance:,.2f} USDT
         await self.bot.send_message("🔄 Refreshing...")
         await self.handle_menu_main(None)
 
+    async def handle_portfolio_details(self, message_id: Optional[int]):
+        """Handle portfolio details callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+
+            # Get positions from active_positions
+            positions = getattr(self.trading_engine, 'active_positions', {})
+
+            text = f"""
+<b>💼 PORTFOLIO DETAILS</b>
+
+<b>💵 Balance:</b> ${balance:,.2f} USDT
+<b>📊 Open Positions:</b> {len(positions)}
+
+<b>📈 Recent Activity:</b>
+<i>Monitoring {len(getattr(self.trading_engine.config, 'symbols', []))} symbols</i>
+
+━━━━━━━━━━━━━━━━━━━━
+            """
+
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_portfolio"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading details: {e}")
+
+    async def handle_portfolio_chart(self, message_id: Optional[int]):
+        """Handle portfolio chart callback."""
+        text = """
+<b>📈 PORTFOLIO CHART</b>
+
+<i>Interactive charts coming soon...</i>
+
+For now, check:
+• Enhanced Dashboard (data/learning_reports/enhanced_dashboard.html)
+• Portfolio History (data/portfolio_history.json)
+
+━━━━━━━━━━━━━━━━━━━━
+        """
+        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_portfolio"}]]
+        await self.bot.send_message_with_keyboard(text, keyboard)
+
 
 class TelegramDashboardBot:
     """Telegram бот для отправки обновлений дашборда."""
 
-    def __init__(self, token: str, chat_id: str):
+    def __init__(self, token: str, chat_id: str, webapp_url: str = None):
         """
         Инициализация Telegram бота.
 
         Args:
             token: Bot token от @BotFather
             chat_id: ID группы/канала (можно получить от @userinfobot)
+            webapp_url: URL Telegram Web App для интерактивного дашборда (опционально)
         """
         self.token = token
         self.chat_id = chat_id
+        self.webapp_url = webapp_url
         self.base_url = f"https://api.telegram.org/bot{token}"
 
     async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
@@ -1068,7 +1128,7 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
             logger.error(f"❌ [TELEGRAM] Error sending message with keyboard: {e}")
             return False
 
-    async def send_main_menu(self) -> bool:
+    async def send_main_menu(self, webapp_url: str = None) -> bool:
         """Отправить главное меню с Inline клавиатурой."""
         menu_text = """
 <b>🤖 Trading Bot Menu</b>
@@ -1089,10 +1149,17 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
                 {"text": "⚙️ Настройки", "callback_data": "menu_settings"},
                 {"text": "💰 Кошелек", "callback_data": "menu_wallet"},
             ],
-            [
-                {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
-            ],
         ]
+
+        # Add Web App button if URL is provided
+        if webapp_url:
+            keyboard.insert(0, [
+                {"text": "📱 Интерактивный Dashboard", "web_app": {"url": webapp_url}}
+            ])
+
+        keyboard.append([
+            {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
+        ])
 
         return await self.send_message_with_keyboard(menu_text, keyboard)
 

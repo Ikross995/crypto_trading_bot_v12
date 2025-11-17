@@ -360,16 +360,28 @@ class LiveTradingEngine:
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
+            tg_webapp_url = getattr(config, "tg_webapp_url", None)
             if tg_token and tg_chat_id:
                 from infra.telegram_bot import TelegramDashboardBot, TelegramUpdateHandler
 
-                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id)
+                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id, webapp_url=tg_webapp_url)
                 self.telegram_update_handler = TelegramUpdateHandler(self.telegram_bot, self)
                 self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
+                if tg_webapp_url:
+                    self.logger.info(f"📱 [TELEGRAM] Web App enabled: {tg_webapp_url}")
             else:
                 self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
         except Exception as e:
             self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
+
+        # Dashboard State Manager for Web App API
+        self.dashboard_state_manager = None
+        try:
+            from utils.dashboard_state import DashboardStateManager
+            self.dashboard_state_manager = DashboardStateManager()
+            self.logger.info("📊 [WEB_APP] Dashboard state manager initialized")
+        except Exception as e:
+            self.logger.warning("📊 [WEB_APP] Failed to initialize dashboard state manager: %s", e)
 
         # Accounting
         self.equity_usdt = float(getattr(config, "paper_equity", 1000.0))
@@ -2225,6 +2237,14 @@ class LiveTradingEngine:
                         self.logger.warning(f"📱 [TELEGRAM] Failed to send dashboard update")
                 else:
                     self.logger.debug("📱 [TELEGRAM] No dashboard data available yet")
+
+                # Save dashboard state for Web App API
+                if self.dashboard_state_manager:
+                    try:
+                        self.dashboard_state_manager.save_state(self)
+                        self.logger.debug("📊 [WEB_APP] Dashboard state saved to file")
+                    except Exception as save_e:
+                        self.logger.warning(f"📊 [WEB_APP] Failed to save dashboard state: {save_e}")
 
             except Exception as e:
                 self.logger.error(f"📱 [TELEGRAM] Error in dashboard task: {e}")
