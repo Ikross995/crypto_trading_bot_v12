@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram Web App Server
-Локальный сервер для хостинга дашборда и API с real-time данными
+Локальный сервер для хостинга дашборда и API с real-time данными через WebSocket
 """
 
 import asyncio
@@ -11,9 +11,19 @@ from pathlib import Path
 from datetime import datetime
 from flask import Flask, jsonify, send_from_directory, request, make_response
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__, static_folder='telegram_webapp', static_url_path='')
 CORS(app)  # Enable CORS for Telegram Web App
+
+# Initialize SocketIO for real-time updates
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=False,
+    engineio_logger=False
+)
 
 
 # Middleware для обработки ngrok предупреждений
@@ -70,6 +80,42 @@ def update_dashboard_data(new_data):
     global dashboard_data
     dashboard_data.update(new_data)
     dashboard_data['lastUpdate'] = datetime.now().isoformat()
+    # Emit update to all connected WebSocket clients
+    emit_dashboard_update(new_data)
+
+
+def emit_dashboard_update(data):
+    """Отправить обновление дашборда всем подключенным клиентам через WebSocket."""
+    try:
+        socketio.emit('dashboard_update', data, namespace='/')
+    except Exception as e:
+        print(f"Warning: Could not emit dashboard update: {e}")
+
+
+def emit_trade_update(trade_data):
+    """Отправить обновление о сделке через WebSocket."""
+    try:
+        socketio.emit('trade_update', trade_data, namespace='/')
+        print(f"📡 Trade update emitted: {trade_data.get('symbol', 'N/A')}")
+    except Exception as e:
+        print(f"Warning: Could not emit trade update: {e}")
+
+
+def emit_position_update(position_data):
+    """Отправить обновление позиций через WebSocket."""
+    try:
+        socketio.emit('position_update', position_data, namespace='/')
+        print(f"📡 Position update emitted")
+    except Exception as e:
+        print(f"Warning: Could not emit position update: {e}")
+
+
+def emit_price_update(price_data):
+    """Отправить обновление цены через WebSocket."""
+    try:
+        socketio.emit('price_update', price_data, namespace='/')
+    except Exception as e:
+        print(f"Warning: Could not emit price update: {e}")
 
 
 @app.route('/')
@@ -121,11 +167,38 @@ def get_positions():
     })
 
 
+# ==================== WebSocket Events ====================
+
+@socketio.on('connect')
+def handle_connect():
+    """Обработка подключения нового клиента."""
+    print(f"✅ Client connected: {request.sid}")
+    # Отправляем текущее состояние дашборда новому клиенту
+    emit('dashboard_update', dashboard_data)
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Обработка отключения клиента."""
+    print(f"❌ Client disconnected: {request.sid}")
+
+
+@socketio.on('request_update')
+def handle_request_update():
+    """Обработка запроса на обновление данных."""
+    # Загружаем свежие данные из файла
+    file_data = load_dashboard_data_from_file()
+    if file_data:
+        update_dashboard_data(file_data)
+    emit('dashboard_update', dashboard_data)
+
+
 def run_server(host='0.0.0.0', port=8080):
-    """Запустить Flask сервер."""
+    """Запустить Flask сервер с WebSocket поддержкой."""
     print(f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║       📱 Telegram Web App Server Started                 ║
+║              🔴 Real-Time WebSocket Enabled              ║
 ╚═══════════════════════════════════════════════════════════╝
 
 🌐 Local URL:     http://localhost:{port}
@@ -137,6 +210,7 @@ def run_server(host='0.0.0.0', port=8080):
 
 🔌 API:           http://localhost:{port}/api/dashboard
 💚 Health:        http://localhost:{port}/api/health
+⚡ WebSocket:     ws://localhost:{port}/socket.io/
 
 💡 Для доступа из Telegram используй ngrok:
    ngrok http {port}
@@ -144,14 +218,32 @@ def run_server(host='0.0.0.0', port=8080):
    Затем добавь в .env:
    TG_WEBAPP_URL=https://your-ngrok-url.ngrok-free.app
 
-🔄 Автоматическое обновление данных из файла:
-   data/dashboard_state.json
+🔄 Режимы обновления:
+   • WebSocket:  Real-time streaming (< 1 сек)
+   • Fallback:   HTTP polling (30 сек)
+   • File:       data/dashboard_state.json
 
 Нажми Ctrl+C для остановки сервера
     """)
 
-    app.run(host=host, port=port, debug=False)
+    # Run with SocketIO support
+    socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
+
+
+def initialize_websocket_bridge():
+    """Инициализировать WebSocket bridge для интеграции с торговым движком."""
+    try:
+        from utils.websocket_bridge import ws_bridge
+        import webapp_server as self_module
+
+        # Setup callbacks
+        ws_bridge.setup_callbacks(self_module)
+        print("✅ WebSocket Bridge initialized")
+    except Exception as e:
+        print(f"Warning: Could not initialize WebSocket bridge: {e}")
 
 
 if __name__ == '__main__':
+    # Initialize WebSocket bridge
+    initialize_websocket_bridge()
     run_server()

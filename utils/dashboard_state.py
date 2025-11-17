@@ -1,16 +1,16 @@
 """
 Dashboard State Manager
-Сохраняет и загружает состояние дашборда для Web App API
+Сохраняет и загружает состояние дашборда для Web App API с WebSocket поддержкой
 """
 
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable
 
 
 class DashboardStateManager:
-    """Управление состоянием дашборда для Web App."""
+    """Управление состоянием дашборда для Web App с WebSocket."""
 
     def __init__(self, state_file: str = "data/dashboard_state.json"):
         """
@@ -21,6 +21,12 @@ class DashboardStateManager:
         """
         self.state_file = Path(state_file)
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # WebSocket callback functions (set by webapp_server)
+        self.on_trade_update: Optional[Callable] = None
+        self.on_position_update: Optional[Callable] = None
+        self.on_price_update: Optional[Callable] = None
+        self.on_dashboard_update: Optional[Callable] = None
 
     def save_state(self, trading_engine) -> None:
         """
@@ -141,8 +147,54 @@ class DashboardStateManager:
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f, indent=2, ensure_ascii=False)
 
+            # Отправляем обновление через WebSocket если callback установлен
+            if self.on_dashboard_update:
+                try:
+                    self.on_dashboard_update(state)
+                except Exception as ws_error:
+                    print(f"Warning: WebSocket dashboard update failed: {ws_error}")
+
         except Exception as e:
             print(f"Error saving dashboard state: {e}")
+
+    def emit_trade(self, trade_data: Dict[str, Any]) -> None:
+        """
+        Отправить обновление о сделке через WebSocket.
+
+        Args:
+            trade_data: Данные сделки (symbol, side, price, quantity, pnl, etc.)
+        """
+        if self.on_trade_update:
+            try:
+                self.on_trade_update(trade_data)
+            except Exception as e:
+                print(f"Warning: WebSocket trade update failed: {e}")
+
+    def emit_position(self, position_data: Dict[str, Any]) -> None:
+        """
+        Отправить обновление позиций через WebSocket.
+
+        Args:
+            position_data: Данные позиций
+        """
+        if self.on_position_update:
+            try:
+                self.on_position_update(position_data)
+            except Exception as e:
+                print(f"Warning: WebSocket position update failed: {e}")
+
+    def emit_price(self, price_data: Dict[str, Any]) -> None:
+        """
+        Отправить обновление цены через WebSocket.
+
+        Args:
+            price_data: Данные о ценах (symbol, price, change, etc.)
+        """
+        if self.on_price_update:
+            try:
+                self.on_price_update(price_data)
+            except Exception as e:
+                print(f"Warning: WebSocket price update failed: {e}")
 
     def load_state(self) -> Dict[str, Any]:
         """
