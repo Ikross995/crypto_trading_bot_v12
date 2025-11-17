@@ -8,6 +8,9 @@
     <!-- Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
+    <!-- Socket.IO Client for real-time updates -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
     <!-- Plotly.js for charts -->
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
 
@@ -472,11 +475,160 @@
             }
         });
 
+        // ==================== WebSocket Real-Time Updates ====================
+        let socket = null;
+        let isWebSocketConnected = false;
+        let fallbackInterval = null;
+
+        function initWebSocket() {
+            try {
+                console.log('🔴 Connecting to WebSocket...');
+
+                // Connect to Socket.IO server
+                socket = io(window.location.origin, {
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    reconnectionAttempts: Infinity
+                });
+
+                // Connection established
+                socket.on('connect', () => {
+                    console.log('✅ WebSocket connected!');
+                    isWebSocketConnected = true;
+
+                    // Clear fallback polling if it exists
+                    if (fallbackInterval) {
+                        clearInterval(fallbackInterval);
+                        fallbackInterval = null;
+                    }
+
+                    // Show connection status
+                    updateConnectionStatus(true);
+                });
+
+                // Connection lost
+                socket.on('disconnect', () => {
+                    console.log('❌ WebSocket disconnected');
+                    isWebSocketConnected = false;
+                    updateConnectionStatus(false);
+
+                    // Start fallback polling
+                    if (!fallbackInterval) {
+                        console.log('🔄 Starting fallback polling...');
+                        fallbackInterval = setInterval(loadData, 10000); // Poll every 10s as fallback
+                    }
+                });
+
+                // Dashboard update event
+                socket.on('dashboard_update', (data) => {
+                    console.log('📊 Dashboard update received:', data);
+                    dashboardData = data;
+                    renderDashboard(data);
+                });
+
+                // Trade update event - show notification
+                socket.on('trade_update', (trade) => {
+                    console.log('💰 Trade update:', trade);
+                    showTradeNotification(trade);
+
+                    // Reload full dashboard to reflect trade
+                    socket.emit('request_update');
+                });
+
+                // Position update event
+                socket.on('position_update', (positions) => {
+                    console.log('📈 Position update:', positions);
+                    // Update positions in dashboard if needed
+                    if (dashboardData) {
+                        dashboardData.positions = positions.positions || positions;
+                        renderDashboard(dashboardData);
+                    }
+                });
+
+                // Price update event (optional - for real-time price streaming)
+                socket.on('price_update', (priceData) => {
+                    console.log('💵 Price update:', priceData);
+                    // Update price displays if needed
+                });
+
+            } catch (error) {
+                console.error('❌ WebSocket initialization failed:', error);
+                // Fallback to polling
+                startFallbackPolling();
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.querySelector('.header p');
+            if (statusEl) {
+                const mode = connected ? '🔴 Real-time' : '🔄 Polling';
+                statusEl.innerHTML = `${mode} • Last update: ${new Date().toLocaleTimeString()}`;
+            }
+        }
+
+        function showTradeNotification(trade) {
+            // Show toast notification for new trade
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 80px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 16px 24px;
+                border-radius: 12px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideDown 0.3s ease-out;
+                max-width: 90%;
+            `;
+
+            const sideColor = trade.side === 'LONG' ? '#00ff88' : '#ff4757';
+            toast.innerHTML = `
+                <div style="font-weight: bold; margin-bottom: 4px;">
+                    ${trade.side === 'LONG' ? '📈' : '📉'} New ${trade.side} Position
+                </div>
+                <div style="font-size: 0.9em;">
+                    ${trade.symbol} @ $${trade.entry_price} • ${trade.leverage}x leverage
+                </div>
+            `;
+
+            document.body.appendChild(toast);
+
+            // Haptic feedback if in Telegram
+            if (tg) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
+
+            // Remove after 5 seconds
+            setTimeout(() => {
+                toast.style.animation = 'slideUp 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
+
+        function startFallbackPolling() {
+            console.log('🔄 Using fallback HTTP polling mode');
+            if (!fallbackInterval) {
+                fallbackInterval = setInterval(loadData, 30000); // Poll every 30s
+            }
+        }
+
         // Initialize
         loadData();
 
-        // Auto-refresh every 30 seconds
-        setInterval(loadData, 30000);
+        // Try to connect WebSocket for real-time updates
+        initWebSocket();
+
+        // If WebSocket doesn't connect within 3 seconds, start polling
+        setTimeout(() => {
+            if (!isWebSocketConnected && !fallbackInterval) {
+                startFallbackPolling();
+            }
+        }, 3000);
 
         // Notify Telegram that app is ready
         if (tg) {

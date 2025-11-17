@@ -380,6 +380,14 @@ class LiveTradingEngine:
             from utils.dashboard_state import DashboardStateManager
             self.dashboard_state_manager = DashboardStateManager()
             self.logger.info("📊 [WEB_APP] Dashboard state manager initialized")
+
+            # Connect to WebSocket bridge for real-time updates
+            try:
+                from utils.websocket_bridge import ws_bridge
+                ws_bridge.set_dashboard_manager(self.dashboard_state_manager)
+                self.logger.info("🔴 [WEBSOCKET] Bridge connected for real-time streaming")
+            except Exception as ws_err:
+                self.logger.debug(f"[WEBSOCKET] Bridge connection skipped: {ws_err}")
         except Exception as e:
             self.logger.warning("📊 [WEB_APP] Failed to initialize dashboard state manager: %s", e)
 
@@ -3787,6 +3795,23 @@ class LiveTradingEngine:
                                 self.logger.warning(
                                     "📱 [TELEGRAM] Failed to send notification: %s", tg_e
                                 )
+
+                        # 🔴 Send WebSocket real-time update
+                        if not self._startup_loading:
+                            try:
+                                from utils.websocket_bridge import ws_bridge
+                                ws_bridge.emit_trade({
+                                    "symbol": symbol,
+                                    "side": "LONG" if order_side == "BUY" else "SHORT",
+                                    "entry_price": round(avg_fill_price, 2),
+                                    "quantity": round(executed_qty, 4),
+                                    "leverage": leverage,
+                                    "notional": round(notional, 2),
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                self.logger.info("🔴 [WEBSOCKET] Trade update emitted")
+                            except Exception as ws_e:
+                                self.logger.debug(f"[WEBSOCKET] Update failed: {ws_e}")
 
                         # 🤖 Register position with RL Position Advisor
                         if self.rl_position_advisor:
