@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Trading Dashboard</title>
+
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Chart.js for interactive charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #000);
+            padding: 16px;
+            padding-bottom: 80px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .header .time {
+            color: var(--tg-theme-hint-color, #999);
+            font-size: 14px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 16px;
+            border-radius: 12px;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999);
+            margin-bottom: 4px;
+        }
+
+        .stat-card .value {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .stat-card.positive .value {
+            color: #4CAF50;
+        }
+
+        .stat-card.negative .value {
+            color: #F44336;
+        }
+
+        .chart-container {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+
+        .chart-container h3 {
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        canvas {
+            max-height: 250px;
+        }
+
+        .positions-list {
+            margin-top: 24px;
+        }
+
+        .position-card {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+        }
+
+        .position-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .position-symbol {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .position-side {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .position-side.long {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .position-side.short {
+            background: #F44336;
+            color: white;
+        }
+
+        .position-details {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #666);
+            line-height: 1.6;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-button-text-color, #fff);
+            border: none;
+            font-size: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .refresh-btn.spinning {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Trading Dashboard</h1>
+        <div class="time" id="currentTime">Loading...</div>
+    </div>
+
+    <div id="content" class="loading">
+        <div>📊 Loading dashboard data...</div>
+    </div>
+
+    <button class="refresh-btn" id="refreshBtn">🔄</button>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.enableClosingConfirmation();
+
+        // Mock data for demo (replace with API call)
+        const mockData = {
+            balance: 1636.23,
+            equity: 1642.50,
+            totalPnl: 636.23,
+            roiPct: 63.62,
+            openPositions: 8,
+            totalTrades: 156,
+            winRate: 67.3,
+            profitFactor: 2.15,
+            positions: [
+                { symbol: 'BTCUSDT', side: 'LONG', pnl: 125.50, pnlPct: 12.5, entry: 93500, current: 94200, leverage: 10 },
+                { symbol: 'ETHUSDT', side: 'LONG', pnl: 45.20, pnlPct: 8.3, entry: 3200, current: 3265, leverage: 5 },
+                { symbol: 'SOLUSDT', side: 'SHORT', pnl: -23.10, pnlPct: -3.2, entry: 185, current: 189, leverage: 5 },
+            ],
+            equityHistory: {
+                labels: ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00'],
+                values: [1500, 1520, 1495, 1550, 1580, 1642]
+            }
+        };
+
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('currentTime').textContent = now.toLocaleString('ru-RU');
+        }
+
+        function renderDashboard(data) {
+            const content = document.getElementById('content');
+
+            const html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="label">💰 Balance</div>
+                        <div class="value">$${data.balance.toFixed(2)}</div>
+                    </div>
+                    <div class="stat-card ${data.totalPnl >= 0 ? 'positive' : 'negative'}">
+                        <div class="label">📊 Total P&L</div>
+                        <div class="value">${data.totalPnl >= 0 ? '+' : ''}$${data.totalPnl.toFixed(2)}</div>
+                    </div>
+                    <div class="stat-card ${data.roiPct >= 0 ? 'positive' : 'negative'}">
+                        <div class="label">📈 ROI</div>
+                        <div class="value">${data.roiPct >= 0 ? '+' : ''}${data.roiPct.toFixed(2)}%</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">🎯 Win Rate</div>
+                        <div class="value">${data.winRate.toFixed(1)}%</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>💹 Equity Curve</h3>
+                    <canvas id="equityChart"></canvas>
+                </div>
+
+                <div class="positions-list">
+                    <h3 style="margin-bottom: 12px;">📊 Open Positions (${data.openPositions})</h3>
+                    ${data.positions.map(pos => `
+                        <div class="position-card">
+                            <div class="position-header">
+                                <span class="position-symbol">${pos.symbol}</span>
+                                <span class="position-side ${pos.side.toLowerCase()}">${pos.side}</span>
+                            </div>
+                            <div class="position-details">
+                                Entry: $${pos.entry.toFixed(2)} → $${pos.current.toFixed(2)} (${pos.leverage}x)<br>
+                                P&L: <strong style="color: ${pos.pnl >= 0 ? '#4CAF50' : '#F44336'}">${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(2)} (${pos.pnlPct >= 0 ? '+' : ''}${pos.pnlPct.toFixed(1)}%)</strong>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+
+            content.innerHTML = html;
+            content.className = '';
+
+            // Render equity chart
+            setTimeout(() => renderEquityChart(data.equityHistory), 100);
+        }
+
+        function renderEquityChart(history) {
+            const ctx = document.getElementById('equityChart');
+            if (!ctx) return;
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: history.labels,
+                    datasets: [{
+                        label: 'Equity',
+                        data: history.values,
+                        borderColor: '#0088cc',
+                        backgroundColor: 'rgba(0, 136, 204, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: false }
+                    }
+                }
+            });
+        }
+
+        async function loadData() {
+            try {
+                // Определить URL API (если запущено локально или через Web App)
+                const apiUrl = window.location.origin + '/api/dashboard';
+
+                const response = await fetch(apiUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Проверка что данные свежие
+                if (data.lastUpdate) {
+                    const lastUpdate = new Date(data.lastUpdate);
+                    const now = new Date();
+                    const diffMinutes = (now - lastUpdate) / 1000 / 60;
+
+                    // Если данные старше 5 минут, показать предупреждение
+                    if (diffMinutes > 5) {
+                        console.warn(`Data is ${diffMinutes.toFixed(1)} minutes old`);
+                    }
+                }
+
+                renderDashboard(data);
+            } catch (error) {
+                console.error('Error loading data:', error);
+
+                // Fallback на mock data если API недоступен
+                console.log('Falling back to mock data...');
+                renderDashboard(mockData);
+
+                // Показать уведомление пользователю
+                const content = document.getElementById('content');
+                const warning = document.createElement('div');
+                warning.style.cssText = 'background: #FFA500; color: white; padding: 12px; border-radius: 8px; margin-bottom: 16px; text-align: center;';
+                warning.innerHTML = '⚠️ Using demo data. Start webapp_server.py for real-time updates.';
+                content.prepend(warning);
+            }
+        }
+
+        // Refresh button handler
+        document.getElementById('refreshBtn').addEventListener('click', async function() {
+            this.classList.add('spinning');
+            tg.HapticFeedback.impactOccurred('light');
+
+            await loadData();
+            this.classList.remove('spinning');
+            tg.HapticFeedback.notificationOccurred('success');
+        });
+
+        // Initialize
+        updateTime();
+        setInterval(updateTime, 1000);
+        loadData();
+
+        // Notify Telegram that app is ready
+        tg.ready();
+    </script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-block {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #0088cc;
+        }
+        .success { border-left-color: #4CAF50; }
+        .error { border-left-color: #F44336; }
+        pre {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Web App Test Page</h1>
+
+    <div class="test-block">
+        <h3>✅ Тест 1: HTML загружен</h3>
+        <p>Если вы видите эту страницу, значит веб-сервер работает!</p>
+    </div>
+
+    <div class="test-block" id="telegramTest">
+        <h3>📱 Тест 2: Telegram Web App SDK</h3>
+        <p id="telegramStatus">Проверяем...</p>
+    </div>
+
+    <div class="test-block" id="apiTest">
+        <h3>🔌 Тест 3: API доступность</h3>
+        <p id="apiStatus">Проверяем...</p>
+        <pre id="apiData"></pre>
+    </div>
+
+    <div class="test-block">
+        <h3>📊 Тест 4: Данные</h3>
+        <div id="dataDisplay">Загрузка...</div>
+    </div>
+
+    <script>
+        // Тест 1: Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        const telegramBlock = document.getElementById('telegramTest');
+        const telegramStatus = document.getElementById('telegramStatus');
+
+        if (tg) {
+            tg.expand();
+            telegramBlock.classList.add('success');
+            telegramStatus.innerHTML = `
+                ✅ Telegram WebApp SDK загружен<br>
+                Version: ${tg.version}<br>
+                Platform: ${tg.platform}<br>
+                initData: ${tg.initData ? 'Да' : 'Нет'}
+            `;
+        } else {
+            telegramBlock.classList.add('error');
+            telegramStatus.innerHTML = '❌ Telegram WebApp SDK не загружен (откройте в Telegram)';
+        }
+
+        // Тест 2: API
+        async function testAPI() {
+            const apiBlock = document.getElementById('apiTest');
+            const apiStatus = document.getElementById('apiStatus');
+            const apiData = document.getElementById('apiData');
+
+            try {
+                // Попробуем разные URL
+                const urls = [
+                    window.location.origin + '/api/dashboard',
+                    '/api/dashboard',
+                    'http://localhost:8080/api/dashboard'
+                ];
+
+                let success = false;
+                let data = null;
+
+                for (const url of urls) {
+                    try {
+                        console.log('Trying:', url);
+                        const response = await fetch(url, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json'
+                            }
+                        });
+
+                        if (response.ok) {
+                            data = await response.json();
+                            apiBlock.classList.add('success');
+                            apiStatus.innerHTML = `✅ API работает! URL: ${url}<br>Status: ${response.status}`;
+                            apiData.textContent = JSON.stringify(data, null, 2);
+                            success = true;
+
+                            // Показать данные
+                            displayData(data);
+                            break;
+                        }
+                    } catch (e) {
+                        console.log('Failed:', url, e);
+                    }
+                }
+
+                if (!success) {
+                    throw new Error('Не удалось подключиться к API');
+                }
+
+            } catch (error) {
+                apiBlock.classList.add('error');
+                apiStatus.innerHTML = `❌ Ошибка API: ${error.message}`;
+                apiData.textContent = `
+Возможные причины:
+1. webapp_server.py не запущен
+2. Неправильный URL
+3. CORS проблема
+4. Файл data/dashboard_state.json отсутствует
+
+Текущий URL: ${window.location.href}
+Origin: ${window.location.origin}
+                `;
+            }
+        }
+
+        function displayData(data) {
+            const display = document.getElementById('dataDisplay');
+
+            if (!data) {
+                display.innerHTML = '❌ Нет данных';
+                return;
+            }
+
+            display.innerHTML = `
+                <h4>💰 Финансы:</h4>
+                <ul>
+                    <li>Balance: $${data.balance || 0}</li>
+                    <li>Total P&L: $${data.totalPnl || 0}</li>
+                    <li>ROI: ${data.roiPct || 0}%</li>
+                </ul>
+
+                <h4>📊 Статистика:</h4>
+                <ul>
+                    <li>Trades: ${data.totalTrades || 0}</li>
+                    <li>Win Rate: ${data.winRate || 0}%</li>
+                    <li>Profit Factor: ${data.profitFactor || 0}</li>
+                </ul>
+
+                <h4>📈 График:</h4>
+                <ul>
+                    <li>Точек данных: ${data.equityHistory?.values?.length || 0}</li>
+                </ul>
+
+                <h4>🕐 Обновление:</h4>
+                <ul>
+                    <li>${data.lastUpdate || 'Неизвестно'}</li>
+                </ul>
+            `;
+        }
+
+        // Запуск тестов
+        testAPI();
+
+        // Notify Telegram
+        if (tg) {
+            tg.ready();
+        }
+    </script>
+</body>
+</html>
