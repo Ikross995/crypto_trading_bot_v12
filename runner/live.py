@@ -360,12 +360,15 @@ class LiveTradingEngine:
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
+            tg_webapp_url = getattr(config, "tg_webapp_url", None)
             if tg_token and tg_chat_id:
                 from infra.telegram_bot import TelegramDashboardBot, TelegramUpdateHandler
 
-                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id)
+                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id, webapp_url=tg_webapp_url)
                 self.telegram_update_handler = TelegramUpdateHandler(self.telegram_bot, self)
                 self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
+                if tg_webapp_url:
+                    self.logger.info(f"📱 [TELEGRAM] Web App enabled: {tg_webapp_url}")
             else:
                 self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
         except Exception as e:

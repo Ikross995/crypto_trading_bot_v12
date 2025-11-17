@@ -209,7 +209,7 @@ Use /menu to start navigating with buttons!
 
     async def handle_menu_command(self):
         """Handle /menu command."""
-        await self.bot.send_main_menu()
+        await self.bot.send_main_menu(webapp_url=self.bot.webapp_url)
 
     async def handle_status_command(self):
         """Handle /status command."""
@@ -244,7 +244,7 @@ Use /menu for detailed info
     # Callback Handlers
     async def handle_menu_main(self, message_id: Optional[int]):
         """Handle main menu callback."""
-        await self.bot.send_main_menu()
+        await self.bot.send_main_menu(webapp_url=self.bot.webapp_url)
 
     async def handle_menu_portfolio(self, message_id: Optional[int]):
         """Handle portfolio menu callback."""
@@ -422,16 +422,18 @@ For now, check:
 class TelegramDashboardBot:
     """Telegram бот для отправки обновлений дашборда."""
 
-    def __init__(self, token: str, chat_id: str):
+    def __init__(self, token: str, chat_id: str, webapp_url: str = None):
         """
         Инициализация Telegram бота.
 
         Args:
             token: Bot token от @BotFather
             chat_id: ID группы/канала (можно получить от @userinfobot)
+            webapp_url: URL Telegram Web App для интерактивного дашборда (опционально)
         """
         self.token = token
         self.chat_id = chat_id
+        self.webapp_url = webapp_url
         self.base_url = f"https://api.telegram.org/bot{token}"
 
     async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
@@ -1126,7 +1128,7 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
             logger.error(f"❌ [TELEGRAM] Error sending message with keyboard: {e}")
             return False
 
-    async def send_main_menu(self) -> bool:
+    async def send_main_menu(self, webapp_url: str = None) -> bool:
         """Отправить главное меню с Inline клавиатурой."""
         menu_text = """
 <b>🤖 Trading Bot Menu</b>
@@ -1147,10 +1149,17 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
                 {"text": "⚙️ Настройки", "callback_data": "menu_settings"},
                 {"text": "💰 Кошелек", "callback_data": "menu_wallet"},
             ],
-            [
-                {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
-            ],
         ]
+
+        # Add Web App button if URL is provided
+        if webapp_url:
+            keyboard.insert(0, [
+                {"text": "📱 Интерактивный Dashboard", "web_app": {"url": webapp_url}}
+            ])
+
+        keyboard.append([
+            {"text": "🔄 Обновить", "callback_data": "menu_refresh"},
+        ])
 
         return await self.send_message_with_keyboard(menu_text, keyboard)
 
