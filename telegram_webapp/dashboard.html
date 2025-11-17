@@ -9,7 +9,13 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <!-- Socket.IO Client for real-time updates -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+            integrity="sha384-8yox+YRA5oiXW9FVKzG/RqPQdhQqJ5EYhF/8fgIQWrKSHLBqALr1w6tMVPPqaEQd"
+            crossorigin="anonymous"
+            onerror="console.error('❌ Failed to load Socket.IO from cdn.socket.io, trying fallback...');
+                     var script = document.createElement('script');
+                     script.src = 'https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js';
+                     document.head.appendChild(script);"></script>
 
     <!-- Plotly.js for charts -->
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
