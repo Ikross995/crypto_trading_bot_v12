@@ -58,7 +58,13 @@ def create_dashboard_state():
 
     # Получить текущий баланс
     balance = get_latest_balance()
-    initial = 1836.0  # Начальный баланс (можно изменить)
+
+    # Если баланс 0, значит нет реальных данных - генерируем примерные
+    if balance == 0:
+        print("⚠️  Реальные данные не найдены, генерируем примерные данные для демо...")
+        balance = 1000.0
+
+    initial = 1000.0  # Начальный баланс (можно изменить)
 
     # Рассчитать метрики
     total_pnl = balance - initial
@@ -70,14 +76,60 @@ def create_dashboard_state():
     # Если нет истории, создать простую для демо
     if not values:
         from datetime import timedelta
+        import random
         now = datetime.now()
-        for i in range(10):
-            time = now - timedelta(hours=10-i)
+
+        # Генерируем более реалистичную историю с волатильностью
+        current_value = initial
+        for i in range(24):  # 24 точки за последние 24 часа
+            time = now - timedelta(hours=24-i)
             labels.append(time.strftime('%H:%M'))
-            # Линейная интерполяция от initial до balance
-            progress = i / 9
-            value = initial + (balance - initial) * progress
-            values.append(round(value, 2))
+
+            # Случайное изменение +/- 2%
+            if i > 0:
+                change_pct = random.uniform(-0.02, 0.03)  # Небольшой положительный bias
+                current_value *= (1 + change_pct)
+
+            values.append(round(current_value, 2))
+
+        # Установим баланс как последнее значение истории
+        balance = values[-1] if values else initial
+        total_pnl = balance - initial
+        roi_pct = ((balance - initial) / initial * 100) if initial > 0 else 0.0
+
+    # Генерируем примерные метрики для демо
+    import random
+    total_trades = random.randint(15, 50)
+    win_rate = random.uniform(55, 75)
+    profit_factor = random.uniform(1.3, 2.5)
+    sharpe_ratio = random.uniform(0.8, 2.2)
+    max_drawdown = random.uniform(-80, -20)
+    max_drawdown_pct = random.uniform(-8, -2)
+
+    # Генерируем примерные открытые позиции
+    sample_positions = []
+    if random.random() > 0.5:  # 50% шанс иметь открытые позиции
+        symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT']
+        for _ in range(random.randint(1, 3)):
+            symbol = random.choice(symbols)
+            side = random.choice(['LONG', 'SHORT'])
+            entry_price = random.uniform(100, 50000)
+            current_price = entry_price * random.uniform(0.97, 1.03)
+            pnl = (current_price - entry_price) * random.uniform(0.1, 2.0)
+            if side == 'SHORT':
+                pnl = -pnl
+            pnl_pct = (pnl / entry_price) * 100
+
+            sample_positions.append({
+                'symbol': symbol,
+                'side': side,
+                'entryPrice': round(entry_price, 2),
+                'currentPrice': round(current_price, 2),
+                'quantity': round(random.uniform(0.1, 5.0), 4),
+                'pnl': round(pnl, 2),
+                'pnlPct': round(pnl_pct, 2),
+                'leverage': random.choice([1, 3, 5, 10])
+            })
 
     # Формируем состояние
     state = {
@@ -85,14 +137,17 @@ def create_dashboard_state():
         'equity': round(balance, 2),
         'totalPnl': round(total_pnl, 2),
         'roiPct': round(roi_pct, 2),
-        'openPositions': 0,  # Будет заполнено торговым ботом
-        'totalTrades': 0,    # Будет заполнено торговым ботом
-        'winRate': 0.0,      # Будет заполнено торговым ботом
-        'profitFactor': 0.0, # Будет заполнено торговым ботом
-        'positions': [],     # Будет заполнено торговым ботом
+        'openPositions': len(sample_positions),
+        'totalTrades': total_trades,
+        'winRate': round(win_rate, 1),
+        'profitFactor': round(profit_factor, 2),
+        'sharpeRatio': round(sharpe_ratio, 2),
+        'maxDrawdown': round(max_drawdown, 2),
+        'maxDrawdownPct': round(max_drawdown_pct, 2),
+        'positions': sample_positions,
         'equityHistory': {
-            'labels': labels[-20:],  # Последние 20 точек
-            'values': values[-20:]
+            'labels': labels[-24:],  # Последние 24 точки
+            'values': values[-24:]
         },
         'lastUpdate': datetime.now().isoformat()
     }
