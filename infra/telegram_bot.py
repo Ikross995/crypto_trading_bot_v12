@@ -306,8 +306,11 @@ Use /menu for detailed info
                         winning = stats.get('winning_trades', 0)
                         total = stats_data['total_trades']
                         stats_data['win_rate'] = (winning / total) if total > 0 else 0.0
-                except Exception:
-                    pass
+                        # FIXED: Добавлено извлечение profit_factor и sharpe_ratio
+                        stats_data['profit_factor'] = stats.get('profit_factor', 0.0)
+                        stats_data['sharpe_ratio'] = stats.get('sharpe_ratio', 0.0)
+                except Exception as e:
+                    logger.error(f"📱 [TELEGRAM] Error getting stats from portfolio_tracker: {e}")
 
             await self.bot.send_stats_menu(stats_data)
         except Exception as e:
