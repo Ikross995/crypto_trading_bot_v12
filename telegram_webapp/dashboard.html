@@ -299,22 +299,56 @@
             });
         }
 
-        function loadData() {
-            // TODO: Replace with actual API call to get data from bot
-            // For now, using mock data
-            renderDashboard(mockData);
+        async function loadData() {
+            try {
+                // Определить URL API (если запущено локально или через Web App)
+                const apiUrl = window.location.origin + '/api/dashboard';
+
+                const response = await fetch(apiUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Проверка что данные свежие
+                if (data.lastUpdate) {
+                    const lastUpdate = new Date(data.lastUpdate);
+                    const now = new Date();
+                    const diffMinutes = (now - lastUpdate) / 1000 / 60;
+
+                    // Если данные старше 5 минут, показать предупреждение
+                    if (diffMinutes > 5) {
+                        console.warn(`Data is ${diffMinutes.toFixed(1)} minutes old`);
+                    }
+                }
+
+                renderDashboard(data);
+            } catch (error) {
+                console.error('Error loading data:', error);
+
+                // Fallback на mock data если API недоступен
+                console.log('Falling back to mock data...');
+                renderDashboard(mockData);
+
+                // Показать уведомление пользователю
+                const content = document.getElementById('content');
+                const warning = document.createElement('div');
+                warning.style.cssText = 'background: #FFA500; color: white; padding: 12px; border-radius: 8px; margin-bottom: 16px; text-align: center;';
+                warning.innerHTML = '⚠️ Using demo data. Start webapp_server.py for real-time updates.';
+                content.prepend(warning);
+            }
         }
 
         // Refresh button handler
-        document.getElementById('refreshBtn').addEventListener('click', function() {
+        document.getElementById('refreshBtn').addEventListener('click', async function() {
             this.classList.add('spinning');
             tg.HapticFeedback.impactOccurred('light');
 
-            setTimeout(() => {
-                loadData();
-                this.classList.remove('spinning');
-                tg.HapticFeedback.notificationOccurred('success');
-            }, 1000);
+            await loadData();
+            this.classList.remove('spinning');
+            tg.HapticFeedback.notificationOccurred('success');
         });
 
         // Initialize

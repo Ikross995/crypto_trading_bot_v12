@@ -374,6 +374,15 @@ class LiveTradingEngine:
         except Exception as e:
             self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
 
+        # Dashboard State Manager for Web App API
+        self.dashboard_state_manager = None
+        try:
+            from utils.dashboard_state import DashboardStateManager
+            self.dashboard_state_manager = DashboardStateManager()
+            self.logger.info("📊 [WEB_APP] Dashboard state manager initialized")
+        except Exception as e:
+            self.logger.warning("📊 [WEB_APP] Failed to initialize dashboard state manager: %s", e)
+
         # Accounting
         self.equity_usdt = float(getattr(config, "paper_equity", 1000.0))
         self.min_notional = float(getattr(config, "min_notional_usdt", 5.0))
@@ -2228,6 +2237,14 @@ class LiveTradingEngine:
                         self.logger.warning(f"📱 [TELEGRAM] Failed to send dashboard update")
                 else:
                     self.logger.debug("📱 [TELEGRAM] No dashboard data available yet")
+
+                # Save dashboard state for Web App API
+                if self.dashboard_state_manager:
+                    try:
+                        self.dashboard_state_manager.save_state(self)
+                        self.logger.debug("📊 [WEB_APP] Dashboard state saved to file")
+                    except Exception as save_e:
+                        self.logger.warning(f"📊 [WEB_APP] Failed to save dashboard state: {save_e}")
 
             except Exception as e:
                 self.logger.error(f"📱 [TELEGRAM] Error in dashboard task: {e}")
