@@ -1156,14 +1156,14 @@ Margin: <b>${pos.get('margin_used', 0):,.2f}</b>
 
         # Add Web App buttons if URL is provided
         if webapp_url:
-            # Main interactive dashboard
+            # Enhanced dashboard (теперь на главной странице)
             keyboard.insert(0, [
-                {"text": "📱 Интерактивный Dashboard", "web_app": {"url": webapp_url}}
+                {"text": "🚀 Enhanced Dashboard", "web_app": {"url": webapp_url}}
             ])
-            # Enhanced dashboard (полный дашборд с графиками)
-            enhanced_url = webapp_url.rstrip('/') + '/enhanced'
+            # Simple dashboard (простая версия на /simple)
+            simple_url = webapp_url.rstrip('/') + '/simple'
             keyboard.insert(1, [
-                {"text": "🚀 Enhanced Dashboard", "web_app": {"url": enhanced_url}}
+                {"text": "📱 Простой Dashboard", "web_app": {"url": simple_url}}
             ])
 
         keyboard.append([
