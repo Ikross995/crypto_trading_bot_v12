@@ -297,10 +297,22 @@ class EnhancedDashboardGenerator:
                 except Exception as e:
                     logger.debug(f"[DASHBOARD] Failed to get market data: {e}")
 
-            # Win/Loss Streaks from trade_history
+            # Win/Loss Streaks and Best/Worst Trades from trade_history
             if hasattr(engine, 'trade_history') and engine.trade_history:
                 trades = list(engine.trade_history)
                 if trades:
+                    # Calculate best/worst trades
+                    trade_pnls = []
+                    for trade in trades:
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+                        if pnl != 0:  # Skip zero PnL trades
+                            trade_pnls.append(pnl)
+
+                    if trade_pnls:
+                        data.best_trade = max(trade_pnls)
+                        data.worst_trade = min(trade_pnls)
+                        data.avg_trade = sum(trade_pnls) / len(trade_pnls)
+
                     # Calculate current streak (go backwards from most recent)
                     data.win_streak = 0
                     data.loss_streak = 0
@@ -490,7 +502,7 @@ class EnhancedDashboardGenerator:
             if data.account_balance > 0:
                 data.roi_pct = ((data.account_balance - data.initial_balance) / data.initial_balance) * 100
 
-            # Win/Loss Streaks - use trading_engine.trade_history if available
+            # Win/Loss Streaks and Best/Worst Trades - use trading_engine.trade_history if available
             trade_history = None
             if trading_engine and hasattr(trading_engine, 'trade_history'):
                 trade_history = trading_engine.trade_history
@@ -500,6 +512,18 @@ class EnhancedDashboardGenerator:
             if trade_history:
                 trades = list(trade_history)
                 if trades:
+                    # Calculate best/worst trades
+                    trade_pnls = []
+                    for trade in trades:
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
+                        if pnl != 0:  # Skip zero PnL trades
+                            trade_pnls.append(pnl)
+
+                    if trade_pnls:
+                        data.best_trade = max(trade_pnls)
+                        data.worst_trade = min(trade_pnls)
+                        data.avg_trade = sum(trade_pnls) / len(trade_pnls)
+
                     # Calculate current streak (go backwards from most recent)
                     data.win_streak = 0
                     data.loss_streak = 0
@@ -507,7 +531,7 @@ class EnhancedDashboardGenerator:
                     # Determine streak type from most recent trade
                     streak_type = None  # 'win' or 'loss'
                     for trade in reversed(trades):
-                        pnl = getattr(trade, 'pnl', 0.0)
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
 
                         if pnl > 0:
                             if streak_type is None:
@@ -531,7 +555,7 @@ class EnhancedDashboardGenerator:
                     win_streak = 0
                     loss_streak = 0
                     for trade in trades:
-                        pnl = getattr(trade, 'pnl', 0.0)
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
                         if pnl > 0:
                             win_streak += 1
                             loss_streak = 0
