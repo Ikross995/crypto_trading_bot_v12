@@ -9,7 +9,15 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <!-- Socket.IO Client for real-time updates -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+            crossorigin="anonymous"
+            onerror="console.error('❌ Failed to load Socket.IO, trying Cloudflare CDN...');
+                     var script = document.createElement('script');
+                     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js';
+                     script.onerror = function() {
+                         console.error('❌ All CDNs failed - WebSocket unavailable, using HTTP polling only');
+                     };
+                     document.head.appendChild(script);"></script>
 
     <!-- Plotly.js for charts -->
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>

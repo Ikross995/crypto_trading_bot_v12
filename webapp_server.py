@@ -120,21 +120,22 @@ def emit_price_update(price_data):
 
 @app.route('/')
 def index():
-    """Главная страница - дашборд."""
-    return send_from_directory('telegram_webapp', 'dashboard.html')
-
-
-@app.route('/enhanced')
-def enhanced_dashboard():
-    """Enhanced дашборд из data/learning_reports."""
+    """Главная страница - Enhanced дашборд с WebSocket."""
     try:
         enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
         if enhanced_path.exists():
             return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
         else:
-            return jsonify({'error': 'Enhanced dashboard not found'}), 404
+            # Fallback to simple dashboard if enhanced not found
+            return send_from_directory('telegram_webapp', 'dashboard.html')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/simple')
+def simple_dashboard():
+    """Простой дашборд (старая версия)."""
+    return send_from_directory('telegram_webapp', 'dashboard.html')
 
 
 @app.route('/api/dashboard')
@@ -205,8 +206,8 @@ def run_server(host='0.0.0.0', port=8080):
 🌐 Network URL:   http://{host}:{port}
 
 📊 Dashboards:
-   • Main:        http://localhost:{port}/
-   • Enhanced:    http://localhost:{port}/enhanced
+   • Main (Enhanced):  http://localhost:{port}/
+   • Simple:           http://localhost:{port}/simple
 
 🔌 API:           http://localhost:{port}/api/dashboard
 💚 Health:        http://localhost:{port}/api/health
