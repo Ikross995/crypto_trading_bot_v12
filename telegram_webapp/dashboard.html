@@ -190,6 +190,241 @@
             border-color: #ffa502;
             color: #ffa502;
         }
+
+        /* Interactive Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 90%;
+            max-height: 80%;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+            animation: slideUp 0.3s ease-out;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .modal-close {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+            background: rgba(255,77,87,0.3);
+            transform: rotate(90deg);
+        }
+
+        /* Control Buttons */
+        .control-panel {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-btn {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 20px;
+            border-radius: 10px;
+            border: none;
+            font-size: 0.95em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .control-btn.pause {
+            background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%);
+            color: #fff;
+        }
+
+        .control-btn.resume {
+            background: linear-gradient(135deg, #00ff88 0%, #00d9ff 100%);
+            color: #000;
+        }
+
+        .control-btn.sound {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .control-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .control-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Position Filters */
+        .filter-panel {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            background: rgba(255,255,255,0.05);
+            padding: 8px;
+            border-radius: 10px;
+        }
+
+        .filter-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            border-color: #667eea;
+        }
+
+        .filter-btn:hover:not(.active) {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Clickable Cards */
+        .card.clickable {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .card.clickable:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(102,126,234,0.3);
+            border-color: rgba(102,126,234,0.5);
+        }
+
+        /* Value Change Animation */
+        @keyframes valueChange {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); color: #00ff88; }
+        }
+
+        .value-changed {
+            animation: valueChange 0.5s ease-out;
+        }
+
+        /* Pulse Animation for New Data */
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102,126,234,0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(102,126,234,0); }
+        }
+
+        .pulse {
+            animation: pulse 1s ease-out;
+        }
+
+        /* Toast Animations */
+        @keyframes slideDown {
+            from {
+                transform: translate(-50%, -100%);
+                opacity: 0;
+            }
+            to {
+                transform: translate(-50%, 0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Sound Icon Animation */
+        @keyframes soundWave {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        .sound-active {
+            animation: soundWave 0.3s ease-out;
+        }
+
+        /* Connection Status Indicator */
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff88;
+        }
+
+        .connection-dot.disconnected {
+            background: #ff4757;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
     </style>
 </head>
 <body>
@@ -197,7 +432,24 @@
         <div class="header">
             <h1>🚀 Trading Dashboard</h1>
             <p>Advanced Real-time Analytics</p>
-            <p><span class="live-indicator"></span> <span id="lastUpdate">Loading...</span></p>
+            <p>
+                <span class="connection-status">
+                    <span class="connection-dot" id="connectionDot"></span>
+                    <span id="connectionStatus">Connecting...</span>
+                </span>
+            </p>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <button class="control-btn pause" id="pauseBtn" title="Pause/Resume Trading">
+                <span id="pauseIcon">⏸️</span>
+                <span id="pauseText">Pause Trading</span>
+            </button>
+            <button class="control-btn sound" id="soundBtn" title="Toggle Sound Notifications">
+                <span id="soundIcon">🔔</span>
+                <span>Sound</span>
+            </button>
         </div>
 
         <div id="content" class="loading">
@@ -205,7 +457,25 @@
         </div>
     </div>
 
+    <!-- Modal for Position Details -->
+    <div id="positionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Position Details</h2>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div id="modalBody">
+                <!-- Position details will be inserted here -->
+            </div>
+        </div>
+    </div>
+
     <button class="refresh-btn" id="refreshBtn">🔄</button>
+
+    <!-- Sound Effects (silent audio files for notification sounds) -->
+    <audio id="tradeSound" preload="auto">
+        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGJ0fPTgjMGHm7A7OihUBELTKXh8bllHAU2jdXzzn0vBSp+zPLaizsKGGS57OynThELT6ri8LdnHwU5k9n0yoU2Btpy0PPEfC8GOorV8tWEMwYeb8Ds6KFQEQtMpeHxuWUcBTaN1fPOfS8FKn7M8tqLOwoYZLns7KdOEQtPquLwt2cfBTmT2fTKhTYG2nLQ88R8LwY6itXy1YQzBh5vwOzooVARC0yl4fG5ZRwFNo3V8859LwUqfszy2os7ChhkuezspFFRkZuWkZJDQ0NERkNDREVERERERERERERFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRQ==" type="audio/wav">
+    </audio>
 
     <script>
         // Initialize Telegram WebApp
@@ -346,8 +616,11 @@
                 ${data.positions && data.positions.length > 0 ? `
                 <div class="card">
                     <h3>📊 Open Positions (${data.positions.length})</h3>
-                    ${data.positions.map(pos => `
-                        <div class="metric">
+                    ${data.positions.map((pos, idx) => `
+                        <div class="metric clickable" style="cursor: pointer; padding: 12px; margin: 4px -12px; border-radius: 8px; transition: all 0.2s;"
+                             onmouseover="this.style.background='rgba(102,126,234,0.1)'"
+                             onmouseout="this.style.background='transparent'"
+                             onclick="showPositionModal(${JSON.stringify(pos).replace(/"/g, '&quot;')})">
                             <span class="metric-label">${pos.symbol} ${pos.side}</span>
                             <span class="metric-value ${getClass(pos.pnl || 0)}">
                                 ${pos.pnl >= 0 ? '+' : ''}${formatCurrency(pos.pnl || 0)}
@@ -355,6 +628,9 @@
                             </span>
                         </div>
                     `).join('')}
+                    <div style="margin-top: 12px; font-size: 0.85em; opacity: 0.7; text-align: center;">
+                        💡 Click any position for details
+                    </div>
                 </div>
                 ` : ''}
 
@@ -569,14 +845,23 @@
         }
 
         function updateConnectionStatus(connected) {
-            const statusEl = document.querySelector('.header p');
-            if (statusEl) {
-                const mode = connected ? '🔴 Real-time' : '🔄 Polling';
-                statusEl.innerHTML = `${mode} • Last update: ${new Date().toLocaleTimeString()}`;
+            const statusDot = document.getElementById('connectionDot');
+            const statusText = document.getElementById('connectionStatus');
+            if (statusDot && statusText) {
+                if (connected) {
+                    statusDot.classList.remove('disconnected');
+                    statusText.textContent = 'Connected';
+                } else {
+                    statusDot.classList.add('disconnected');
+                    statusText.textContent = 'Reconnecting...';
+                }
             }
         }
 
         function showTradeNotification(trade) {
+            // Play sound if enabled
+            playTradeSound();
+
             // Show toast notification for new trade
             const toast = document.createElement('div');
             toast.style.cssText = `
@@ -617,6 +902,204 @@
                 setTimeout(() => toast.remove(), 300);
             }, 5000);
         }
+
+        // ==================== Interactive Features ====================
+
+        // Sound notifications
+        let soundEnabled = localStorage.getItem('soundEnabled') !== 'false'; // Default true
+
+        function playTradeSound() {
+            if (soundEnabled) {
+                const audio = document.getElementById('tradeSound');
+                if (audio) {
+                    audio.currentTime = 0;
+                    audio.play().catch(e => console.log('Sound playback failed:', e));
+                }
+                // Add visual feedback
+                const soundIcon = document.getElementById('soundIcon');
+                if (soundIcon) {
+                    soundIcon.classList.add('sound-active');
+                    setTimeout(() => soundIcon.classList.remove('sound-active'), 300);
+                }
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            localStorage.setItem('soundEnabled', soundEnabled);
+            updateSoundButton();
+            if (tg) tg.HapticFeedback.impactOccurred('light');
+        }
+
+        function updateSoundButton() {
+            const soundIcon = document.getElementById('soundIcon');
+            const soundBtn = document.getElementById('soundBtn');
+            if (soundIcon && soundBtn) {
+                soundIcon.textContent = soundEnabled ? '🔔' : '🔕';
+                soundBtn.style.opacity = soundEnabled ? '1' : '0.5';
+            }
+        }
+
+        // Pause/Resume trading
+        let tradingPaused = false;
+
+        async function toggleTrading() {
+            tradingPaused = !tradingPaused;
+
+            // Send command to server via WebSocket
+            if (socket && isWebSocketConnected) {
+                socket.emit('trading_control', {
+                    action: tradingPaused ? 'pause' : 'resume'
+                });
+            }
+
+            updatePauseButton();
+
+            if (tg) {
+                tg.HapticFeedback.impactOccurred('medium');
+            }
+
+            // Show feedback toast
+            showToast(tradingPaused ? '⏸️ Trading Paused' : '▶️ Trading Resumed');
+        }
+
+        function updatePauseButton() {
+            const pauseIcon = document.getElementById('pauseIcon');
+            const pauseText = document.getElementById('pauseText');
+            const pauseBtn = document.getElementById('pauseBtn');
+
+            if (pauseIcon && pauseText && pauseBtn) {
+                if (tradingPaused) {
+                    pauseIcon.textContent = '▶️';
+                    pauseText.textContent = 'Resume Trading';
+                    pauseBtn.classList.remove('pause');
+                    pauseBtn.classList.add('resume');
+                } else {
+                    pauseIcon.textContent = '⏸️';
+                    pauseText.textContent = 'Pause Trading';
+                    pauseBtn.classList.remove('resume');
+                    pauseBtn.classList.add('pause');
+                }
+            }
+        }
+
+        // Modal window for position details
+        function showPositionModal(position) {
+            const modal = document.getElementById('positionModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+
+            if (!modal || !modalTitle || !modalBody || !position) return;
+
+            modalTitle.textContent = `${position.symbol} ${position.side} Position`;
+
+            const pnlClass = position.pnl >= 0 ? 'positive' : 'negative';
+            const pnlSign = position.pnl >= 0 ? '+' : '';
+
+            modalBody.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Symbol</span>
+                    <span class="metric-value">${position.symbol}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Side</span>
+                    <span class="metric-value">${position.side === 'LONG' ? '📈 LONG' : '📉 SHORT'}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Entry Price</span>
+                    <span class="metric-value">$${formatNumber(position.entryPrice || 0, 4)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Current Price</span>
+                    <span class="metric-value">$${formatNumber(position.currentPrice || 0, 4)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Quantity</span>
+                    <span class="metric-value">${formatNumber(position.quantity || 0, 4)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Leverage</span>
+                    <span class="metric-value">${position.leverage || 1}x</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">P&L</span>
+                    <span class="metric-value ${pnlClass}">
+                        ${pnlSign}${formatCurrency(position.pnl || 0)}
+                        (${pnlSign}${formatNumber(position.pnlPct || 0, 2)}%)
+                    </span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Margin Used</span>
+                    <span class="metric-value">${formatCurrency(position.marginUsed || 0)}</span>
+                </div>
+                ${position.liquidationPrice ? `
+                <div class="metric">
+                    <span class="metric-label">Liquidation Price</span>
+                    <span class="metric-value negative">$${formatNumber(position.liquidationPrice, 4)}</span>
+                </div>
+                ` : ''}
+            `;
+
+            modal.classList.add('active');
+            if (tg) tg.HapticFeedback.impactOccurred('light');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('positionModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            const modal = document.getElementById('positionModal');
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+
+        // General toast notification
+        function showToast(message, duration = 3000) {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 80px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0,0,0,0.9);
+                color: white;
+                padding: 12px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideDown 0.3s ease-out;
+                font-size: 0.95em;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideUp 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+
+        // Animate value changes
+        function animateValueChange(element) {
+            if (element) {
+                element.classList.add('value-changed');
+                setTimeout(() => element.classList.remove('value-changed'), 500);
+            }
+        }
+
+        // Event Listeners for controls
+        document.getElementById('pauseBtn')?.addEventListener('click', toggleTrading);
+        document.getElementById('soundBtn')?.addEventListener('click', toggleSound);
+
+        // Initialize UI states
+        updateSoundButton();
+        updatePauseButton();
 
         function startFallbackPolling() {
             console.log('🔄 Using fallback HTTP polling mode');
