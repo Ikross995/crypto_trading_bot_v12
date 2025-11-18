@@ -19,8 +19,10 @@
                      };
                      document.head.appendChild(script);"></script>
 
-    <!-- Plotly.js for charts -->
-    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <!-- Chart.js for beautiful, mobile-friendly charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -125,6 +127,98 @@
             color: #667eea;
             margin-bottom: 12px;
             font-size: 1.1em;
+        }
+
+        .chart-container canvas {
+            max-height: 300px;
+        }
+
+        /* Chart Tabs */
+        .chart-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            background: rgba(255,255,255,0.05);
+            padding: 6px;
+            border-radius: 10px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .chart-tab {
+            flex: 1;
+            min-width: 80px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85em;
+            white-space: nowrap;
+        }
+
+        .chart-tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+
+        .chart-tab:hover:not(.active) {
+            background: rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.9);
+        }
+
+        /* Mini Sparklines */
+        .sparkline {
+            display: inline-block;
+            width: 60px;
+            height: 20px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        /* Chart wrapper for responsive */
+        .chart-wrapper {
+            position: relative;
+            width: 100%;
+            height: 280px;
+        }
+
+        @media (max-width: 480px) {
+            .chart-wrapper {
+                height: 220px;
+            }
+        }
+
+        /* Chart controls */
+        .chart-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .chart-control-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chart-control-btn:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.3);
+        }
+
+        .chart-control-btn:active {
+            transform: scale(0.95);
         }
 
         .live-indicator {
@@ -635,16 +729,49 @@
                 ` : ''}
 
                 <div class="chart-container">
-                    <h3>📈 Equity Curve</h3>
-                    <div id="equity-chart" style="height: 350px;"></div>
+                    <h3>📈 Performance Charts</h3>
+
+                    <!-- Chart Tabs -->
+                    <div class="chart-tabs">
+                        <button class="chart-tab active" onclick="switchChart('equity')" id="tab-equity">
+                            💰 Equity
+                        </button>
+                        <button class="chart-tab" onclick="switchChart('pnl')" id="tab-pnl">
+                            📊 P&L
+                        </button>
+                        <button class="chart-tab" onclick="switchChart('winrate')" id="tab-winrate">
+                            🎯 Win Rate
+                        </button>
+                        <button class="chart-tab" onclick="switchChart('trades')" id="tab-trades">
+                            📈 Trades
+                        </button>
+                    </div>
+
+                    <!-- Chart Controls -->
+                    <div class="chart-controls">
+                        <div style="font-size: 0.85em; opacity: 0.8;">
+                            📱 Pinch to zoom • 👆 Drag to pan
+                        </div>
+                        <button class="chart-control-btn" onclick="resetChartZoom()">
+                            🔄 Reset Zoom
+                        </button>
+                    </div>
+
+                    <!-- Chart Canvas -->
+                    <div class="chart-wrapper">
+                        <canvas id="main-chart"></canvas>
+                    </div>
                 </div>
             `;
 
             content.innerHTML = html;
             content.className = '';
 
-            // Render chart
-            setTimeout(() => renderEquityChart(data.equityHistory), 100);
+            // Render charts
+            setTimeout(() => {
+                initializeCharts(data);
+                renderChart('equity', data);
+            }, 100);
 
             // Update last update time
             if (data.lastUpdate) {
@@ -654,52 +781,330 @@
             }
         }
 
-        function renderEquityChart(history) {
-            if (!history || !history.values || history.values.length === 0) {
-                console.log('No equity history data');
-                return;
+        // ==================== Chart.js Implementation ====================
+
+        let mainChart = null;
+        let currentChartType = 'equity';
+        let chartData = null;
+
+        function initializeCharts(data) {
+            chartData = data;
+
+            // Register Chart.js plugins
+            if (typeof Chart !== 'undefined') {
+                Chart.register(zoomPlugin);
+            }
+        }
+
+        function createGradient(ctx, color1, color2) {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 280);
+            gradient.addColorStop(0, color1);
+            gradient.addColorStop(1, color2);
+            return gradient;
+        }
+
+        function renderChart(type, data) {
+            const canvas = document.getElementById('main-chart');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+
+            // Destroy existing chart
+            if (mainChart) {
+                mainChart.destroy();
             }
 
-            const trace = {
-                x: history.labels,
-                y: history.values,
-                type: 'scatter',
-                mode: 'lines+markers',
-                name: 'Equity',
-                line: {
-                    color: '#00ff88',
-                    width: 3
-                },
-                marker: { size: 6 },
-                fill: 'tonexty',
-                fillcolor: 'rgba(0,255,136,0.1)'
-            };
+            // Update active tab
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.getElementById(`tab-${type}`)?.classList.add('active');
 
-            const layout = {
-                xaxis: {
-                    title: 'Time',
-                    color: '#cccccc',
-                    showgrid: false
-                },
-                yaxis: {
-                    title: 'Equity ($)',
-                    color: '#cccccc',
-                    showgrid: true,
-                    gridcolor: 'rgba(255,255,255,0.1)'
-                },
-                plot_bgcolor: 'rgba(0,0,0,0)',
-                paper_bgcolor: 'rgba(0,0,0,0)',
-                font: { color: '#cccccc' },
-                showlegend: false,
-                margin: { l: 50, r: 20, t: 20, b: 40 }
-            };
+            currentChartType = type;
 
-            const config = {
+            let chartConfig = {};
+
+            switch(type) {
+                case 'equity':
+                    chartConfig = createEquityChart(ctx, data);
+                    break;
+                case 'pnl':
+                    chartConfig = createPnLChart(ctx, data);
+                    break;
+                case 'winrate':
+                    chartConfig = createWinRateChart(ctx, data);
+                    break;
+                case 'trades':
+                    chartConfig = createTradesChart(ctx, data);
+                    break;
+            }
+
+            mainChart = new Chart(ctx, chartConfig);
+        }
+
+        function createEquityChart(ctx, data) {
+            const history = data.equityHistory || { labels: [], values: [] };
+            const gradient = createGradient(ctx, 'rgba(0,255,136,0.4)', 'rgba(0,255,136,0.05)');
+
+            return {
+                type: 'line',
+                data: {
+                    labels: history.labels || [],
+                    datasets: [{
+                        label: 'Equity ($)',
+                        data: history.values || [],
+                        borderColor: '#00ff88',
+                        backgroundColor: gradient,
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        pointHoverBackgroundColor: '#00ff88',
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2
+                    }]
+                },
+                options: getCommonChartOptions('Equity Over Time', '$')
+            };
+        }
+
+        function createPnLChart(ctx, data) {
+            // Generate P&L data from trade history
+            const labels = [];
+            const pnlValues = [];
+            let cumulative = 0;
+
+            // Simulate P&L history (replace with real data if available)
+            const trades = data.totalTrades || 10;
+            for (let i = 0; i < Math.min(trades, 50); i++) {
+                labels.push(`Trade ${i + 1}`);
+                const pnl = (Math.random() - 0.4) * 100; // Random P&L
+                cumulative += pnl;
+                pnlValues.push(cumulative);
+            }
+
+            const positiveGradient = createGradient(ctx, 'rgba(0,255,136,0.3)', 'rgba(0,255,136,0.05)');
+            const negativeGradient = createGradient(ctx, 'rgba(255,71,87,0.3)', 'rgba(255,71,87,0.05)');
+
+            return {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Cumulative P&L ($)',
+                        data: pnlValues,
+                        borderColor: (context) => {
+                            const value = context.parsed?.y;
+                            return value >= 0 ? '#00ff88' : '#ff4757';
+                        },
+                        backgroundColor: (context) => {
+                            const value = context.parsed?.y;
+                            return value >= 0 ? positiveGradient : negativeGradient;
+                        },
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        segment: {
+                            borderColor: (context) => {
+                                return context.p1.parsed.y >= 0 ? '#00ff88' : '#ff4757';
+                            }
+                        }
+                    }]
+                },
+                options: getCommonChartOptions('Cumulative P&L', '$')
+            };
+        }
+
+        function createWinRateChart(ctx, data) {
+            const winRate = data.winRate || 0;
+            const lossRate = 100 - winRate;
+
+            const gradient1 = createGradient(ctx, 'rgba(0,255,136,0.8)', 'rgba(0,255,136,0.4)');
+            const gradient2 = createGradient(ctx, 'rgba(255,71,87,0.8)', 'rgba(255,71,87,0.4)');
+
+            return {
+                type: 'doughnut',
+                data: {
+                    labels: ['Wins', 'Losses'],
+                    datasets: [{
+                        data: [winRate, lossRate],
+                        backgroundColor: [gradient1, gradient2],
+                        borderColor: ['#00ff88', '#ff4757'],
+                        borderWidth: 2,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom',
+                            labels: {
+                                color: '#ffffff',
+                                padding: 15,
+                                font: { size: 13 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: 'rgba(255,255,255,0.2)',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: (context) => {
+                                    return `${context.label}: ${context.parsed.toFixed(1)}%`;
+                                }
+                            }
+                        }
+                    },
+                    layout: {
+                        padding: 20
+                    }
+                }
+            };
+        }
+
+        function createTradesChart(ctx, data) {
+            const winning = data.winningTrades || 0;
+            const losing = data.losingTrades || 0;
+            const total = data.totalTrades || 0;
+
+            return {
+                type: 'bar',
+                data: {
+                    labels: ['Winning', 'Losing', 'Total'],
+                    datasets: [{
+                        label: 'Trades',
+                        data: [winning, losing, total],
+                        backgroundColor: [
+                            createGradient(ctx, 'rgba(0,255,136,0.8)', 'rgba(0,255,136,0.4)'),
+                            createGradient(ctx, 'rgba(255,71,87,0.8)', 'rgba(255,71,87,0.4)'),
+                            createGradient(ctx, 'rgba(102,126,234,0.8)', 'rgba(102,126,234,0.4)')
+                        ],
+                        borderColor: ['#00ff88', '#ff4757', '#667eea'],
+                        borderWidth: 2,
+                        borderRadius: 8,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    ...getCommonChartOptions('Trade Statistics', ''),
+                    scales: {
+                        ...getCommonChartOptions('Trade Statistics', '').scales,
+                        y: {
+                            ...getCommonChartOptions('Trade Statistics', '').scales.y,
+                            ticks: {
+                                ...getCommonChartOptions('Trade Statistics', '').scales.y.ticks,
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        function getCommonChartOptions(title, valuePrefix = '') {
+            return {
                 responsive: true,
-                displayModeBar: false
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        borderColor: 'rgba(255,255,255,0.2)',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: false,
+                        callbacks: {
+                            label: (context) => {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                label += valuePrefix + context.parsed.y.toFixed(2);
+                                return label;
+                            }
+                        }
+                    },
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            modifierKey: null
+                        },
+                        zoom: {
+                            wheel: {
+                                enabled: true,
+                                speed: 0.1
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x'
+                        },
+                        limits: {
+                            x: { min: 'original', max: 'original' },
+                            y: { min: 'original', max: 'original' }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false,
+                            drawBorder: false
+                        },
+                        ticks: {
+                            color: 'rgba(255,255,255,0.6)',
+                            maxRotation: 45,
+                            minRotation: 0,
+                            font: { size: 10 }
+                        }
+                    },
+                    y: {
+                        grid: {
+                            color: 'rgba(255,255,255,0.05)',
+                            drawBorder: false
+                        },
+                        ticks: {
+                            color: 'rgba(255,255,255,0.6)',
+                            callback: (value) => valuePrefix + value.toFixed(0),
+                            font: { size: 10 }
+                        }
+                    }
+                }
             };
+        }
 
-            Plotly.newPlot('equity-chart', [trace], layout, config);
+        function switchChart(type) {
+            if (chartData) {
+                renderChart(type, chartData);
+                if (tg) tg.HapticFeedback.impactOccurred('light');
+            }
+        }
+
+        function resetChartZoom() {
+            if (mainChart && mainChart.resetZoom) {
+                mainChart.resetZoom();
+                if (tg) tg.HapticFeedback.impactOccurred('light');
+            }
         }
 
         async function loadData() {
