@@ -68,6 +68,7 @@ def after_request(response):
 dashboard_data = {
     'balance': 0.0,
     'equity': 0.0,
+    'initialEquity': 0.0,
     'totalPnl': 0.0,
     'roiPct': 0.0,
     'openPositions': 0,
