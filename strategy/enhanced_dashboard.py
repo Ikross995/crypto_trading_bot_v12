@@ -612,9 +612,10 @@ class EnhancedDashboardGenerator:
             justify-content: space-between; 
             align-items: center; 
             background: rgba(255,255,255,0.1); 
-            padding: 15px 30px; 
-            border-radius: 10px; 
+            padding: 15px 30px;
+            border-radius: 10px;
             margin-bottom: 30px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
         
@@ -639,8 +640,9 @@ class EnhancedDashboardGenerator:
         .card {{ 
             background: rgba(255,255,255,0.05); 
             border: 1px solid rgba(255,255,255,0.1);
-            padding: 25px; 
-            border-radius: 15px; 
+            padding: 25px;
+            border-radius: 15px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }}
@@ -682,9 +684,10 @@ class EnhancedDashboardGenerator:
         .chart-container {{ 
             background: rgba(255,255,255,0.05); 
             border: 1px solid rgba(255,255,255,0.1);
-            padding: 25px; 
-            border-radius: 15px; 
+            padding: 25px;
+            border-radius: 15px;
             margin-bottom: 30px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
         
