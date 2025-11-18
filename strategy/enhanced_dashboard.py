@@ -236,7 +236,25 @@ class EnhancedDashboardGenerator:
         try:
             # Основные параметры
             data.iteration = getattr(engine, 'iteration', 0)
-            
+
+            # Uptime calculation
+            start_time = getattr(engine, '_start_time', None)
+            if start_time:
+                from datetime import datetime, timezone
+                uptime_delta = datetime.now(timezone.utc) - start_time
+                data.uptime_hours = uptime_delta.total_seconds() / 3600.0
+
+            # Signals generated
+            data.signals_generated = getattr(engine, 'signals_generated', 0)
+
+            # Execution rate (trades executed / signals generated)
+            if hasattr(engine, 'trade_history') and engine.trade_history:
+                trades_count = len(engine.trade_history)
+                if data.signals_generated > 0:
+                    data.execution_rate = trades_count / data.signals_generated
+                else:
+                    data.execution_rate = 0.0
+
             # Позиции
             active_positions = getattr(engine, 'active_positions', {})
             data.open_positions = len(active_positions)

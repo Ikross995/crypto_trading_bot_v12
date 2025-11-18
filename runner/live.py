@@ -1170,6 +1170,11 @@ class LiveTradingEngine:
             except Exception:
                 pass
         self.running = True
+
+        # Set start time for uptime calculation
+        from datetime import datetime, timezone
+        self._start_time = datetime.now(timezone.utc)
+
         self.logger.info("Starting live trading engine...")
 
         # 🧪 ENHANCED: Market Context Analysis & Pre-Trading Backtest
@@ -2770,6 +2775,9 @@ class LiveTradingEngine:
                 "[SYMBOL_CHECK] %s: No actionable signal (wait/rejected)", symbol
             )
             return  # nothing actionable
+
+        # Increment signals generated counter
+        self.signals_generated += 1
 
         # Ensure we have a price to size the order
         price = sig.entry_price or await self._latest_price(symbol)
