@@ -586,35 +586,46 @@ class EnhancedDashboardGenerator:
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
-            color: #ffffff; 
+            color: #ffffff;
             min-height: 100vh;
+            padding: 0;
         }}
-        
-        .container {{ max-width: 1600px; margin: 0 auto; padding: 20px; }}
-        
-        .header {{ 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            padding: 30px; 
-            border-radius: 15px; 
-            margin-bottom: 30px; 
+
+        .container {{
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 20px;
             box-shadow: 0 15px 35px rgba(102, 126, 234, 0.3);
             text-align: center;
         }}
-        
+
         .header h1 {{ font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
         .header p {{ font-size: 1.2em; opacity: 0.9; }}
-        
-        .status-bar {{ 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            background: rgba(255,255,255,0.1); 
+
+        /* Все элементы выровнены по header */
+        .status-bar, .main-grid, .chart-grid, .performance-grid, .chart-container, .table-container, .footer {{
+            margin-left: 0;
+            margin-right: 0;
+        }}
+
+        .status-bar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.1);
             padding: 15px 30px;
             border-radius: 10px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
@@ -626,15 +637,15 @@ class EnhancedDashboardGenerator:
         .main-grid {{ 
             display: grid; 
             grid-template-columns: 1fr 1fr 1fr; 
-            gap: 25px; 
-            margin-bottom: 30px; 
+            gap: 20px; 
+            margin-bottom: 20px; 
         }}
         
         .performance-grid {{ 
             display: grid; 
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
             gap: 20px; 
-            margin-bottom: 30px; 
+            margin-bottom: 20px; 
         }}
         
         .card {{ 
@@ -686,7 +697,7 @@ class EnhancedDashboardGenerator:
             border: 1px solid rgba(255,255,255,0.1);
             padding: 25px;
             border-radius: 15px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
@@ -694,8 +705,8 @@ class EnhancedDashboardGenerator:
         .chart-grid {{ 
             display: grid; 
             grid-template-columns: 1fr 1fr; 
-            gap: 25px; 
-            margin-bottom: 30px; 
+            gap: 20px; 
+            margin-bottom: 20px; 
         }}
         
         .progress-ring {{ 
@@ -766,7 +777,7 @@ class EnhancedDashboardGenerator:
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 15px;
             padding: 25px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             overflow-x: auto;
         }}
 
