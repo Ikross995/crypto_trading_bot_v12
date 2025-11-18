@@ -215,7 +215,7 @@ class EnhancedDashboardGenerator:
 
         # Используем Portfolio Tracker если доступен (приоритет!)
         if trading_engine and hasattr(trading_engine, 'portfolio_tracker') and trading_engine.portfolio_tracker:
-            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data)
+            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data, trading_engine)
 
         # Данные системы обучения
         if adaptive_learning:
@@ -296,10 +296,56 @@ class EnhancedDashboardGenerator:
                         
                 except Exception as e:
                     logger.debug(f"[DASHBOARD] Failed to get market data: {e}")
-            
+
+            # Win/Loss Streaks from trade_history
+            if hasattr(engine, 'trade_history') and engine.trade_history:
+                trades = list(engine.trade_history)
+                if trades:
+                    # Calculate current streak (go backwards from most recent)
+                    data.win_streak = 0
+                    data.loss_streak = 0
+
+                    # Determine streak type from most recent trade
+                    streak_type = None  # 'win' or 'loss'
+                    for trade in reversed(trades):
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+
+                        if pnl > 0:
+                            if streak_type is None:
+                                streak_type = 'win'
+                            if streak_type == 'win':
+                                data.win_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        elif pnl < 0:
+                            if streak_type is None:
+                                streak_type = 'loss'
+                            if streak_type == 'loss':
+                                data.loss_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        else:
+                            # Skip trades with 0 PnL
+                            continue
+
+                    # Calculate max streaks (go forward through all history)
+                    win_streak = 0
+                    loss_streak = 0
+                    for trade in trades:
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            win_streak += 1
+                            loss_streak = 0
+                            data.max_win_streak = max(data.max_win_streak, win_streak)
+                        elif pnl < 0:
+                            loss_streak += 1
+                            win_streak = 0
+                            data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+                        # Skip trades with 0 PnL
+
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting trading engine data: {e}")
-        
+
         return data
     
     async def _get_learning_data(self, adaptive_learning, data: DashboardData) -> DashboardData:
@@ -361,7 +407,7 @@ class EnhancedDashboardGenerator:
 
         return data
 
-    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData) -> DashboardData:
+    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData, trading_engine=None) -> DashboardData:
         """Получает данные от Portfolio Tracker (приоритет над другими источниками!)."""
         try:
             # Получаем полную статистику портфеля
@@ -444,30 +490,44 @@ class EnhancedDashboardGenerator:
             if data.account_balance > 0:
                 data.roi_pct = ((data.account_balance - data.initial_balance) / data.initial_balance) * 100
 
-            # Win/Loss Streaks
-            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
-                trades = list(portfolio_tracker.trade_history)
+            # Win/Loss Streaks - use trading_engine.trade_history if available
+            trade_history = None
+            if trading_engine and hasattr(trading_engine, 'trade_history'):
+                trade_history = trading_engine.trade_history
+            elif hasattr(portfolio_tracker, 'trade_history'):
+                trade_history = portfolio_tracker.trade_history
+
+            if trade_history:
+                trades = list(trade_history)
                 if trades:
-                    # Calculate current streak
-                    current_streak = 0
+                    # Calculate current streak (go backwards from most recent)
+                    data.win_streak = 0
+                    data.loss_streak = 0
+
+                    # Determine streak type from most recent trade
+                    streak_type = None  # 'win' or 'loss'
                     for trade in reversed(trades):
                         pnl = getattr(trade, 'pnl', 0.0)
-                        if pnl > 0:
-                            if data.win_streak >= 0:
-                                data.win_streak += 1
-                                data.loss_streak = 0
-                            else:
-                                break
-                        elif pnl < 0:
-                            if data.loss_streak >= 0:
-                                data.loss_streak += 1
-                                data.win_streak = 0
-                            else:
-                                break
-                        else:
-                            break
 
-                    # Calculate max streaks
+                        if pnl > 0:
+                            if streak_type is None:
+                                streak_type = 'win'
+                            if streak_type == 'win':
+                                data.win_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        elif pnl < 0:
+                            if streak_type is None:
+                                streak_type = 'loss'
+                            if streak_type == 'loss':
+                                data.loss_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        else:
+                            # Skip trades with 0 PnL
+                            continue
+
+                    # Calculate max streaks (go forward through all history)
                     win_streak = 0
                     loss_streak = 0
                     for trade in trades:
@@ -480,6 +540,7 @@ class EnhancedDashboardGenerator:
                             loss_streak += 1
                             win_streak = 0
                             data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+                        # Skip trades with 0 PnL
 
             # Hourly PnL (based on uptime)
             if data.uptime_hours > 0:
