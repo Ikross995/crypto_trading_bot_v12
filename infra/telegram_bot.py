@@ -56,6 +56,12 @@ class TelegramUpdateHandler:
         self.callback_handlers['portfolio_details'] = self.handle_portfolio_details
         self.callback_handlers['portfolio_chart'] = self.handle_portfolio_chart
 
+        # Stats sub-menus
+        self.callback_handlers['stats_best'] = self.handle_stats_best
+        self.callback_handlers['stats_worst'] = self.handle_stats_worst
+        self.callback_handlers['stats_daily'] = self.handle_stats_daily
+        self.callback_handlers['stats_weekly'] = self.handle_stats_weekly
+
     async def start_polling(self):
         """Start polling for updates."""
         self.running = True
@@ -519,6 +525,94 @@ Or visit: /dashboard
         """
         keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_portfolio"}]]
         await self.bot.send_message_with_keyboard(text, keyboard)
+
+    async def handle_stats_best(self, message_id: Optional[int]):
+        """Handle best trades callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            text = """
+<b>🏆 BEST TRADES</b>
+
+<i>Loading best trades data...</i>
+
+━━━━━━━━━━━━━━━━━━━━
+💡 For detailed trade analysis, check:
+• Enhanced Dashboard (/dashboard)
+• Trade History in Portfolio section
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_stats"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading best trades: {e}")
+
+    async def handle_stats_worst(self, message_id: Optional[int]):
+        """Handle worst trades callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            text = """
+<b>💔 WORST TRADES</b>
+
+<i>Loading worst trades data...</i>
+
+━━━━━━━━━━━━━━━━━━━━
+💡 For detailed trade analysis, check:
+• Enhanced Dashboard (/dashboard)
+• Trade History in Portfolio section
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_stats"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading worst trades: {e}")
+
+    async def handle_stats_daily(self, message_id: Optional[int]):
+        """Handle daily stats callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            text = """
+<b>📅 DAILY STATISTICS</b>
+
+<i>Loading daily performance data...</i>
+
+━━━━━━━━━━━━━━━━━━━━
+💡 For detailed daily breakdown, check:
+• Enhanced Dashboard (/dashboard)
+• Performance charts and history
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_stats"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading daily stats: {e}")
+
+    async def handle_stats_weekly(self, message_id: Optional[int]):
+        """Handle weekly stats callback."""
+        if not self.trading_engine:
+            await self.bot.send_message("❌ Trading engine not available")
+            return
+
+        try:
+            text = """
+<b>📆 WEEKLY STATISTICS</b>
+
+<i>Loading weekly performance data...</i>
+
+━━━━━━━━━━━━━━━━━━━━
+💡 For detailed weekly breakdown, check:
+• Enhanced Dashboard (/dashboard)
+• Performance charts and history
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_stats"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            await self.bot.send_message(f"Error loading weekly stats: {e}")
 
 
 class TelegramDashboardBot:
