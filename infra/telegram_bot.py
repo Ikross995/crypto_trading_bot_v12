@@ -344,15 +344,88 @@ Use /menu for detailed info
 
     async def handle_menu_history(self, message_id: Optional[int]):
         """Handle history menu callback."""
-        text = "<b>📜 TRADE HISTORY</b>\n\n<i>Coming soon...</i>"
-        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
-        await self.bot.send_message_with_keyboard(text, keyboard)
+        if not self.trading_engine:
+            text = "<b>📜 TRADE HISTORY</b>\n\n<i>Trading engine not available</i>"
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+            return
+
+        try:
+            # Try to get trade history from portfolio tracker
+            recent_trades = []
+            if hasattr(self.trading_engine, 'portfolio_tracker') and self.trading_engine.portfolio_tracker:
+                try:
+                    stats = self.trading_engine.portfolio_tracker.get_stats()
+                    if stats:
+                        total_trades = stats.get('total_trades', 0)
+                        winning_trades = stats.get('winning_trades', 0)
+                        losing_trades = stats.get('losing_trades', 0)
+                    else:
+                        total_trades = winning_trades = losing_trades = 0
+                except Exception:
+                    total_trades = winning_trades = losing_trades = 0
+            else:
+                total_trades = winning_trades = losing_trades = 0
+
+            text = f"""
+<b>📜 TRADE HISTORY</b>
+
+<b>📊 Overall Statistics:</b>
+Total Trades: {total_trades}
+✅ Winning: {winning_trades}
+❌ Losing: {losing_trades}
+
+━━━━━━━━━━━━━━━━━━━━
+💡 For detailed trade history, check:
+• Enhanced Dashboard (/dashboard)
+• Portfolio History (data/portfolio_history.json)
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            text = f"<b>📜 TRADE HISTORY</b>\n\n<i>Error loading history: {e}</i>"
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
 
     async def handle_menu_settings(self, message_id: Optional[int]):
         """Handle settings menu callback."""
-        text = "<b>⚙️ SETTINGS</b>\n\n<i>Coming soon...</i>"
-        keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
-        await self.bot.send_message_with_keyboard(text, keyboard)
+        if not self.trading_engine:
+            text = "<b>⚙️ SETTINGS</b>\n\n<i>Trading engine not available</i>"
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+            return
+
+        try:
+            # Get bot configuration
+            config = self.trading_engine.config
+            leverage = getattr(config, 'leverage', 'N/A')
+            symbols = getattr(config, 'symbols', [])
+            mode = getattr(config, 'paper_mode', True)
+
+            mode_emoji = "📝" if mode else "💰"
+            mode_text = "Paper Trading" if mode else "Live Trading"
+
+            text = f"""
+<b>⚙️ BOT SETTINGS</b>
+
+<b>🔧 Configuration:</b>
+Mode: {mode_emoji} <b>{mode_text}</b>
+Leverage: <b>{leverage}x</b>
+Symbols: <b>{len(symbols)}</b> pairs
+
+<b>📊 Monitored Pairs:</b>
+{', '.join(symbols[:5])}
+{'...' if len(symbols) > 5 else ''}
+
+━━━━━━━━━━━━━━━━━━━━
+💡 To change settings, edit your config file
+            """
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
+        except Exception as e:
+            text = f"<b>⚙️ SETTINGS</b>\n\n<i>Error loading settings: {e}</i>"
+            keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
+            await self.bot.send_message_with_keyboard(text, keyboard)
 
     async def handle_menu_wallet(self, message_id: Optional[int]):
         """Handle wallet menu callback."""
@@ -360,13 +433,35 @@ Use /menu for detailed info
             return
 
         balance = getattr(self.trading_engine, 'equity_usdt', 0.0)
+        initial_equity = getattr(self.trading_engine, 'initial_equity', balance)
+        total_pnl = balance - initial_equity
+        roi_pct = ((balance - initial_equity) / initial_equity * 100) if initial_equity > 0 else 0.0
+        open_positions = len(getattr(self.trading_engine, 'active_positions', {}))
+
+        pnl_emoji = "💰" if total_pnl >= 0 else "📉"
+        roi_emoji = "🟢" if roi_pct >= 0 else "🔴"
 
         text = f"""
-<b>💰 WALLET</b>
+<b>💰 WALLET OVERVIEW</b>
 
-Balance: ${balance:,.2f} USDT
+━━━━━━━━━━━━━━━━━━━━
+<b>💵 Current Balance</b>
+${balance:,.2f} USDT
 
-<i>More features coming soon...</i>
+<b>💎 Initial Equity</b>
+${initial_equity:,.2f} USDT
+
+<b>{pnl_emoji} Total P&L</b>
+${total_pnl:+,.2f} USDT
+
+<b>{roi_emoji} ROI</b>
+{roi_pct:+.2f}%
+
+<b>📊 Open Positions</b>
+{open_positions} position{'s' if open_positions != 1 else ''}
+
+━━━━━━━━━━━━━━━━━━━━
+💡 Use /dashboard for real-time updates
         """
         keyboard = [[{"text": "🔙 Назад", "callback_data": "menu_main"}]]
         await self.bot.send_message_with_keyboard(text, keyboard)
@@ -410,11 +505,15 @@ Balance: ${balance:,.2f} USDT
         text = """
 <b>📈 PORTFOLIO CHART</b>
 
-<i>Interactive charts coming soon...</i>
+✅ <b>Real-time charts are available!</b>
 
-For now, check:
-• Enhanced Dashboard (data/learning_reports/enhanced_dashboard.html)
-• Portfolio History (data/portfolio_history.json)
+Use the <b>🚀 Enhanced Dashboard</b> button in the main menu to view:
+• 📊 Live equity chart
+• 📈 Real-time position updates
+• 💰 P&L tracking
+• 🔴 WebSocket streaming (< 1 sec latency)
+
+Or visit: /dashboard
 
 ━━━━━━━━━━━━━━━━━━━━
         """
