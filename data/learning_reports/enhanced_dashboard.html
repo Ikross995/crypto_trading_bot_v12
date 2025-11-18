@@ -173,13 +173,133 @@
             padding: 10px;
         }
         
-        .trade-item { 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 8px 12px; 
-            margin-bottom: 5px; 
-            background: rgba(255,255,255,0.05); 
+        .trade-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            background: rgba(255,255,255,0.05);
             border-radius: 6px;
+        }
+
+        /* ==================== Mobile Responsive Styles ==================== */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .header h1 {
+                font-size: 1.5em;
+            }
+
+            .header p {
+                font-size: 0.9em;
+            }
+
+            .status-bar {
+                flex-wrap: wrap;
+                padding: 10px 15px;
+                gap: 10px;
+            }
+
+            .status-item {
+                flex: 1 1 45%;
+                min-width: 100px;
+            }
+
+            .status-value {
+                font-size: 1.2em;
+            }
+
+            .status-label {
+                font-size: 0.75em;
+            }
+
+            .main-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .chart-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .performance-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .card {
+                padding: 15px;
+            }
+
+            .card h3 {
+                font-size: 1.1em;
+            }
+
+            .metric {
+                padding: 8px 10px;
+                margin-bottom: 10px;
+            }
+
+            .metric-label {
+                font-size: 0.85em;
+            }
+
+            .metric-value {
+                font-size: 1em;
+            }
+
+            .chart-container {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .card:hover {
+                transform: none;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 5px;
+            }
+
+            .header {
+                padding: 12px;
+            }
+
+            .header h1 {
+                font-size: 1.2em;
+            }
+
+            .header p {
+                font-size: 0.75em;
+            }
+
+            .status-bar {
+                flex-direction: column;
+                padding: 10px;
+            }
+
+            .status-item {
+                flex: 1 1 100%;
+                padding: 5px 0;
+            }
+
+            .card {
+                padding: 12px;
+            }
+
+            .card h3 {
+                font-size: 1em;
+            }
         }
     </style>
 </head>

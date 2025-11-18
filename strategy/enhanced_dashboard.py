@@ -823,6 +823,43 @@ class EnhancedDashboardGenerator:
             color: #ff4757;
             border: 1px solid #ff4757;
         }}
+
+        /* ==================== Mobile Responsive Styles ==================== */
+        @media (max-width: 768px) {{
+            .container {{ padding: 10px; }}
+            .header {{ padding: 15px; margin-bottom: 15px; }}
+            .header h1 {{ font-size: 1.5em; }}
+            .header p {{ font-size: 0.9em; }}
+            .status-bar {{ flex-wrap: wrap; padding: 10px 15px; gap: 10px; }}
+            .status-item {{ flex: 1 1 45%; min-width: 100px; }}
+            .status-value {{ font-size: 1.2em; }}
+            .status-label {{ font-size: 0.75em; }}
+            .main-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .chart-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .performance-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .card {{ padding: 15px; }}
+            .card h3 {{ font-size: 1.1em; }}
+            .metric {{ padding: 8px 10px; margin-bottom: 10px; }}
+            .metric-label {{ font-size: 0.85em; }}
+            .metric-value {{ font-size: 1em; }}
+            .chart-container {{ padding: 15px; margin-bottom: 15px; }}
+            .card:hover {{ transform: none; }}
+            .table-container {{ padding: 15px; }}
+            .data-table {{ font-size: 0.8em; }}
+        }}
+
+        @media (max-width: 480px) {{
+            .container {{ padding: 5px; }}
+            .header {{ padding: 12px; }}
+            .header h1 {{ font-size: 1.2em; }}
+            .header p {{ font-size: 0.75em; }}
+            .status-bar {{ flex-direction: column; padding: 10px; }}
+            .status-item {{ flex: 1 1 100%; padding: 5px 0; }}
+            .card {{ padding: 12px; }}
+            .card h3 {{ font-size: 1em; }}
+            .table-container {{ padding: 10px; overflow-x: scroll; }}
+            .data-table {{ font-size: 0.7em; }}
+        }}
     </style>
 </head>
 <body>
