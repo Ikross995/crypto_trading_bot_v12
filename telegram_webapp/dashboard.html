@@ -10,11 +10,13 @@
 
     <!-- Socket.IO Client for real-time updates -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
-            integrity="sha384-8yox+YRA5oiXW9FVKzG/RqPQdhQqJ5EYhF/8fgIQWrKSHLBqALr1w6tMVPPqaEQd"
             crossorigin="anonymous"
-            onerror="console.error('❌ Failed to load Socket.IO from cdn.socket.io, trying fallback...');
+            onerror="console.error('❌ Failed to load Socket.IO, trying Cloudflare CDN...');
                      var script = document.createElement('script');
-                     script.src = 'https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js';
+                     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js';
+                     script.onerror = function() {
+                         console.error('❌ All CDNs failed - WebSocket unavailable, using HTTP polling only');
+                     };
                      document.head.appendChild(script);"></script>
 
     <!-- Plotly.js for charts -->
