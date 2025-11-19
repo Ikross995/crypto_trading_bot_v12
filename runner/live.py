@@ -1170,6 +1170,11 @@ class LiveTradingEngine:
             except Exception:
                 pass
         self.running = True
+
+        # Set start time for uptime calculation
+        from datetime import datetime, timezone
+        self._start_time = datetime.now(timezone.utc)
+
         self.logger.info("Starting live trading engine...")
 
         # 🧪 ENHANCED: Market Context Analysis & Pre-Trading Backtest
@@ -2232,19 +2237,9 @@ class LiveTradingEngine:
 
         while self.running:
             try:
-                # Prepare dashboard data
-                dashboard_data = await self._generate_telegram_dashboard_data()
-
-                if dashboard_data:
-                    # Send dashboard update
-                    success = await self.telegram_bot.send_dashboard_update(dashboard_data)
-
-                    if success:
-                        self.logger.info(f"📱 [TELEGRAM] Dashboard update sent successfully")
-                    else:
-                        self.logger.warning(f"📱 [TELEGRAM] Failed to send dashboard update")
-                else:
-                    self.logger.debug("📱 [TELEGRAM] No dashboard data available yet")
+                # DISABLED: Periodic dashboard updates to Telegram (use WebSocket dashboard instead)
+                # Only save dashboard state for Web App API real-time updates
+                # Trade signals (open/close/TP/SL) will still be sent to Telegram
 
                 # Save dashboard state for Web App API
                 if self.dashboard_state_manager:
@@ -2780,6 +2775,9 @@ class LiveTradingEngine:
                 "[SYMBOL_CHECK] %s: No actionable signal (wait/rejected)", symbol
             )
             return  # nothing actionable
+
+        # Increment signals generated counter
+        self.signals_generated += 1
 
         # Ensure we have a price to size the order
         price = sig.entry_price or await self._latest_price(symbol)
@@ -3591,10 +3589,15 @@ class LiveTradingEngine:
                                     "leverage": self.leverage,
                                     "margin_used": (executed_qty * avg_fill_price) / self.leverage,
                                     "notional": executed_qty * avg_fill_price,
-                                    "tp_levels": tp_prices if tp_prices else [],
-                                    "sl_price": sl_price if sl_price else 0.0,
+                                    "take_profit": tp_prices[0] if tp_prices and len(tp_prices) > 0 else None,
+                                    "stop_loss": sl_price if sl_price else None,
+                                    "tp_count": len(tp_prices) if tp_prices else 0,
+                                    "tp_distance": ((tp_prices[0] - avg_fill_price) / avg_fill_price * 100) if tp_prices and len(tp_prices) > 0 else 0,
+                                    "sl_distance": ((sl_price - avg_fill_price) / avg_fill_price * 100) if sl_price else 0,
+                                    "account_balance": self.equity_usdt,
                                     "signal_strength": strength,
                                     "regime": regime if regime else "unknown",
+                                    "reason": f"Signal: {strength:.2f} | Regime: {regime if regime else 'unknown'}",
                                 }
 
                                 # Send notification (await directly to avoid recursion on shutdown)
