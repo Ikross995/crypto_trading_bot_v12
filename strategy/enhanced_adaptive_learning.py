@@ -266,7 +266,16 @@ class EnhancedAdaptiveLearningSystem:
                 # Периодически оцениваем и обновляем метрики
                 if len(self.prediction_history) % 10 == 0:
                     await self._update_enhanced_metrics()
-                    
+
+                # 💾 Периодически сохраняем модели (каждые 10 сделок)
+                if total_samples > 0 and total_samples % 10 == 0:
+                    try:
+                        logger.info(f"💾 [AUTO_SAVE] Saving ML models at {total_samples} samples...")
+                        await self.save_all_data()
+                        logger.info(f"✅ [AUTO_SAVE] ML models saved successfully")
+                    except Exception as save_error:
+                        logger.warning(f"⚠️ [AUTO_SAVE] Failed to save models: {save_error}")
+
         except Exception as e:
             logger.error(f"❌ [ML_EXIT_UPDATE] Error updating trade exit: {e}")
     

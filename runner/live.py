@@ -2455,6 +2455,24 @@ class LiveTradingEngine:
                 except Exception as e:
                     self.logger.error(f"❌ [SHUTDOWN] Dashboard save error: {e}")
 
+            # 🧠 Save ML learning data and models
+            if hasattr(self, 'enhanced_ai') and self.enhanced_ai:
+                try:
+                    self.logger.info("💾 [SHUTDOWN] Saving ML models and learning data...")
+                    await self.enhanced_ai.save_all_data()
+
+                    # Log ML statistics
+                    if hasattr(self.enhanced_ai, 'ml_system'):
+                        ml_samples = sum(
+                            getattr(model, 'samples_seen', 0)
+                            for model in self.enhanced_ai.ml_system.models.values()
+                        )
+                        self.logger.info(f"✅ [SHUTDOWN] ML models saved ({ml_samples} samples trained)")
+                    else:
+                        self.logger.info("✅ [SHUTDOWN] ML learning data saved")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] ML save error: {e}")
+
             # Save active positions state
             if hasattr(self, 'active_positions') and self.active_positions:
                 try:

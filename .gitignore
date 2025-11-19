@@ -166,3 +166,7 @@ models/checkpoints/
 *.backup
 temp/
 tmp/
+
+# ML learning data
+ml_learning_data/
+enhanced_learning_data/
