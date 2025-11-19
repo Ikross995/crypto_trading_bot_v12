@@ -193,12 +193,17 @@ class AdvancedMLLearningSystem:
         logger.info("🧠 [ADVANCED_ML] System initialized")
         self._load_historical_data()
     
-    def extract_features(self, market_context: MarketContext, 
-                        signal_strength: float, 
+    def extract_features(self, market_context: MarketContext,
+                        signal_strength: float,
                         recent_performance: Dict) -> MLFeatures:
         """Извлечение признаков для ML модели"""
-        
+
         try:
+            # 🛡️ Защита: проверяем что market_context правильного типа
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [FEATURE_EXTRACTION] Invalid market_context type: {type(market_context)}. Returning zero features.")
+                return MLFeatures(**{field: 0.0 for field in MLFeatures.__annotations__})
+
             # Технические признаки
             rsi_momentum = (market_context.rsi_14 - 50) / 50  # Нормализованный RSI
             macd_divergence = market_context.macd - market_context.macd_signal
@@ -253,12 +258,23 @@ class AdvancedMLLearningSystem:
             # Возвращаем нулевые признаки в случае ошибки
             return MLFeatures(**{field: 0.0 for field in MLFeatures.__annotations__})
     
-    async def predict_trade_outcome(self, market_context: MarketContext, 
+    async def predict_trade_outcome(self, market_context: MarketContext,
                                   signal_strength: float,
                                   recent_performance: Dict) -> Dict[str, float]:
         """Предсказывает результат сделки перед входом"""
-        
+
         try:
+            # 🛡️ Защита: проверяем валидность market_context
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [PREDICT_TRADE] Invalid market context - returning neutral predictions")
+                return {
+                    'expected_pnl_pct': 0.0,
+                    'win_probability': 0.5,
+                    'expected_hold_time_minutes': 30.0,
+                    'risk_score': 0.5,
+                    'confidence': 0.0
+                }
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
@@ -308,8 +324,13 @@ class AdvancedMLLearningSystem:
                              signal_strength: float,
                              recent_performance: Dict):
         """Обучение на завершенной сделке"""
-        
+
         try:
+            # 🛡️ Защита: проверяем валидность market_context
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [LEARN_FROM_TRADE] Invalid market context - skipping learning")
+                return
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
@@ -344,11 +365,16 @@ class AdvancedMLLearningSystem:
     async def get_intelligent_recommendations(self, current_market: MarketContext,
                                             recent_performance: Dict) -> Dict[str, Any]:
         """Получить рекомендации от AI системы"""
-        
+
         try:
+            # 🛡️ Защита: проверяем наличие обученных моделей и валидность контекста
             if not self.models['pnl_predictor'].is_fitted:
                 return {'confidence': 0.0, 'recommendations': []}
-            
+
+            if current_market is None or isinstance(current_market, dict):
+                logger.warning(f"⚠️ [ML_RECOMMENDATIONS] Invalid market context type: {type(current_market)}")
+                return {'confidence': 0.0, 'recommendations': []}
+
             # Анализируем текущие рыночные условия
             features = self.extract_features(current_market, 1.0, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
