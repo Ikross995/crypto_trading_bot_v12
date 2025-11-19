@@ -232,7 +232,14 @@ ml_learning_data/
 
 ### Запустить бота:
 ```bash
-python3 run_full_combo_system_multi.py --live
+# Интерактивный режим (рекомендуется)
+python3 start_bot.py
+
+# ИЛИ прямой запуск на testnet
+python3 cli.py live --testnet
+
+# ИЛИ прямой запуск на mainnet
+python3 cli.py live
 ```
 
 ### Проверить статус ML:

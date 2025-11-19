@@ -41,8 +41,12 @@ ls -lh ml_learning_data/
 
 ## 📈 Мониторинг в реальном времени
 ```bash
-# Запустить бота
-python3 run_full_combo_system_multi.py --live
+# Запустить бота (интерактивно)
+python3 start_bot.py
+# Выберите: 1 (Testnet) или 2 (Real)
+
+# ИЛИ прямой запуск через CLI
+python3 cli.py live --testnet
 
 # В другом терминале - мониторинг
 watch -n 10 python3 check_ml_status.py
