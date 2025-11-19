@@ -141,22 +141,25 @@ def emit_price_update(price_data):
 
 @app.route('/')
 def index():
-    """Главная страница - Enhanced дашборд с WebSocket."""
+    """Главная страница - Новый интерактивный дашборд с Chart.js."""
     try:
-        enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
-        if enhanced_path.exists():
-            return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
-        else:
-            # Fallback to simple dashboard if enhanced not found
-            return send_from_directory('telegram_webapp', 'dashboard.html')
+        # Используем новый интерактивный dashboard с Chart.js и WebSocket
+        return send_from_directory('telegram_webapp', 'dashboard.html')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/simple')
 def simple_dashboard():
-    """Простой дашборд (старая версия)."""
-    return send_from_directory('telegram_webapp', 'dashboard.html')
+    """Старый автогенерируемый дашборд."""
+    try:
+        enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
+        if enhanced_path.exists():
+            return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
+        else:
+            return jsonify({'error': 'Old dashboard not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/dashboard')
