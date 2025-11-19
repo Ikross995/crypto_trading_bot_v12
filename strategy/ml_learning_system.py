@@ -480,16 +480,46 @@ class AdvancedMLLearningSystem:
             # Загружаем сохраненные данные если есть
             contexts_file = self.data_dir / "market_contexts.json"
             outcomes_file = self.data_dir / "trade_outcomes.json"
-            
+
             if contexts_file.exists() and outcomes_file.exists():
                 with open(contexts_file, 'r') as f:
                     contexts_data = json.load(f)
-                
+
                 with open(outcomes_file, 'r') as f:
                     outcomes_data = json.load(f)
-                
+
                 logger.info(f"🧠 [ML_LOAD] Loaded {len(contexts_data)} historical contexts")
-                
+
+            # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
+            if ML_AVAILABLE:
+                models_loaded = 0
+                for name, model in self.models.items():
+                    model_file = self.data_dir / f"{name}_model.pkl"
+                    scaler_file = self.data_dir / f"{name}_scaler.pkl"
+
+                    if model_file.exists() and scaler_file.exists():
+                        try:
+                            model.model = joblib.load(model_file)
+                            model.scaler = joblib.load(scaler_file)
+                            model.is_fitted = True
+
+                            # Восстанавливаем samples_seen из метаданных если есть
+                            metadata_file = self.data_dir / f"{name}_metadata.json"
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    model.samples_seen = metadata.get('samples_seen', 0)
+
+                            models_loaded += 1
+                            logger.info(f"✅ [ML_LOAD] Loaded model '{name}': {model.samples_seen} samples seen")
+                        except Exception as e:
+                            logger.warning(f"⚠️ [ML_LOAD] Failed to load model '{name}': {e}")
+
+                if models_loaded > 0:
+                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded}/{len(self.models)} ML models")
+                else:
+                    logger.info(f"📚 [ML_LOAD] No saved models found - starting from scratch")
+
         except Exception as e:
             logger.error(f"❌ [ML_LOAD] Error loading historical data: {e}")
     
@@ -500,27 +530,42 @@ class AdvancedMLLearningSystem:
             contexts_data = []
             for context in self.market_contexts:
                 contexts_data.append(asdict(context))
-            
+
             with open(self.data_dir / "market_contexts.json", 'w') as f:
                 json.dump(contexts_data, f, indent=2, default=str)
-            
+
             # Сохраняем результаты сделок
             outcomes_data = []
             for outcome in self.trade_outcomes:
                 outcomes_data.append(asdict(outcome))
-            
+
             with open(self.data_dir / "trade_outcomes.json", 'w') as f:
                 json.dump(outcomes_data, f, indent=2, default=str)
-            
-            # Сохраняем модели
+
+            # Сохраняем модели и их метаданные
             if ML_AVAILABLE:
+                models_saved = 0
                 for name, model in self.models.items():
                     if model.is_fitted:
+                        # Сохраняем модель и скейлер
                         joblib.dump(model.model, self.data_dir / f"{name}_model.pkl")
                         joblib.dump(model.scaler, self.data_dir / f"{name}_scaler.pkl")
-            
+
+                        # Сохраняем метаданные (samples_seen и т.д.)
+                        metadata = {
+                            'samples_seen': model.samples_seen,
+                            'is_fitted': model.is_fitted,
+                            'saved_at': datetime.now(timezone.utc).isoformat()
+                        }
+                        with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
+                            json.dump(metadata, f, indent=2)
+
+                        models_saved += 1
+
+                logger.info(f"💾 [ML_SAVE] Saved {models_saved} ML models with metadata")
+
             logger.info(f"💾 [ML_SAVE] Saved ML data: {len(self.market_contexts)} contexts, "
                        f"{len(self.trade_outcomes)} outcomes")
-            
+
         except Exception as e:
             logger.error(f"❌ [ML_SAVE] Error: {e}")
