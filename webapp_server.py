@@ -162,6 +162,12 @@ def simple_dashboard():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/simple')
+def simple_dashboard():
+    """Простой дашборд (старая версия)."""
+    return send_from_directory('telegram_webapp', 'dashboard.html')
+
+
 @app.route('/api/dashboard')
 def get_dashboard():
     """API endpoint для получения данных дашборда."""
