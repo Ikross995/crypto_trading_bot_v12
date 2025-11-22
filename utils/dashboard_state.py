@@ -38,9 +38,27 @@ class DashboardStateManager:
         try:
             # Собираем данные из торгового бота
             balance = getattr(trading_engine, 'equity_usdt', 0.0)
+
+            # CRITICAL: Сохраняем initial_equity чтобы не сбрасывать при каждом запуске
+            # 1. Проверяем есть ли сохраненное значение в файле
+            previous_state = self.load_state()
+            saved_initial = previous_state.get('initialEquity', None)
+
+            # 2. Берем initial из торгового движка
             initial = getattr(trading_engine, 'initial_equity', None)
-            if initial is None:
-                initial = getattr(trading_engine.config, 'paper_equity', 1000.0)
+
+            # 3. Логика определения initial_equity:
+            if saved_initial and saved_initial > 0:
+                # Используем сохраненное значение (самое важное!)
+                initial = saved_initial
+            elif initial is None or initial == 0:
+                # Если initial не задан - берем текущий баланс как начальный
+                # (это для первого запуска)
+                initial = balance
+
+            # 4. Обновляем в торговом движке если нужно
+            if not hasattr(trading_engine, 'initial_equity') or trading_engine.initial_equity is None:
+                trading_engine.initial_equity = initial
 
             # Рассчитываем метрики
             total_pnl = balance - initial
@@ -129,6 +147,7 @@ class DashboardStateManager:
             state = {
                 'balance': round(balance, 2),
                 'equity': round(balance, 2),
+                'initialEquity': round(initial, 2),  # СОХРАНЯЕМ начальный equity!
                 'totalPnl': round(total_pnl, 2),
                 'roiPct': round(roi_pct, 2),
                 'openPositions': len(positions),
@@ -214,6 +233,7 @@ class DashboardStateManager:
         return {
             'balance': 0.0,
             'equity': 0.0,
+            'initialEquity': 0.0,
             'totalPnl': 0.0,
             'roiPct': 0.0,
             'openPositions': 0,
