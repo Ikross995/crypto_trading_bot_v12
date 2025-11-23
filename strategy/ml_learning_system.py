@@ -335,12 +335,22 @@ class AdvancedMLLearningSystem:
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
             
-            # Целевые переменные для обучения
+            # 🔧 ИСПРАВЛЕНИЕ: Целевые переменные В ПРОЦЕНТАХ (не абсолютные значения!)
+            # Clip extreme values to prevent model from learning outliers
+            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим ±20%
+
+            # Нормализуем hold_time в часах (0-24 часа)
+            hold_time_hours = np.clip(trade_outcome.hold_time_minutes / 60, 0, 24)
+
+            # MAE в процентах от entry price (не абсолютное значение!)
+            # Используем pnl_pct как прокси для риска
+            risk_pct = abs(pnl_pct) if trade_outcome.pnl < 0 else 0
+
             targets = {
-                'pnl_predictor': trade_outcome.pnl_pct,
+                'pnl_predictor': pnl_pct,
                 'win_probability': 1.0 if trade_outcome.pnl > 0 else 0.0,
-                'hold_time_predictor': trade_outcome.hold_time_minutes,
-                'risk_estimator': trade_outcome.max_adverse_excursion
+                'hold_time_predictor': hold_time_hours,
+                'risk_estimator': np.clip(risk_pct, 0, 10)  # Максимум 10% риск
             }
             
             # Обучаем все модели
