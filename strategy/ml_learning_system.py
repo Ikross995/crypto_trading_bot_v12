@@ -510,12 +510,72 @@ class AdvancedMLLearningSystem:
         except Exception as e:
             logger.error(f"❌ [ML_EVALUATION] Error: {e}")
     
+    def _warm_start_training(self, historical_contexts: list, historical_outcomes: list):
+        """🔥 WARM START: Переобучает модели на исторических сделках"""
+        try:
+            if not ML_AVAILABLE:
+                return
+
+            # Фильтруем только завершенные сделки с ненулевым PnL
+            valid_pairs = []
+            for ctx, outcome in zip(historical_contexts, historical_outcomes):
+                # Пропускаем сделки с 0% PnL (незавершенные)
+                if abs(outcome.pnl_pct) > 0.01:  # Минимум 0.01% движения
+                    valid_pairs.append((ctx, outcome))
+
+            if len(valid_pairs) < 5:
+                logger.info(f"⚠️ [WARM_START] Not enough valid historical trades ({len(valid_pairs)}) - skipping warm start")
+                return
+
+            logger.info(f"🔥 [WARM_START] Pretraining on {len(valid_pairs)} historical trades...")
+
+            # Переобучаем модели на исторических данных
+            for ctx, outcome in valid_pairs:
+                try:
+                    # Создаем признаки
+                    features = self.extract_features(ctx, 1.0, {})
+                    feature_array = np.array([list(asdict(features).values())])
+
+                    # Clip target values (как в learn_from_trade)
+                    pnl_pct = np.clip(outcome.pnl_pct, -20, 20)
+                    hold_time_hours = np.clip(outcome.hold_time_minutes / 60, 0, 24)
+                    risk_pct = abs(pnl_pct) if outcome.pnl < 0 else 0
+
+                    targets = {
+                        'pnl_predictor': pnl_pct,
+                        'win_probability': 1.0 if outcome.pnl > 0 else 0.0,
+                        'hold_time_predictor': hold_time_hours,
+                        'risk_estimator': np.clip(risk_pct, 0, 10)
+                    }
+
+                    # Обучаем модели
+                    for name, target in targets.items():
+                        if name in self.models:
+                            self.models[name].partial_fit(feature_array, np.array([target]))
+
+                except Exception as e:
+                    logger.debug(f"⚠️ [WARM_START] Failed to train on one trade: {e}")
+
+            # Логируем результат
+            total_samples = sum(model.samples_seen for model in self.models.values())
+            logger.info(f"✅ [WARM_START] Pretrained on {len(valid_pairs)} historical trades")
+            logger.info(f"🧠 [WARM_START] Total samples across all models: {total_samples}")
+
+            # Сохраняем обновленные модели
+            self.save_data()
+
+        except Exception as e:
+            logger.error(f"❌ [WARM_START] Error during warm start training: {e}")
+
     def _load_historical_data(self):
         """Загружает исторические данные"""
         try:
             # Загружаем сохраненные данные если есть
             contexts_file = self.data_dir / "market_contexts.json"
             outcomes_file = self.data_dir / "trade_outcomes.json"
+
+            historical_contexts = []
+            historical_outcomes = []
 
             if contexts_file.exists() and outcomes_file.exists():
                 with open(contexts_file, 'r') as f:
@@ -524,7 +584,23 @@ class AdvancedMLLearningSystem:
                 with open(outcomes_file, 'r') as f:
                     outcomes_data = json.load(f)
 
-                logger.info(f"🧠 [ML_LOAD] Loaded {len(contexts_data)} historical contexts")
+                # Восстанавливаем объекты из JSON
+                for ctx_dict in contexts_data:
+                    try:
+                        # Преобразуем ISO строки обратно в datetime
+                        if 'timestamp' in ctx_dict and isinstance(ctx_dict['timestamp'], str):
+                            ctx_dict['timestamp'] = datetime.fromisoformat(ctx_dict['timestamp'].replace('Z', '+00:00'))
+                        historical_contexts.append(MarketContext(**ctx_dict))
+                    except Exception as e:
+                        logger.debug(f"⚠️ Failed to restore context: {e}")
+
+                for outcome_dict in outcomes_data:
+                    try:
+                        historical_outcomes.append(TradeOutcome(**outcome_dict))
+                    except Exception as e:
+                        logger.debug(f"⚠️ Failed to restore outcome: {e}")
+
+                logger.info(f"🧠 [ML_LOAD] Loaded {len(historical_contexts)} historical contexts, {len(historical_outcomes)} outcomes")
 
             # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
             if ML_AVAILABLE:
@@ -555,6 +631,16 @@ class AdvancedMLLearningSystem:
                     logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded}/{len(self.models)} ML models")
                 else:
                     logger.info(f"📚 [ML_LOAD] No saved models found - starting from scratch")
+
+            # Восстанавливаем данные в память
+            if len(historical_contexts) > 0:
+                self.market_contexts.extend(historical_contexts)
+            if len(historical_outcomes) > 0:
+                self.trade_outcomes.extend(historical_outcomes)
+
+            # 🔥 WARM START: Переобучаем модели на исторических данных
+            if len(historical_contexts) > 0 and len(historical_outcomes) > 0:
+                self._warm_start_training(historical_contexts, historical_outcomes)
 
         except Exception as e:
             logger.error(f"❌ [ML_LOAD] Error loading historical data: {e}")
