@@ -36,6 +36,8 @@ class TelegramUpdateHandler:
         """Register default command and callback handlers."""
         # Commands
         self.command_handlers['/start'] = self.handle_start_command
+        self.command_handlers['/stop'] = self.handle_stop_command
+        self.command_handlers['/subscribers'] = self.handle_subscribers_command
         self.command_handlers['/help'] = self.handle_help_command
         self.command_handlers['/menu'] = self.handle_menu_command
         self.command_handlers['/status'] = self.handle_status_command
@@ -145,13 +147,17 @@ class TelegramUpdateHandler:
         try:
             text = message.get("text", "")
             command = text.split()[0].lower()
+            chat_id = str(message.get("chat", {}).get("id", ""))
 
-            logger.info(f"📱 [TELEGRAM] Command: {command}")
+            logger.info(f"📱 [TELEGRAM] Command: {command} from chat_id: {chat_id}")
 
-            if command in self.command_handlers:
+            # Special handling for commands that need chat_id
+            if command in ["/start", "/stop", "/subscribers"]:
+                await self.command_handlers[command](chat_id=chat_id)
+            elif command in self.command_handlers:
                 await self.command_handlers[command]()
             else:
-                await self.bot.send_message(f"Unknown command: {command}\nUse /help for available commands")
+                await self.bot.send_message(f"Unknown command: {command}\nUse /help for available commands", chat_id=chat_id)
 
         except Exception as e:
             logger.error(f"📱 [TELEGRAM] Error handling command: {e}")
@@ -170,10 +176,19 @@ class TelegramUpdateHandler:
             logger.debug(f"Error answering callback: {e}")
 
     # Command Handlers
-    async def handle_start_command(self):
-        """Handle /start command."""
-        welcome_text = """
+    async def handle_start_command(self, chat_id: str = None):
+        """Handle /start command and subscribe user to notifications."""
+        # 📢 Subscribe user to receive trade notifications
+        if chat_id:
+            was_new = self.bot.add_subscriber(chat_id)
+            subscription_status = "✅ You are now subscribed to trade signals!" if was_new else "✅ Already subscribed!"
+        else:
+            subscription_status = ""
+
+        welcome_text = f"""
 🤖 <b>Welcome to AI Trading Bot!</b>
+
+{subscription_status}
 
 This bot helps you monitor and manage your automated trading.
 
@@ -184,21 +199,70 @@ This bot helps you monitor and manage your automated trading.
 /stats - Trading statistics
 /help - Show this help
 
+<b>📢 Notifications:</b>
+• You will receive alerts for all trades (open/close)
+• Real-time updates when positions change
+• Send /stop to unsubscribe from notifications
+
 Use /menu to start navigating with buttons!
         """
-        await self.bot.send_message(welcome_text)
+        await self.bot.send_message(welcome_text, chat_id=chat_id)
+
+    async def handle_stop_command(self, chat_id: str = None):
+        """Handle /stop command - unsubscribe from notifications."""
+        if chat_id:
+            was_removed = self.bot.remove_subscriber(chat_id)
+            if was_removed:
+                text = """
+❌ <b>Unsubscribed from notifications</b>
+
+You will no longer receive trade alerts.
+
+Send /start anytime to subscribe again!
+                """
+            else:
+                text = "❌ You were not subscribed."
+            await self.bot.send_message(text, chat_id=chat_id)
+
+    async def handle_subscribers_command(self, chat_id: str = None):
+        """Handle /subscribers command - show subscriber count (admin only)."""
+        # Only allow default chat_id (admin) to see this
+        if chat_id and str(chat_id) == str(self.bot.chat_id):
+            count = len(self.bot.subscribers)
+            text = f"""
+📢 <b>Subscriber Management</b>
+
+Total subscribers: <b>{count}</b>
+
+All subscribers receive:
+• Trade open notifications
+• Trade close notifications
+• Position updates
+
+Subscribers can use /stop to unsubscribe.
+            """
+            await self.bot.send_message(text, chat_id=chat_id)
+        else:
+            await self.bot.send_message("❌ This command is only available to the admin.", chat_id=chat_id)
 
     async def handle_help_command(self):
         """Handle /help command."""
         help_text = """
 <b>📚 Available Commands:</b>
 
-/start - Welcome message
+/start - Welcome and subscribe to notifications
+/stop - Unsubscribe from trade notifications
 /menu - Show interactive menu
 /status - Bot status and account info
 /positions - List open positions
 /stats - Trading statistics
+/subscribers - Show subscriber count (admin only)
 /help - This help message
+
+<b>📢 Notifications:</b>
+• /start to subscribe to trade alerts
+• /stop to unsubscribe
+• All subscribers get real-time trade signals
 
 <b>🎯 Tips:</b>
 • Use /menu for button navigation
@@ -435,26 +499,84 @@ class TelegramDashboardBot:
             webapp_url: URL Telegram Web App для интерактивного дашборда (опционально)
         """
         self.token = token
-        self.chat_id = chat_id
+        self.chat_id = chat_id  # Default chat (for backward compatibility)
         self.webapp_url = webapp_url
         self.base_url = f"https://api.telegram.org/bot{token}"
 
-    async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+        # 📢 NEW: Subscriber management for broadcast notifications
+        self.subscribers = set()  # Set of subscribed chat_ids
+        self.subscribers_file = Path("data/telegram_subscribers.json")
+        self._load_subscribers()
+
+    def _load_subscribers(self):
+        """Загрузить список подписчиков из файла."""
+        try:
+            if self.subscribers_file.exists():
+                import json
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    self.subscribers = set(data.get('subscribers', []))
+                    # Always include default chat_id
+                    if self.chat_id:
+                        self.subscribers.add(str(self.chat_id))
+                    logger.info(f"📢 [SUBSCRIBERS] Loaded {len(self.subscribers)} subscribers")
+            else:
+                # Start with default chat_id
+                if self.chat_id:
+                    self.subscribers.add(str(self.chat_id))
+        except Exception as e:
+            logger.error(f"❌ [SUBSCRIBERS] Failed to load: {e}")
+            if self.chat_id:
+                self.subscribers.add(str(self.chat_id))
+
+    def _save_subscribers(self):
+        """Сохранить список подписчиков в файл."""
+        try:
+            import json
+            self.subscribers_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.subscribers_file, 'w') as f:
+                json.dump({'subscribers': list(self.subscribers)}, f, indent=2)
+        except Exception as e:
+            logger.error(f"❌ [SUBSCRIBERS] Failed to save: {e}")
+
+    def add_subscriber(self, chat_id: str):
+        """Добавить нового подписчика."""
+        chat_id = str(chat_id)
+        if chat_id not in self.subscribers:
+            self.subscribers.add(chat_id)
+            self._save_subscribers()
+            logger.info(f"📢 [SUBSCRIBERS] New subscriber added: {chat_id} (total: {len(self.subscribers)})")
+            return True
+        return False
+
+    def remove_subscriber(self, chat_id: str):
+        """Удалить подписчика."""
+        chat_id = str(chat_id)
+        if chat_id in self.subscribers:
+            self.subscribers.remove(chat_id)
+            self._save_subscribers()
+            logger.info(f"📢 [SUBSCRIBERS] Subscriber removed: {chat_id}")
+            return True
+        return False
+
+    async def send_message(self, text: str, parse_mode: str = "HTML", chat_id: str = None) -> bool:
         """
-        Отправить текстовое сообщение.
+        Отправить текстовое сообщение в конкретный чат.
 
         Args:
             text: Текст сообщения (поддерживает HTML/Markdown)
             parse_mode: "HTML" или "Markdown"
+            chat_id: ID чата (если None, используется self.chat_id)
 
         Returns:
             True если успешно отправлено
         """
+        target_chat_id = chat_id or self.chat_id
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{self.base_url}/sendMessage"
                 data = {
-                    "chat_id": self.chat_id,
+                    "chat_id": target_chat_id,
                     "text": text,
                     "parse_mode": parse_mode,
                     "disable_web_page_preview": True
@@ -462,16 +584,46 @@ class TelegramDashboardBot:
 
                 async with session.post(url, json=data) as response:
                     if response.status == 200:
-                        logger.info("📤 [TELEGRAM] Message sent successfully")
+                        logger.debug(f"📤 [TELEGRAM] Message sent to {target_chat_id}")
                         return True
                     else:
                         error_text = await response.text()
-                        logger.error(f"❌ [TELEGRAM] Failed to send message: {error_text}")
+                        logger.error(f"❌ [TELEGRAM] Failed to send to {target_chat_id}: {error_text}")
                         return False
 
         except Exception as e:
             logger.error(f"❌ [TELEGRAM] Error sending message: {e}")
             return False
+
+    async def broadcast_message(self, text: str, parse_mode: str = "HTML") -> Dict[str, int]:
+        """
+        Отправить сообщение ВСЕМ подписчикам (broadcast).
+
+        Args:
+            text: Текст сообщения
+            parse_mode: Режим парсинга
+
+        Returns:
+            {"sent": count, "failed": count}
+        """
+        sent = 0
+        failed = 0
+
+        for chat_id in self.subscribers:
+            try:
+                success = await self.send_message(text, parse_mode, chat_id)
+                if success:
+                    sent += 1
+                else:
+                    failed += 1
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                logger.error(f"❌ [BROADCAST] Failed to send to {chat_id}: {e}")
+                failed += 1
+
+        logger.info(f"📢 [BROADCAST] Sent to {sent}/{sent+failed} subscribers")
+        return {"sent": sent, "failed": failed}
 
     async def send_document(self, file_path: Path, caption: str = "") -> bool:
         """
@@ -614,7 +766,7 @@ Margin: ${pos['margin_used']:,.2f}
 
     async def send_trade_opened(self, trade_info: Dict[str, Any]) -> bool:
         """
-        Отправить уведомление об открытии новой позиции.
+        Отправить уведомление об открытии новой позиции ВСЕМ подписчикам.
 
         Args:
             trade_info: {
@@ -635,14 +787,16 @@ Margin: ${pos['margin_used']:,.2f}
         """
         try:
             message = self._format_trade_opened_message(trade_info)
-            return await self.send_message(message, parse_mode="HTML")
+            # 📢 Send to ALL subscribers instead of just one chat
+            result = await self.broadcast_message(message, parse_mode="HTML")
+            return result["sent"] > 0
         except Exception as e:
             logger.error(f"❌ [TELEGRAM] Error sending trade opened notification: {e}")
             return False
 
     async def send_trade_closed(self, trade_info: Dict[str, Any]) -> bool:
         """
-        Отправить уведомление о закрытии позиции.
+        Отправить уведомление о закрытии позиции ВСЕМ подписчикам.
 
         Args:
             trade_info: {
@@ -662,7 +816,9 @@ Margin: ${pos['margin_used']:,.2f}
         """
         try:
             message = self._format_trade_closed_message(trade_info)
-            return await self.send_message(message, parse_mode="HTML")
+            # 📢 Send to ALL subscribers instead of just one chat
+            result = await self.broadcast_message(message, parse_mode="HTML")
+            return result["sent"] > 0
         except Exception as e:
             logger.error(f"❌ [TELEGRAM] Error sending trade closed notification: {e}")
             return False
