@@ -34,6 +34,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 🔢 MODEL VERSION - увеличивайте при изменении логики обучения!
+# v1: Initial implementation
+# v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
+MODEL_VERSION = 2
+
 @dataclass
 class MarketContext:
     """Контекст рынка во время сделки"""
@@ -510,6 +515,51 @@ class AdvancedMLLearningSystem:
         except Exception as e:
             logger.error(f"❌ [ML_EVALUATION] Error: {e}")
     
+    def _validate_model_sanity(self, model_name: str, model: 'OnlineLearningModel') -> bool:
+        """
+        🛡️ Проверяет что модель дает вменяемые предсказания
+        Отклоняет модели которые предсказывают абсурдные значения
+        """
+        try:
+            if not model.is_fitted:
+                return True  # Новая модель - ок
+
+            # Создаем тестовый вектор с нормальными значениями
+            test_features = np.array([[0.5] * 12])  # 12 features, все средние значения
+
+            prediction = model.predict(test_features)[0]
+
+            # Проверяем диапазоны в зависимости от типа модели
+            if model_name == 'pnl_predictor':
+                # PnL должен быть в пределах ±50% (даже ±20% слишком много для одного trade)
+                if abs(prediction) > 50:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected ±50%)")
+                    return False
+
+            elif model_name == 'win_probability':
+                # Вероятность должна быть 0-1
+                if prediction < 0 or prediction > 1.5:  # Небольшой запас на случай экстраполяции
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd probability: {prediction:.4f} (expected 0-1)")
+                    return False
+
+            elif model_name == 'hold_time_predictor':
+                # Время удержания в часах, должно быть разумным (0-48 часов)
+                if prediction < 0 or prediction > 48:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd hold time: {prediction:.2f}h (expected 0-48h)")
+                    return False
+
+            elif model_name == 'risk_estimator':
+                # Риск должен быть 0-20%
+                if prediction < 0 or prediction > 20:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd risk: {prediction:.2f}% (expected 0-20%)")
+                    return False
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"⚠️ [VALIDATION] Error validating model '{model_name}': {e}")
+            return False
+
     def _warm_start_training(self, historical_contexts: list, historical_outcomes: list):
         """🔥 WARM START: Переобучает модели на исторических сделках"""
         try:
@@ -605,27 +655,63 @@ class AdvancedMLLearningSystem:
             # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
             if ML_AVAILABLE:
                 models_loaded = 0
+                incompatible_models = []
+
                 for name, model in self.models.items():
                     model_file = self.data_dir / f"{name}_model.pkl"
                     scaler_file = self.data_dir / f"{name}_scaler.pkl"
+                    metadata_file = self.data_dir / f"{name}_metadata.json"
 
                     if model_file.exists() and scaler_file.exists():
                         try:
+                            # 🔢 Проверяем версию модели
+                            model_version = None
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    model_version = metadata.get('model_version', 1)  # default v1 для старых моделей
+
+                            # 🛡️ ЗАЩИТА: Проверяем совместимость версии
+                            if model_version != MODEL_VERSION:
+                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' version mismatch: saved v{model_version}, current v{MODEL_VERSION}")
+                                incompatible_models.append(name)
+                                continue
+
+                            # Загружаем модель
                             model.model = joblib.load(model_file)
                             model.scaler = joblib.load(scaler_file)
                             model.is_fitted = True
 
-                            # Восстанавливаем samples_seen из метаданных если есть
-                            metadata_file = self.data_dir / f"{name}_metadata.json"
+                            # Восстанавливаем samples_seen из метаданных
                             if metadata_file.exists():
                                 with open(metadata_file, 'r') as f:
                                     metadata = json.load(f)
                                     model.samples_seen = metadata.get('samples_seen', 0)
 
+                            # 🛡️ ВАЛИДАЦИЯ: Проверяем что модель дает вменяемые предсказания
+                            if not self._validate_model_sanity(name, model):
+                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' failed sanity check - discarding")
+                                incompatible_models.append(name)
+                                model.is_fitted = False
+                                continue
+
                             models_loaded += 1
                             logger.info(f"✅ [ML_LOAD] Loaded model '{name}': {model.samples_seen} samples seen")
+
                         except Exception as e:
                             logger.warning(f"⚠️ [ML_LOAD] Failed to load model '{name}': {e}")
+                            incompatible_models.append(name)
+
+                # 🗑️ Удаляем несовместимые модели
+                if incompatible_models:
+                    logger.warning(f"🗑️ [ML_CLEANUP] Deleting {len(incompatible_models)} incompatible models: {incompatible_models}")
+                    for name in incompatible_models:
+                        try:
+                            (self.data_dir / f"{name}_model.pkl").unlink(missing_ok=True)
+                            (self.data_dir / f"{name}_scaler.pkl").unlink(missing_ok=True)
+                            (self.data_dir / f"{name}_metadata.json").unlink(missing_ok=True)
+                        except Exception as e:
+                            logger.debug(f"Failed to delete old model files for '{name}': {e}")
 
                 if models_loaded > 0:
                     logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded}/{len(self.models)} ML models")
@@ -677,7 +763,8 @@ class AdvancedMLLearningSystem:
                         metadata = {
                             'samples_seen': model.samples_seen,
                             'is_fitted': model.is_fitted,
-                            'saved_at': datetime.now(timezone.utc).isoformat()
+                            'saved_at': datetime.now(timezone.utc).isoformat(),
+                            'model_version': MODEL_VERSION  # 🔢 Версия модели для совместимости
                         }
                         with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
                             json.dump(metadata, f, indent=2)
