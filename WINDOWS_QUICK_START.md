@@ -1,5 +1,15 @@
 # 🚀 Быстрый старт для Windows
 
+## ✨ ОБНОВЛЕНИЕ: Автоматическая очистка моделей!
+
+**Хорошие новости!** Теперь бот **автоматически** удаляет старые несовместимые модели при запуске.
+
+Просто сделайте `git pull` и запустите бота - он сам обнаружит и удалит старые модели!
+
+Подробности: см. `AUTO_MODEL_CLEANUP.md`
+
+---
+
 ## 1️⃣ Скачать все исправления
 
 ```powershell
@@ -9,13 +19,14 @@ git branch
 # Если НЕ на ветке claude/fix-lstm-tensorflow-dependency-011HYLKrz2PEqxC6NQowAgKV:
 git checkout claude/fix-lstm-tensorflow-dependency-011HYLKrz2PEqxC6NQowAgKV
 
-# Скачать все изменения
+# Скачать все изменения (включая автоматическую валидацию моделей!)
 git pull origin claude/fix-lstm-tensorflow-dependency-011HYLKrz2PEqxC6NQowAgKV
 
 # Проверить что файлы появились
 dir test_ml_persistence.py
 dir check_ml_status.py
 dir INSTALL_WINDOWS.md
+dir AUTO_MODEL_CLEANUP.md
 ```
 
 ---
