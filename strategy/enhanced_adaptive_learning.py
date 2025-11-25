@@ -266,7 +266,16 @@ class EnhancedAdaptiveLearningSystem:
                 # Периодически оцениваем и обновляем метрики
                 if len(self.prediction_history) % 10 == 0:
                     await self._update_enhanced_metrics()
-                    
+
+                # 💾 Периодически сохраняем модели (каждые 10 сделок)
+                if total_samples > 0 and total_samples % 10 == 0:
+                    try:
+                        logger.info(f"💾 [AUTO_SAVE] Saving ML models at {total_samples} samples...")
+                        await self.save_all_data()
+                        logger.info(f"✅ [AUTO_SAVE] ML models saved successfully")
+                    except Exception as save_error:
+                        logger.warning(f"⚠️ [AUTO_SAVE] Failed to save models: {save_error}")
+
         except Exception as e:
             logger.error(f"❌ [ML_EXIT_UPDATE] Error updating trade exit: {e}")
     
@@ -660,22 +669,31 @@ class EnhancedAdaptiveLearningSystem:
             elif total_samples < 200:
                 learning_progress = (total_samples - 50) / 150  # 0.0 to 1.0
                 logger.info(f"🎓 [LEARNING] Learning mode: {total_samples}/200 samples, progress: {learning_progress:.1%}")
-                
-                # Постепенно снижаем порог сигнала и добавляем ML
-                adaptive_threshold = 1.4 - (learning_progress * 0.3)  # 1.4 → 1.1
-                ml_weight = learning_progress * 0.3  # 0 → 0.3
-                
-                # Комбинированная логика
+
+                # 🔧 ИСПРАВЛЕНИЕ: ML только наблюдает до 100 samples
+                if total_samples < 100:
+                    logger.info(f"📚 [LEARNING_MODE] ML наблюдает: {total_samples}/100 - пропускаем сигнал {signal_strength:.2f}")
+                    return signal_strength >= 1.2  # Только базовый IMBA порог
+
+                # После 100 samples постепенно добавляем ML
+                ml_progress = (total_samples - 100) / 100  # 0.0 to 1.0
+                adaptive_threshold = 1.3 - (ml_progress * 0.2)  # 1.3 → 1.1
+                ml_weight = ml_progress * 0.5  # 0 → 0.5
+
+                # Комбинированная логика - ML только ПОМОГАЕТ, не блокирует
                 signal_ok = signal_strength >= adaptive_threshold
-                ml_suggests = (ml_confidence * ml_weight + 
-                             win_probability * ml_weight) > (ml_weight * 0.6)
-                
-                should_trade = signal_ok and (ml_weight == 0 or ml_suggests)
-                
+
+                # ML может только усилить решение, но не блокировать
+                if ml_confidence > 0.3 and win_probability > 0.55:
+                    ml_boost = ml_weight * 0.2  # ML дает +20% к уверенности максимум
+                    logger.info(f"🎓 [LEARNING] ML усиливает: confidence={ml_confidence:.2f}, boost={ml_boost:.2f}")
+                    return signal_ok  # Пропускаем если сигнал OK
+
+                # ML не уверена - решаем по базовому сигналу
                 logger.info(f"🎓 [LEARNING] Signal: {signal_strength:.2f}>={adaptive_threshold:.2f}? {signal_ok}, "
-                           f"ML weight: {ml_weight:.2f}, Decision: {'TRADE' if should_trade else 'SKIP'}")
-                
-                return should_trade
+                           f"ML weight: {ml_weight:.2f}, Decision: {'TRADE' if signal_ok else 'SKIP'}")
+
+                return signal_ok
             
             # 🎯 FULL ML PHASE - После 200 сделок (полный ML)
             else:

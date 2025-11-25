@@ -34,6 +34,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 🔢 MODEL VERSION - увеличивайте при изменении логики обучения!
+# v1: Initial implementation
+# v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
+MODEL_VERSION = 2
+
 @dataclass
 class MarketContext:
     """Контекст рынка во время сделки"""
@@ -193,12 +198,17 @@ class AdvancedMLLearningSystem:
         logger.info("🧠 [ADVANCED_ML] System initialized")
         self._load_historical_data()
     
-    def extract_features(self, market_context: MarketContext, 
-                        signal_strength: float, 
+    def extract_features(self, market_context: MarketContext,
+                        signal_strength: float,
                         recent_performance: Dict) -> MLFeatures:
         """Извлечение признаков для ML модели"""
-        
+
         try:
+            # 🛡️ Защита: проверяем что market_context правильного типа
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [FEATURE_EXTRACTION] Invalid market_context type: {type(market_context)}. Returning zero features.")
+                return MLFeatures(**{field: 0.0 for field in MLFeatures.__annotations__})
+
             # Технические признаки
             rsi_momentum = (market_context.rsi_14 - 50) / 50  # Нормализованный RSI
             macd_divergence = market_context.macd - market_context.macd_signal
@@ -253,12 +263,23 @@ class AdvancedMLLearningSystem:
             # Возвращаем нулевые признаки в случае ошибки
             return MLFeatures(**{field: 0.0 for field in MLFeatures.__annotations__})
     
-    async def predict_trade_outcome(self, market_context: MarketContext, 
+    async def predict_trade_outcome(self, market_context: MarketContext,
                                   signal_strength: float,
                                   recent_performance: Dict) -> Dict[str, float]:
         """Предсказывает результат сделки перед входом"""
-        
+
         try:
+            # 🛡️ Защита: проверяем валидность market_context
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [PREDICT_TRADE] Invalid market context - returning neutral predictions")
+                return {
+                    'expected_pnl_pct': 0.0,
+                    'win_probability': 0.5,
+                    'expected_hold_time_minutes': 30.0,
+                    'risk_score': 0.5,
+                    'confidence': 0.0
+                }
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
@@ -308,18 +329,33 @@ class AdvancedMLLearningSystem:
                              signal_strength: float,
                              recent_performance: Dict):
         """Обучение на завершенной сделке"""
-        
+
         try:
+            # 🛡️ Защита: проверяем валидность market_context
+            if market_context is None or isinstance(market_context, dict):
+                logger.warning(f"⚠️ [LEARN_FROM_TRADE] Invalid market context - skipping learning")
+                return
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
             
-            # Целевые переменные для обучения
+            # 🔧 ИСПРАВЛЕНИЕ: Целевые переменные В ПРОЦЕНТАХ (не абсолютные значения!)
+            # Clip extreme values to prevent model from learning outliers
+            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим ±20%
+
+            # Нормализуем hold_time в часах (0-24 часа)
+            hold_time_hours = np.clip(trade_outcome.hold_time_minutes / 60, 0, 24)
+
+            # MAE в процентах от entry price (не абсолютное значение!)
+            # Используем pnl_pct как прокси для риска
+            risk_pct = abs(pnl_pct) if trade_outcome.pnl < 0 else 0
+
             targets = {
-                'pnl_predictor': trade_outcome.pnl_pct,
+                'pnl_predictor': pnl_pct,
                 'win_probability': 1.0 if trade_outcome.pnl > 0 else 0.0,
-                'hold_time_predictor': trade_outcome.hold_time_minutes,
-                'risk_estimator': trade_outcome.max_adverse_excursion
+                'hold_time_predictor': hold_time_hours,
+                'risk_estimator': np.clip(risk_pct, 0, 10)  # Максимум 10% риск
             }
             
             # Обучаем все модели
@@ -344,11 +380,16 @@ class AdvancedMLLearningSystem:
     async def get_intelligent_recommendations(self, current_market: MarketContext,
                                             recent_performance: Dict) -> Dict[str, Any]:
         """Получить рекомендации от AI системы"""
-        
+
         try:
+            # 🛡️ Защита: проверяем наличие обученных моделей и валидность контекста
             if not self.models['pnl_predictor'].is_fitted:
                 return {'confidence': 0.0, 'recommendations': []}
-            
+
+            if current_market is None or isinstance(current_market, dict):
+                logger.warning(f"⚠️ [ML_RECOMMENDATIONS] Invalid market context type: {type(current_market)}")
+                return {'confidence': 0.0, 'recommendations': []}
+
             # Анализируем текущие рыночные условия
             features = self.extract_features(current_market, 1.0, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
@@ -474,22 +515,219 @@ class AdvancedMLLearningSystem:
         except Exception as e:
             logger.error(f"❌ [ML_EVALUATION] Error: {e}")
     
+    def _validate_model_sanity(self, model_name: str, model: 'OnlineLearningModel') -> bool:
+        """
+        🛡️ Проверяет что модель дает вменяемые предсказания
+        Отклоняет модели которые предсказывают абсурдные значения
+        """
+        try:
+            if not model.is_fitted:
+                return True  # Новая модель - ок
+
+            # Создаем тестовый вектор с нормальными значениями
+            test_features = np.array([[0.5] * 12])  # 12 features, все средние значения
+
+            prediction = model.predict(test_features)[0]
+
+            # Проверяем диапазоны в зависимости от типа модели
+            if model_name == 'pnl_predictor':
+                # PnL должен быть в пределах ±50% (даже ±20% слишком много для одного trade)
+                if abs(prediction) > 50:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected ±50%)")
+                    return False
+
+            elif model_name == 'win_probability':
+                # Вероятность должна быть 0-1
+                if prediction < 0 or prediction > 1.5:  # Небольшой запас на случай экстраполяции
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd probability: {prediction:.4f} (expected 0-1)")
+                    return False
+
+            elif model_name == 'hold_time_predictor':
+                # Время удержания в часах, должно быть разумным (0-48 часов)
+                if prediction < 0 or prediction > 48:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd hold time: {prediction:.2f}h (expected 0-48h)")
+                    return False
+
+            elif model_name == 'risk_estimator':
+                # Риск должен быть 0-20%
+                if prediction < 0 or prediction > 20:
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd risk: {prediction:.2f}% (expected 0-20%)")
+                    return False
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"⚠️ [VALIDATION] Error validating model '{model_name}': {e}")
+            return False
+
+    def _warm_start_training(self, historical_contexts: list, historical_outcomes: list):
+        """🔥 WARM START: Переобучает модели на исторических сделках"""
+        try:
+            if not ML_AVAILABLE:
+                return
+
+            # Фильтруем только завершенные сделки с ненулевым PnL
+            valid_pairs = []
+            for ctx, outcome in zip(historical_contexts, historical_outcomes):
+                # Пропускаем сделки с 0% PnL (незавершенные)
+                if abs(outcome.pnl_pct) > 0.01:  # Минимум 0.01% движения
+                    valid_pairs.append((ctx, outcome))
+
+            if len(valid_pairs) < 5:
+                logger.info(f"⚠️ [WARM_START] Not enough valid historical trades ({len(valid_pairs)}) - skipping warm start")
+                return
+
+            logger.info(f"🔥 [WARM_START] Pretraining on {len(valid_pairs)} historical trades...")
+
+            # Переобучаем модели на исторических данных
+            for ctx, outcome in valid_pairs:
+                try:
+                    # Создаем признаки
+                    features = self.extract_features(ctx, 1.0, {})
+                    feature_array = np.array([list(asdict(features).values())])
+
+                    # Clip target values (как в learn_from_trade)
+                    pnl_pct = np.clip(outcome.pnl_pct, -20, 20)
+                    hold_time_hours = np.clip(outcome.hold_time_minutes / 60, 0, 24)
+                    risk_pct = abs(pnl_pct) if outcome.pnl < 0 else 0
+
+                    targets = {
+                        'pnl_predictor': pnl_pct,
+                        'win_probability': 1.0 if outcome.pnl > 0 else 0.0,
+                        'hold_time_predictor': hold_time_hours,
+                        'risk_estimator': np.clip(risk_pct, 0, 10)
+                    }
+
+                    # Обучаем модели
+                    for name, target in targets.items():
+                        if name in self.models:
+                            self.models[name].partial_fit(feature_array, np.array([target]))
+
+                except Exception as e:
+                    logger.debug(f"⚠️ [WARM_START] Failed to train on one trade: {e}")
+
+            # Логируем результат
+            total_samples = sum(model.samples_seen for model in self.models.values())
+            logger.info(f"✅ [WARM_START] Pretrained on {len(valid_pairs)} historical trades")
+            logger.info(f"🧠 [WARM_START] Total samples across all models: {total_samples}")
+
+            # Сохраняем обновленные модели
+            self.save_data()
+
+        except Exception as e:
+            logger.error(f"❌ [WARM_START] Error during warm start training: {e}")
+
     def _load_historical_data(self):
         """Загружает исторические данные"""
         try:
             # Загружаем сохраненные данные если есть
             contexts_file = self.data_dir / "market_contexts.json"
             outcomes_file = self.data_dir / "trade_outcomes.json"
-            
+
+            historical_contexts = []
+            historical_outcomes = []
+
             if contexts_file.exists() and outcomes_file.exists():
                 with open(contexts_file, 'r') as f:
                     contexts_data = json.load(f)
-                
+
                 with open(outcomes_file, 'r') as f:
                     outcomes_data = json.load(f)
-                
-                logger.info(f"🧠 [ML_LOAD] Loaded {len(contexts_data)} historical contexts")
-                
+
+                # Восстанавливаем объекты из JSON
+                for ctx_dict in contexts_data:
+                    try:
+                        # Преобразуем ISO строки обратно в datetime
+                        if 'timestamp' in ctx_dict and isinstance(ctx_dict['timestamp'], str):
+                            ctx_dict['timestamp'] = datetime.fromisoformat(ctx_dict['timestamp'].replace('Z', '+00:00'))
+                        historical_contexts.append(MarketContext(**ctx_dict))
+                    except Exception as e:
+                        logger.debug(f"⚠️ Failed to restore context: {e}")
+
+                for outcome_dict in outcomes_data:
+                    try:
+                        historical_outcomes.append(TradeOutcome(**outcome_dict))
+                    except Exception as e:
+                        logger.debug(f"⚠️ Failed to restore outcome: {e}")
+
+                logger.info(f"🧠 [ML_LOAD] Loaded {len(historical_contexts)} historical contexts, {len(historical_outcomes)} outcomes")
+
+            # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
+            if ML_AVAILABLE:
+                models_loaded = 0
+                incompatible_models = []
+
+                for name, model in self.models.items():
+                    model_file = self.data_dir / f"{name}_model.pkl"
+                    scaler_file = self.data_dir / f"{name}_scaler.pkl"
+                    metadata_file = self.data_dir / f"{name}_metadata.json"
+
+                    if model_file.exists() and scaler_file.exists():
+                        try:
+                            # 🔢 Проверяем версию модели
+                            model_version = None
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    model_version = metadata.get('model_version', 1)  # default v1 для старых моделей
+
+                            # 🛡️ ЗАЩИТА: Проверяем совместимость версии
+                            if model_version != MODEL_VERSION:
+                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' version mismatch: saved v{model_version}, current v{MODEL_VERSION}")
+                                incompatible_models.append(name)
+                                continue
+
+                            # Загружаем модель
+                            model.model = joblib.load(model_file)
+                            model.scaler = joblib.load(scaler_file)
+                            model.is_fitted = True
+
+                            # Восстанавливаем samples_seen из метаданных
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    model.samples_seen = metadata.get('samples_seen', 0)
+
+                            # 🛡️ ВАЛИДАЦИЯ: Проверяем что модель дает вменяемые предсказания
+                            if not self._validate_model_sanity(name, model):
+                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' failed sanity check - discarding")
+                                incompatible_models.append(name)
+                                model.is_fitted = False
+                                continue
+
+                            models_loaded += 1
+                            logger.info(f"✅ [ML_LOAD] Loaded model '{name}': {model.samples_seen} samples seen")
+
+                        except Exception as e:
+                            logger.warning(f"⚠️ [ML_LOAD] Failed to load model '{name}': {e}")
+                            incompatible_models.append(name)
+
+                # 🗑️ Удаляем несовместимые модели
+                if incompatible_models:
+                    logger.warning(f"🗑️ [ML_CLEANUP] Deleting {len(incompatible_models)} incompatible models: {incompatible_models}")
+                    for name in incompatible_models:
+                        try:
+                            (self.data_dir / f"{name}_model.pkl").unlink(missing_ok=True)
+                            (self.data_dir / f"{name}_scaler.pkl").unlink(missing_ok=True)
+                            (self.data_dir / f"{name}_metadata.json").unlink(missing_ok=True)
+                        except Exception as e:
+                            logger.debug(f"Failed to delete old model files for '{name}': {e}")
+
+                if models_loaded > 0:
+                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded}/{len(self.models)} ML models")
+                else:
+                    logger.info(f"📚 [ML_LOAD] No saved models found - starting from scratch")
+
+            # Восстанавливаем данные в память
+            if len(historical_contexts) > 0:
+                self.market_contexts.extend(historical_contexts)
+            if len(historical_outcomes) > 0:
+                self.trade_outcomes.extend(historical_outcomes)
+
+            # 🔥 WARM START: Переобучаем модели на исторических данных
+            if len(historical_contexts) > 0 and len(historical_outcomes) > 0:
+                self._warm_start_training(historical_contexts, historical_outcomes)
+
         except Exception as e:
             logger.error(f"❌ [ML_LOAD] Error loading historical data: {e}")
     
@@ -500,27 +738,43 @@ class AdvancedMLLearningSystem:
             contexts_data = []
             for context in self.market_contexts:
                 contexts_data.append(asdict(context))
-            
+
             with open(self.data_dir / "market_contexts.json", 'w') as f:
                 json.dump(contexts_data, f, indent=2, default=str)
-            
+
             # Сохраняем результаты сделок
             outcomes_data = []
             for outcome in self.trade_outcomes:
                 outcomes_data.append(asdict(outcome))
-            
+
             with open(self.data_dir / "trade_outcomes.json", 'w') as f:
                 json.dump(outcomes_data, f, indent=2, default=str)
-            
-            # Сохраняем модели
+
+            # Сохраняем модели и их метаданные
             if ML_AVAILABLE:
+                models_saved = 0
                 for name, model in self.models.items():
                     if model.is_fitted:
+                        # Сохраняем модель и скейлер
                         joblib.dump(model.model, self.data_dir / f"{name}_model.pkl")
                         joblib.dump(model.scaler, self.data_dir / f"{name}_scaler.pkl")
-            
+
+                        # Сохраняем метаданные (samples_seen и т.д.)
+                        metadata = {
+                            'samples_seen': model.samples_seen,
+                            'is_fitted': model.is_fitted,
+                            'saved_at': datetime.now(timezone.utc).isoformat(),
+                            'model_version': MODEL_VERSION  # 🔢 Версия модели для совместимости
+                        }
+                        with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
+                            json.dump(metadata, f, indent=2)
+
+                        models_saved += 1
+
+                logger.info(f"💾 [ML_SAVE] Saved {models_saved} ML models with metadata")
+
             logger.info(f"💾 [ML_SAVE] Saved ML data: {len(self.market_contexts)} contexts, "
                        f"{len(self.trade_outcomes)} outcomes")
-            
+
         except Exception as e:
             logger.error(f"❌ [ML_SAVE] Error: {e}")

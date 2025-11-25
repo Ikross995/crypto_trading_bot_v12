@@ -215,7 +215,7 @@ class EnhancedDashboardGenerator:
 
         # Используем Portfolio Tracker если доступен (приоритет!)
         if trading_engine and hasattr(trading_engine, 'portfolio_tracker') and trading_engine.portfolio_tracker:
-            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data)
+            data = await self._get_portfolio_tracker_data(trading_engine.portfolio_tracker, data, trading_engine)
 
         # Данные системы обучения
         if adaptive_learning:
@@ -236,7 +236,25 @@ class EnhancedDashboardGenerator:
         try:
             # Основные параметры
             data.iteration = getattr(engine, 'iteration', 0)
-            
+
+            # Uptime calculation
+            start_time = getattr(engine, '_start_time', None)
+            if start_time:
+                from datetime import datetime, timezone
+                uptime_delta = datetime.now(timezone.utc) - start_time
+                data.uptime_hours = uptime_delta.total_seconds() / 3600.0
+
+            # Signals generated
+            data.signals_generated = getattr(engine, 'signals_generated', 0)
+
+            # Execution rate (trades executed / signals generated)
+            if hasattr(engine, 'trade_history') and engine.trade_history:
+                trades_count = len(engine.trade_history)
+                if data.signals_generated > 0:
+                    data.execution_rate = trades_count / data.signals_generated
+                else:
+                    data.execution_rate = 0.0
+
             # Позиции
             active_positions = getattr(engine, 'active_positions', {})
             data.open_positions = len(active_positions)
@@ -296,10 +314,68 @@ class EnhancedDashboardGenerator:
                         
                 except Exception as e:
                     logger.debug(f"[DASHBOARD] Failed to get market data: {e}")
-            
+
+            # Win/Loss Streaks and Best/Worst Trades from trade_history
+            if hasattr(engine, 'trade_history') and engine.trade_history:
+                trades = list(engine.trade_history)
+                if trades:
+                    # Calculate best/worst trades
+                    trade_pnls = []
+                    for trade in trades:
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+                        if pnl != 0:  # Skip zero PnL trades
+                            trade_pnls.append(pnl)
+
+                    if trade_pnls:
+                        data.best_trade = max(trade_pnls)
+                        data.worst_trade = min(trade_pnls)
+                        data.avg_trade = sum(trade_pnls) / len(trade_pnls)
+
+                    # Calculate current streak (go backwards from most recent)
+                    data.win_streak = 0
+                    data.loss_streak = 0
+
+                    # Determine streak type from most recent trade
+                    streak_type = None  # 'win' or 'loss'
+                    for trade in reversed(trades):
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+
+                        if pnl > 0:
+                            if streak_type is None:
+                                streak_type = 'win'
+                            if streak_type == 'win':
+                                data.win_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        elif pnl < 0:
+                            if streak_type is None:
+                                streak_type = 'loss'
+                            if streak_type == 'loss':
+                                data.loss_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        else:
+                            # Skip trades with 0 PnL
+                            continue
+
+                    # Calculate max streaks (go forward through all history)
+                    win_streak = 0
+                    loss_streak = 0
+                    for trade in trades:
+                        pnl = trade.get('pnl', 0.0) if isinstance(trade, dict) else getattr(trade, 'pnl', 0.0)
+                        if pnl > 0:
+                            win_streak += 1
+                            loss_streak = 0
+                            data.max_win_streak = max(data.max_win_streak, win_streak)
+                        elif pnl < 0:
+                            loss_streak += 1
+                            win_streak = 0
+                            data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+                        # Skip trades with 0 PnL
+
         except Exception as e:
             logger.debug(f"[DASHBOARD] Error getting trading engine data: {e}")
-        
+
         return data
     
     async def _get_learning_data(self, adaptive_learning, data: DashboardData) -> DashboardData:
@@ -361,7 +437,7 @@ class EnhancedDashboardGenerator:
 
         return data
 
-    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData) -> DashboardData:
+    async def _get_portfolio_tracker_data(self, portfolio_tracker, data: DashboardData, trading_engine=None) -> DashboardData:
         """Получает данные от Portfolio Tracker (приоритет над другими источниками!)."""
         try:
             # Получаем полную статистику портфеля
@@ -444,34 +520,60 @@ class EnhancedDashboardGenerator:
             if data.account_balance > 0:
                 data.roi_pct = ((data.account_balance - data.initial_balance) / data.initial_balance) * 100
 
-            # Win/Loss Streaks
-            if hasattr(portfolio_tracker, 'trade_history') and portfolio_tracker.trade_history:
-                trades = list(portfolio_tracker.trade_history)
-                if trades:
-                    # Calculate current streak
-                    current_streak = 0
-                    for trade in reversed(trades):
-                        pnl = getattr(trade, 'pnl', 0.0)
-                        if pnl > 0:
-                            if data.win_streak >= 0:
-                                data.win_streak += 1
-                                data.loss_streak = 0
-                            else:
-                                break
-                        elif pnl < 0:
-                            if data.loss_streak >= 0:
-                                data.loss_streak += 1
-                                data.win_streak = 0
-                            else:
-                                break
-                        else:
-                            break
+            # Win/Loss Streaks and Best/Worst Trades - use trading_engine.trade_history if available
+            trade_history = None
+            if trading_engine and hasattr(trading_engine, 'trade_history'):
+                trade_history = trading_engine.trade_history
+            elif hasattr(portfolio_tracker, 'trade_history'):
+                trade_history = portfolio_tracker.trade_history
 
-                    # Calculate max streaks
+            if trade_history:
+                trades = list(trade_history)
+                if trades:
+                    # Calculate best/worst trades
+                    trade_pnls = []
+                    for trade in trades:
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
+                        if pnl != 0:  # Skip zero PnL trades
+                            trade_pnls.append(pnl)
+
+                    if trade_pnls:
+                        data.best_trade = max(trade_pnls)
+                        data.worst_trade = min(trade_pnls)
+                        data.avg_trade = sum(trade_pnls) / len(trade_pnls)
+
+                    # Calculate current streak (go backwards from most recent)
+                    data.win_streak = 0
+                    data.loss_streak = 0
+
+                    # Determine streak type from most recent trade
+                    streak_type = None  # 'win' or 'loss'
+                    for trade in reversed(trades):
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
+
+                        if pnl > 0:
+                            if streak_type is None:
+                                streak_type = 'win'
+                            if streak_type == 'win':
+                                data.win_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        elif pnl < 0:
+                            if streak_type is None:
+                                streak_type = 'loss'
+                            if streak_type == 'loss':
+                                data.loss_streak += 1
+                            else:
+                                break  # Different type, stop counting
+                        else:
+                            # Skip trades with 0 PnL
+                            continue
+
+                    # Calculate max streaks (go forward through all history)
                     win_streak = 0
                     loss_streak = 0
                     for trade in trades:
-                        pnl = getattr(trade, 'pnl', 0.0)
+                        pnl = getattr(trade, 'pnl', 0.0) if hasattr(trade, 'pnl') else trade.get('pnl', 0.0)
                         if pnl > 0:
                             win_streak += 1
                             loss_streak = 0
@@ -480,6 +582,7 @@ class EnhancedDashboardGenerator:
                             loss_streak += 1
                             win_streak = 0
                             data.max_loss_streak = max(data.max_loss_streak, loss_streak)
+                        # Skip trades with 0 PnL
 
             # Hourly PnL (based on uptime)
             if data.uptime_hours > 0:
@@ -586,35 +689,47 @@ class EnhancedDashboardGenerator:
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
-            color: #ffffff; 
+            color: #ffffff;
             min-height: 100vh;
+            padding: 0;
         }}
-        
-        .container {{ max-width: 1600px; margin: 0 auto; padding: 20px; }}
-        
-        .header {{ 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            padding: 30px; 
-            border-radius: 15px; 
-            margin-bottom: 30px; 
+
+        .container {{
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 20px;
             box-shadow: 0 15px 35px rgba(102, 126, 234, 0.3);
             text-align: center;
         }}
-        
+
         .header h1 {{ font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
         .header p {{ font-size: 1.2em; opacity: 0.9; }}
-        
-        .status-bar {{ 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            background: rgba(255,255,255,0.1); 
-            padding: 15px 30px; 
-            border-radius: 10px; 
-            margin-bottom: 30px;
+
+        /* Все элементы выровнены по header */
+        .status-bar, .main-grid, .chart-grid, .performance-grid, .chart-container, .table-container, .footer {{
+            margin-left: 0;
+            margin-right: 0;
+        }}
+
+        .status-bar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.1);
+            padding: 15px 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
         
@@ -625,22 +740,23 @@ class EnhancedDashboardGenerator:
         .main-grid {{ 
             display: grid; 
             grid-template-columns: 1fr 1fr 1fr; 
-            gap: 25px; 
-            margin-bottom: 30px; 
+            gap: 20px; 
+            margin-bottom: 20px; 
         }}
         
         .performance-grid {{ 
             display: grid; 
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
             gap: 20px; 
-            margin-bottom: 30px; 
+            margin-bottom: 20px; 
         }}
         
         .card {{ 
             background: rgba(255,255,255,0.05); 
             border: 1px solid rgba(255,255,255,0.1);
-            padding: 25px; 
-            border-radius: 15px; 
+            padding: 25px;
+            border-radius: 15px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }}
@@ -682,17 +798,18 @@ class EnhancedDashboardGenerator:
         .chart-container {{ 
             background: rgba(255,255,255,0.05); 
             border: 1px solid rgba(255,255,255,0.1);
-            padding: 25px; 
-            border-radius: 15px; 
-            margin-bottom: 30px;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
         }}
         
         .chart-grid {{ 
             display: grid; 
             grid-template-columns: 1fr 1fr; 
-            gap: 25px; 
-            margin-bottom: 30px; 
+            gap: 20px; 
+            margin-bottom: 20px; 
         }}
         
         .progress-ring {{ 
@@ -763,7 +880,7 @@ class EnhancedDashboardGenerator:
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 15px;
             padding: 25px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             overflow-x: auto;
         }}
 
@@ -822,6 +939,43 @@ class EnhancedDashboardGenerator:
             background: rgba(255,71,87,0.2);
             color: #ff4757;
             border: 1px solid #ff4757;
+        }}
+
+        /* ==================== Mobile Responsive Styles ==================== */
+        @media (max-width: 768px) {{
+            .container {{ padding: 10px; }}
+            .header {{ padding: 15px; margin-bottom: 15px; }}
+            .header h1 {{ font-size: 1.5em; }}
+            .header p {{ font-size: 0.9em; }}
+            .status-bar {{ flex-wrap: wrap; padding: 10px 15px; gap: 10px; }}
+            .status-item {{ flex: 1 1 45%; min-width: 100px; }}
+            .status-value {{ font-size: 1.2em; }}
+            .status-label {{ font-size: 0.75em; }}
+            .main-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .chart-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .performance-grid {{ grid-template-columns: 1fr; gap: 15px; }}
+            .card {{ padding: 15px; }}
+            .card h3 {{ font-size: 1.1em; }}
+            .metric {{ padding: 8px 10px; margin-bottom: 10px; }}
+            .metric-label {{ font-size: 0.85em; }}
+            .metric-value {{ font-size: 1em; }}
+            .chart-container {{ padding: 15px; margin-bottom: 15px; }}
+            .card:hover {{ transform: none; }}
+            .table-container {{ padding: 15px; }}
+            .data-table {{ font-size: 0.8em; }}
+        }}
+
+        @media (max-width: 480px) {{
+            .container {{ padding: 5px; }}
+            .header {{ padding: 12px; }}
+            .header h1 {{ font-size: 1.2em; }}
+            .header p {{ font-size: 0.75em; }}
+            .status-bar {{ flex-direction: column; padding: 10px; }}
+            .status-item {{ flex: 1 1 100%; padding: 5px 0; }}
+            .card {{ padding: 12px; }}
+            .card h3 {{ font-size: 1em; }}
+            .table-container {{ padding: 10px; overflow-x: scroll; }}
+            .data-table {{ font-size: 0.7em; }}
         }}
     </style>
 </head>

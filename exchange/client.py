@@ -411,6 +411,26 @@ class BinanceClient:
     def get_balance(self) -> float:
         return self.get_account_balance()
 
+    def get_account(self) -> Dict[str, Any]:
+        """Get full account information (balances, positions, margins, etc.)."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_account)
+            except Exception:
+                pass
+        try:
+            return self._rest("GET", "/fapi/v2/account", {})
+        except Exception as e:
+            logger.warning(f"Failed to fetch account info: {e}")
+            return {
+                "assets": [],
+                "positions": [],
+                "totalWalletBalance": "0.0",
+                "totalUnrealizedProfit": "0.0",
+                "totalMarginBalance": "0.0",
+                "availableBalance": "0.0"
+            }
+
     def get_positions(self) -> List[Dict[str, Any]]:
         if self.client:
             try:
@@ -661,6 +681,26 @@ class MockBinanceClient(BinanceClient):
 
     def get_balance(self) -> Decimal:
         return self._paper_balance
+
+    def get_account(self) -> Dict[str, Any]:
+        """Return mock account info for dry-run mode."""
+        balance = float(self._paper_balance)
+        return {
+            "assets": [
+                {
+                    "asset": "USDT",
+                    "walletBalance": str(balance),
+                    "unrealizedProfit": "0.0",
+                    "marginBalance": str(balance),
+                    "availableBalance": str(balance)
+                }
+            ],
+            "positions": [],
+            "totalWalletBalance": str(balance),
+            "totalUnrealizedProfit": "0.0",
+            "totalMarginBalance": str(balance),
+            "availableBalance": str(balance)
+        }
 
 
 # Some code expects this alias

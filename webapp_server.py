@@ -36,18 +36,39 @@ def add_ngrok_headers():
 
 @app.after_request
 def after_request(response):
-    """Добавляет необходимые заголовки в ответ."""
-    # Добавляем заголовок для обхода ngrok warning
+    """Добавляет необходимые заголовки безопасности и производительности."""
+    # Ngrok bypass
     response.headers['ngrok-skip-browser-warning'] = 'true'
-    # Добавляем кастомный User-Agent если нужно
+
+    # CORS
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,ngrok-skip-browser-warning'
+
+    # Security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+
+    # Content-Type with charset
+    if 'Content-Type' in response.headers and 'text/html' in response.headers['Content-Type']:
+        if 'charset' not in response.headers['Content-Type']:
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+
+    # Cache control for static resources
+    if request.path.endswith(('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2')):
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    elif request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    else:
+        response.headers['Cache-Control'] = 'no-cache'
+
     return response
 
 # Global state - будет обновляться из торгового бота
 dashboard_data = {
     'balance': 0.0,
     'equity': 0.0,
+    'initialEquity': 0.0,
     'totalPnl': 0.0,
     'roiPct': 0.0,
     'openPositions': 0,
@@ -120,14 +141,23 @@ def emit_price_update(price_data):
 
 @app.route('/')
 def index():
-    """Главная страница - Enhanced дашборд с WebSocket."""
+    """Главная страница - Новый интерактивный дашборд с Chart.js."""
+    try:
+        # Используем новый интерактивный dashboard с Chart.js и WebSocket
+        return send_from_directory('telegram_webapp', 'dashboard.html')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/simple')
+def simple_dashboard():
+    """Старый автогенерируемый дашборд."""
     try:
         enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
         if enhanced_path.exists():
             return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
         else:
-            # Fallback to simple dashboard if enhanced not found
-            return send_from_directory('telegram_webapp', 'dashboard.html')
+            return jsonify({'error': 'Old dashboard not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
