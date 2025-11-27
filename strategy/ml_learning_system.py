@@ -709,46 +709,72 @@ class AdvancedMLLearningSystem:
             return {}
     
     async def _evaluate_model_performance(self):
-        """Оценка производительности моделей"""
+        """Оценка производительности моделей (для каждого символа отдельно)"""
         try:
             if len(self.trade_outcomes) < 30:
                 return
-            
+
             # Берем последние N сделок для оценки
             recent_outcomes = list(self.trade_outcomes)[-50:]
             recent_features = list(self.feature_history)[-50:]
-            
+
             if len(recent_features) != len(recent_outcomes):
                 return
-            
-            # Создаем массивы для оценки
-            X = np.array([list(asdict(f).values()) for f in recent_features])
-            
-            # Оцениваем каждую модель
-            for name, model in self.models.items():
-                if not model.is_fitted:
+
+            # Группируем сделки по символам
+            from collections import defaultdict
+            outcomes_by_symbol = defaultdict(list)
+            features_by_symbol = defaultdict(list)
+
+            for outcome, feature in zip(recent_outcomes, recent_features):
+                # Получаем символ из trade_id (format: "symbol_timestamp_...")
+                if '_' in outcome.trade_id:
+                    symbol = outcome.trade_id.split('_')[0]
+                    outcomes_by_symbol[symbol].append(outcome)
+                    features_by_symbol[symbol].append(feature)
+
+            # Оцениваем модели для каждого символа
+            for symbol in outcomes_by_symbol.keys():
+                if symbol not in self.models_by_symbol:
                     continue
-                
-                if name == 'pnl_predictor':
-                    y_true = [outcome.pnl_pct for outcome in recent_outcomes]
-                elif name == 'win_probability':
-                    y_true = [1.0 if outcome.pnl > 0 else 0.0 for outcome in recent_outcomes]
-                elif name == 'hold_time_predictor':
-                    y_true = [outcome.hold_time_minutes for outcome in recent_outcomes]
-                else:
+
+                symbol_outcomes = outcomes_by_symbol[symbol]
+                symbol_features = features_by_symbol[symbol]
+
+                if len(symbol_features) < 10:  # Минимум 10 сделок для оценки
                     continue
-                
-                y_pred = model.predict(X)
-                mse = mean_squared_error(y_true, y_pred)
-                
-                self.model_performance[name].append({
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'mse': float(mse),
-                    'samples': len(y_true)
-                })
-                
-                logger.info(f"📊 [ML_PERFORMANCE] {name}: MSE = {mse:.4f}")
-            
+
+                # Создаем массивы для оценки
+                X = np.array([list(asdict(f).values()) for f in symbol_features])
+
+                models = self.models_by_symbol[symbol]
+
+                # Оцениваем каждую модель
+                for name, model in models.items():
+                    if not model.is_fitted:
+                        continue
+
+                    if name == 'pnl_predictor':
+                        y_true = [outcome.pnl_pct for outcome in symbol_outcomes]
+                    elif name == 'win_probability':
+                        y_true = [1.0 if outcome.pnl > 0 else 0.0 for outcome in symbol_outcomes]
+                    elif name == 'hold_time_predictor':
+                        y_true = [outcome.hold_time_minutes for outcome in symbol_outcomes]
+                    else:
+                        continue
+
+                    y_pred = model.predict(X)
+                    mse = mean_squared_error(y_true, y_pred)
+
+                    perf_key = f"{symbol}_{name}"
+                    self.model_performance[perf_key].append({
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'mse': float(mse),
+                        'samples': len(y_true)
+                    })
+
+                    logger.info(f"📊 [ML_PERFORMANCE] {symbol} {name}: MSE = {mse:.4f}")
+
         except Exception as e:
             logger.error(f"❌ [ML_EVALUATION] Error: {e}")
     
