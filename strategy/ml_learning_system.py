@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 # v1: Initial implementation
 # v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
 # v3: Added trend direction classifier and trend strength predictor
-MODEL_VERSION = 3
+# v4: Separate models per trading pair (symbol-specific learning)
+MODEL_VERSION = 4
 
 @dataclass
 class MarketContext:
@@ -253,36 +254,76 @@ class AdvancedMLLearningSystem:
         self.config = config
         self.data_dir = Path("ml_learning_data")
         self.data_dir.mkdir(exist_ok=True)
-        
+
         # История данных
         self.market_contexts = deque(maxlen=10000)
         self.trade_outcomes = deque(maxlen=10000)
         self.feature_history = deque(maxlen=5000)
-        
-        # ML модели (регрессоры)
-        self.models = {
-            'pnl_predictor': OnlineLearningModel('PnL'),
-            'win_probability': OnlineLearningModel('WinProb'),
-            'hold_time_predictor': OnlineLearningModel('HoldTime'),
-            'risk_estimator': OnlineLearningModel('Risk'),
-            'trend_strength': OnlineLearningModel('TrendStrength')  # 🆕 Сила тренда (0-1)
+
+        # 🆕 v4: ML модели разделены по торговым парам (symbol)
+        # Структура: {symbol: {model_name: model_instance}}
+        self.models_by_symbol = {}  # Регрессоры для каждой пары
+        self.classifiers_by_symbol = {}  # Классификаторы для каждой пары
+
+        # Список поддерживаемых моделей (шаблон)
+        self.model_template = {
+            'pnl_predictor': 'PnL',
+            'win_probability': 'WinProb',
+            'hold_time_predictor': 'HoldTime',
+            'risk_estimator': 'Risk',
+            'trend_strength': 'TrendStrength'
         }
 
-        # 🆕 ML классификаторы
-        self.classifiers = {
-            'trend_direction': OnlineLearningClassifier('TrendDirection')  # 0=DOWN, 1=SIDEWAYS, 2=UP
+        self.classifier_template = {
+            'trend_direction': 'TrendDirection'
         }
-        
+
         # Ensemble модели (для более сложных предсказаний)
         self.ensemble_models = {}
 
-        # Статистика производительности
-        all_model_names = list(self.models.keys()) + list(self.classifiers.keys())
-        self.model_performance = {name: [] for name in all_model_names}
-        
-        logger.info("🧠 [ADVANCED_ML] System initialized")
+        # Статистика производительности (по символам)
+        self.model_performance_by_symbol = {}
+
+        logger.info("🧠 [ADVANCED_ML] System initialized with per-symbol models")
         self._load_historical_data()
-    
+
+    def _get_or_create_models(self, symbol: str) -> Tuple[Dict, Dict]:
+        """
+        Получает или создает модели для конкретного символа.
+
+        Args:
+            symbol: Торговая пара (например, 'BTCUSDT')
+
+        Returns:
+            Tuple of (models_dict, classifiers_dict) for the symbol
+        """
+        # Создаем модели для символа если их еще нет
+        if symbol not in self.models_by_symbol:
+            logger.info(f"🆕 [ML_INIT] Creating new models for {symbol}")
+
+            # Создаем регрессоры
+            self.models_by_symbol[symbol] = {}
+            for model_name, display_name in self.model_template.items():
+                self.models_by_symbol[symbol][model_name] = OnlineLearningModel(
+                    f"{display_name}_{symbol}"
+                )
+
+            # Создаем классификаторы
+            self.classifiers_by_symbol[symbol] = {}
+            for clf_name, display_name in self.classifier_template.items():
+                self.classifiers_by_symbol[symbol][clf_name] = OnlineLearningClassifier(
+                    f"{display_name}_{symbol}"
+                )
+
+            # Инициализируем статистику производительности
+            all_model_names = list(self.model_template.keys()) + list(self.classifier_template.keys())
+            self.model_performance_by_symbol[symbol] = {name: [] for name in all_model_names}
+
+            logger.info(f"✅ [ML_INIT] Created {len(self.models_by_symbol[symbol])} regressors "
+                       f"and {len(self.classifiers_by_symbol[symbol])} classifiers for {symbol}")
+
+        return self.models_by_symbol[symbol], self.classifiers_by_symbol[symbol]
+
     def extract_features(self, market_context: MarketContext,
                         signal_strength: float,
                         recent_performance: Dict) -> MLFeatures:
@@ -401,24 +442,28 @@ class AdvancedMLLearningSystem:
                     'confidence': 0.0
                 }
 
+            # 🆕 v4: Получаем модели для конкретного символа
+            symbol = market_context.symbol
+            models, classifiers = self._get_or_create_models(symbol)
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
-            
-            # Получаем предсказания от всех моделей (регрессоров)
+
+            # Получаем предсказания от всех моделей (регрессоров) КОНКРЕТНОЙ ПАРЫ
             predictions = {}
 
-            for name, model in self.models.items():
+            for name, model in models.items():
                 if model.is_fitted:
                     pred = model.predict(feature_array)[0]
                     predictions[name] = float(pred)
                 else:
                     predictions[name] = 0.0
 
-            # 🆕 Предсказания от классификаторов
+            # 🆕 Предсказания от классификаторов КОНКРЕТНОЙ ПАРЫ
             trend_predictions = {}
 
-            for name, classifier in self.classifiers.items():
+            for name, classifier in classifiers.items():
                 if classifier.is_fitted:
                     # Получаем класс и вероятности
                     pred_class = classifier.predict(feature_array)[0]
@@ -434,10 +479,10 @@ class AdvancedMLLearningSystem:
                         'probabilities': [0.33, 0.34, 0.33],
                         'confidence': 0.34
                     }
-            
-            # Метрики качества предсказания
-            all_samples = sum(model.samples_seen for model in self.models.values()) + \
-                         sum(clf.samples_seen for clf in self.classifiers.values())
+
+            # Метрики качества предсказания (для данного символа)
+            all_samples = sum(model.samples_seen for model in models.values()) + \
+                         sum(clf.samples_seen for clf in classifiers.values())
             prediction_confidence = min(1.0, max(0.1, all_samples / 1000))
 
             # 🆕 Интерпретация направления тренда
@@ -454,7 +499,7 @@ class AdvancedMLLearningSystem:
                 'expected_hold_time': max(5, predictions.get('hold_time_predictor', 30)),  # минуты
                 'risk_score': predictions.get('risk_estimator', 0.5),
                 'prediction_confidence': prediction_confidence,
-                'feature_importance': self._get_feature_importance(),
+                'feature_importance': self._get_feature_importance(symbol),
                 # 🆕 Предсказания тренда
                 'trend_direction': trend_direction_str,
                 'trend_direction_class': trend_class,
@@ -497,10 +542,14 @@ class AdvancedMLLearningSystem:
                 logger.warning(f"⚠️ [LEARN_FROM_TRADE] Invalid market context - skipping learning")
                 return
 
+            # 🆕 v4: Получаем модели для конкретного символа
+            symbol = market_context.symbol
+            models, classifiers = self._get_or_create_models(symbol)
+
             # Извлекаем признаки
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
-            
+
             # 🔧 ИСПРАВЛЕНИЕ: Целевые переменные В ПРОЦЕНТАХ (не абсолютные значения!)
             # Clip extreme values to prevent model from learning outliers
             pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим ±20%
@@ -520,12 +569,12 @@ class AdvancedMLLearningSystem:
                 'trend_strength': np.clip(abs(pnl_pct) / 10, 0, 1)  # 🆕 Сила тренда (0-1, нормализованная)
             }
 
-            # Обучаем все модели (регрессоры)
+            # Обучаем все модели (регрессоры) КОНКРЕТНОЙ ПАРЫ
             for name, target in targets.items():
-                if name in self.models:
-                    self.models[name].partial_fit(feature_array, np.array([target]))
+                if name in models:
+                    models[name].partial_fit(feature_array, np.array([target]))
 
-            # 🆕 Обучаем классификаторы
+            # 🆕 Обучаем классификаторы КОНКРЕТНОЙ ПАРЫ
             # Определяем направление тренда на основе PnL
             if pnl_pct > 1.0:  # Значительный рост
                 trend_class = 2  # UP
@@ -535,23 +584,23 @@ class AdvancedMLLearningSystem:
                 trend_class = 1  # SIDEWAYS
 
             # Обучаем классификатор тренда
-            if 'trend_direction' in self.classifiers:
-                self.classifiers['trend_direction'].partial_fit(
+            if 'trend_direction' in classifiers:
+                classifiers['trend_direction'].partial_fit(
                     feature_array,
                     np.array([trend_class])
                 )
-            
+
             # Сохраняем данные
             self.market_contexts.append(market_context)
             self.trade_outcomes.append(trade_outcome)
             self.feature_history.append(features)
-            
+
             # Периодически оцениваем качество моделей
             if len(self.trade_outcomes) % 50 == 0:
                 await self._evaluate_model_performance()
-            
-            logger.info(f"🧠 [ML_LEARNING] Learned from trade: {trade_outcome.pnl_pct:+.2f}% PnL")
-            
+
+            logger.info(f"🧠 [ML_LEARNING] Learned from {symbol} trade: {trade_outcome.pnl_pct:+.2f}% PnL")
+
         except Exception as e:
             logger.error(f"❌ [ML_LEARNING] Error: {e}")
     
@@ -560,22 +609,26 @@ class AdvancedMLLearningSystem:
         """Получить рекомендации от AI системы"""
 
         try:
-            # 🛡️ Защита: проверяем наличие обученных моделей и валидность контекста
-            if not self.models['pnl_predictor'].is_fitted:
-                return {'confidence': 0.0, 'recommendations': []}
-
             if current_market is None or isinstance(current_market, dict):
                 logger.warning(f"⚠️ [ML_RECOMMENDATIONS] Invalid market context type: {type(current_market)}")
+                return {'confidence': 0.0, 'recommendations': []}
+
+            # 🆕 v4: Получаем модели для конкретного символа
+            symbol = current_market.symbol
+            models, classifiers = self._get_or_create_models(symbol)
+
+            # 🛡️ Защита: проверяем наличие обученных моделей
+            if not models['pnl_predictor'].is_fitted:
                 return {'confidence': 0.0, 'recommendations': []}
 
             # Анализируем текущие рыночные условия
             features = self.extract_features(current_market, 1.0, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
-            
-            # Получаем предсказания
-            expected_pnl = self.models['pnl_predictor'].predict(feature_array)[0]
-            win_prob = self.models['win_probability'].predict(feature_array)[0]
-            risk_score = self.models['risk_estimator'].predict(feature_array)[0]
+
+            # Получаем предсказания от моделей КОНКРЕТНОЙ ПАРЫ
+            expected_pnl = models['pnl_predictor'].predict(feature_array)[0]
+            win_prob = models['win_probability'].predict(feature_array)[0]
+            risk_score = models['risk_estimator'].predict(feature_array)[0]
             
             # Генерируем рекомендации
             recommendations = []
@@ -628,23 +681,29 @@ class AdvancedMLLearningSystem:
             logger.error(f"❌ [ML_RECOMMENDATIONS] Error: {e}")
             return {'confidence': 0.0, 'recommendations': []}
     
-    def _get_feature_importance(self) -> Dict[str, float]:
-        """Получить важность признаков"""
+    def _get_feature_importance(self, symbol: str) -> Dict[str, float]:
+        """Получить важность признаков для конкретного символа"""
         try:
-            if not ML_AVAILABLE or not self.models['pnl_predictor'].is_fitted:
+            # Получаем модели для символа
+            if symbol not in self.models_by_symbol:
                 return {}
-            
+
+            models = self.models_by_symbol[symbol]
+
+            if not ML_AVAILABLE or not models['pnl_predictor'].is_fitted:
+                return {}
+
             # Для SGD модели используем коэффициенты как важность
-            coef = self.models['pnl_predictor'].model.coef_
+            coef = models['pnl_predictor'].model.coef_
             feature_names = list(MLFeatures.__annotations__.keys())
-            
+
             importance = {}
             for i, name in enumerate(feature_names):
                 if i < len(coef):
                     importance[name] = abs(float(coef[i]))
-            
+
             return importance
-            
+
         except Exception as e:
             logger.error(f"❌ [FEATURE_IMPORTANCE] Error: {e}")
             return {}
@@ -755,55 +814,69 @@ class AdvancedMLLearningSystem:
                 logger.info(f"⚠️ [WARM_START] Not enough valid historical trades ({len(valid_pairs)}) - skipping warm start")
                 return
 
-            logger.info(f"🔥 [WARM_START] Pretraining on {len(valid_pairs)} historical trades...")
-
-            # Переобучаем модели на исторических данных
+            # 🆕 v4: Группируем сделки по символам
+            trades_by_symbol = {}
             for ctx, outcome in valid_pairs:
-                try:
-                    # Создаем признаки
-                    features = self.extract_features(ctx, 1.0, {})
-                    feature_array = np.array([list(asdict(features).values())])
+                symbol = ctx.symbol
+                if symbol not in trades_by_symbol:
+                    trades_by_symbol[symbol] = []
+                trades_by_symbol[symbol].append((ctx, outcome))
 
-                    # Clip target values (как в learn_from_trade)
-                    pnl_pct = np.clip(outcome.pnl_pct, -20, 20)
-                    hold_time_hours = np.clip(outcome.hold_time_minutes / 60, 0, 24)
-                    risk_pct = abs(pnl_pct) if outcome.pnl < 0 else 0
+            logger.info(f"🔥 [WARM_START] Pretraining on {len(valid_pairs)} historical trades across {len(trades_by_symbol)} symbols...")
 
-                    targets = {
-                        'pnl_predictor': pnl_pct,
-                        'win_probability': 1.0 if outcome.pnl > 0 else 0.0,
-                        'hold_time_predictor': hold_time_hours,
-                        'risk_estimator': np.clip(risk_pct, 0, 10),
-                        'trend_strength': np.clip(abs(pnl_pct) / 10, 0, 1)  # 🆕 Сила тренда
-                    }
+            # Переобучаем модели для каждого символа отдельно
+            for symbol, symbol_trades in trades_by_symbol.items():
+                # Получаем или создаем модели для символа
+                models, classifiers = self._get_or_create_models(symbol)
 
-                    # Обучаем регрессоры
-                    for name, target in targets.items():
-                        if name in self.models:
-                            self.models[name].partial_fit(feature_array, np.array([target]))
+                logger.info(f"  📊 [WARM_START] Training {symbol}: {len(symbol_trades)} trades")
 
-                    # 🆕 Обучаем классификаторы
-                    # Определяем направление тренда
-                    if pnl_pct > 1.0:
-                        trend_class = 2  # UP
-                    elif pnl_pct < -1.0:
-                        trend_class = 0  # DOWN
-                    else:
-                        trend_class = 1  # SIDEWAYS
+                for ctx, outcome in symbol_trades:
+                    try:
+                        # Создаем признаки
+                        features = self.extract_features(ctx, 1.0, {})
+                        feature_array = np.array([list(asdict(features).values())])
 
-                    if 'trend_direction' in self.classifiers:
-                        self.classifiers['trend_direction'].partial_fit(
-                            feature_array,
-                            np.array([trend_class])
-                        )
+                        # Clip target values (как в learn_from_trade)
+                        pnl_pct = np.clip(outcome.pnl_pct, -20, 20)
+                        hold_time_hours = np.clip(outcome.hold_time_minutes / 60, 0, 24)
+                        risk_pct = abs(pnl_pct) if outcome.pnl < 0 else 0
 
-                except Exception as e:
-                    logger.debug(f"⚠️ [WARM_START] Failed to train on one trade: {e}")
+                        targets = {
+                            'pnl_predictor': pnl_pct,
+                            'win_probability': 1.0 if outcome.pnl > 0 else 0.0,
+                            'hold_time_predictor': hold_time_hours,
+                            'risk_estimator': np.clip(risk_pct, 0, 10),
+                            'trend_strength': np.clip(abs(pnl_pct) / 10, 0, 1)
+                        }
 
-            # Логируем результат
-            total_samples = sum(model.samples_seen for model in self.models.values())
-            logger.info(f"✅ [WARM_START] Pretrained on {len(valid_pairs)} historical trades")
-            logger.info(f"🧠 [WARM_START] Total samples across all models: {total_samples}")
+                        # Обучаем регрессоры КОНКРЕТНОГО СИМВОЛА
+                        for name, target in targets.items():
+                            if name in models:
+                                models[name].partial_fit(feature_array, np.array([target]))
+
+                        # Обучаем классификаторы КОНКРЕТНОГО СИМВОЛА
+                        if pnl_pct > 1.0:
+                            trend_class = 2  # UP
+                        elif pnl_pct < -1.0:
+                            trend_class = 0  # DOWN
+                        else:
+                            trend_class = 1  # SIDEWAYS
+
+                        if 'trend_direction' in classifiers:
+                            classifiers['trend_direction'].partial_fit(
+                                feature_array,
+                                np.array([trend_class])
+                            )
+
+                    except Exception as e:
+                        logger.debug(f"⚠️ [WARM_START] Failed to train on one trade: {e}")
+
+                # Логируем результат для символа
+                total_samples = sum(model.samples_seen for model in models.values())
+                logger.info(f"  ✅ [WARM_START] {symbol}: {total_samples} total samples")
+
+            logger.info(f"🧠 [WARM_START] Completed pretraining for all symbols")
 
             # Сохраняем обновленные модели
             self.save_data()
@@ -846,114 +919,144 @@ class AdvancedMLLearningSystem:
 
                 logger.info(f"🧠 [ML_LOAD] Loaded {len(historical_contexts)} historical contexts, {len(historical_outcomes)} outcomes")
 
-            # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
+            # 🆕 v4: Загружаем ML модели для каждого символа
             if ML_AVAILABLE:
-                models_loaded = 0
-                classifiers_loaded = 0
-                incompatible_models = []
+                total_models_loaded = 0
+                total_classifiers_loaded = 0
+                incompatible_files = []
 
-                # Загружаем регрессоры
-                for name, model in self.models.items():
-                    model_file = self.data_dir / f"{name}_model.pkl"
-                    scaler_file = self.data_dir / f"{name}_scaler.pkl"
-                    metadata_file = self.data_dir / f"{name}_metadata.json"
+                # Сканируем директорию на наличие файлов моделей
+                # Паттерн: {SYMBOL}_{model_name}_model.pkl или {SYMBOL}_{model_name}_classifier.pkl
+                model_files = list(self.data_dir.glob("*_model.pkl"))
+                classifier_files = list(self.data_dir.glob("*_classifier.pkl"))
 
-                    if model_file.exists() and scaler_file.exists():
-                        try:
-                            # 🔢 Проверяем версию модели
-                            model_version = None
-                            if metadata_file.exists():
-                                with open(metadata_file, 'r') as f:
-                                    metadata = json.load(f)
-                                    model_version = metadata.get('model_version', 1)  # default v1 для старых моделей
+                # Собираем уникальные символы из имен файлов
+                symbols_found = set()
+                for file in model_files + classifier_files:
+                    # Извлекаем символ из имени файла
+                    parts = file.stem.split('_')
+                    if len(parts) >= 2:
+                        symbol = parts[0]  # Первая часть - это символ
+                        symbols_found.add(symbol)
 
-                            # 🛡️ ЗАЩИТА: Проверяем совместимость версии
-                            if model_version != MODEL_VERSION:
-                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' version mismatch: saved v{model_version}, current v{MODEL_VERSION}")
-                                incompatible_models.append(name)
-                                continue
-
-                            # Загружаем модель
-                            model.model = joblib.load(model_file)
-                            model.scaler = joblib.load(scaler_file)
-                            model.is_fitted = True
-
-                            # Восстанавливаем samples_seen из метаданных
-                            if metadata_file.exists():
-                                with open(metadata_file, 'r') as f:
-                                    metadata = json.load(f)
-                                    model.samples_seen = metadata.get('samples_seen', 0)
-
-                            # 🛡️ ВАЛИДАЦИЯ: Проверяем что модель дает вменяемые предсказания
-                            if not self._validate_model_sanity(name, model):
-                                logger.warning(f"⚠️ [ML_LOAD] Model '{name}' failed sanity check - discarding")
-                                incompatible_models.append(name)
-                                model.is_fitted = False
-                                continue
-
-                            models_loaded += 1
-                            logger.info(f"✅ [ML_LOAD] Loaded regressor '{name}': {model.samples_seen} samples seen")
-
-                        except Exception as e:
-                            logger.warning(f"⚠️ [ML_LOAD] Failed to load model '{name}': {e}")
-                            incompatible_models.append(name)
-
-                # 🆕 Загружаем классификаторы
-                for name, classifier in self.classifiers.items():
-                    model_file = self.data_dir / f"{name}_classifier.pkl"
-                    scaler_file = self.data_dir / f"{name}_scaler.pkl"
-                    metadata_file = self.data_dir / f"{name}_metadata.json"
-
-                    if model_file.exists() and scaler_file.exists():
-                        try:
-                            # 🔢 Проверяем версию модели
-                            model_version = None
-                            if metadata_file.exists():
-                                with open(metadata_file, 'r') as f:
-                                    metadata = json.load(f)
-                                    model_version = metadata.get('model_version', 1)
-
-                            # 🛡️ ЗАЩИТА: Проверяем совместимость версии
-                            if model_version != MODEL_VERSION:
-                                logger.warning(f"⚠️ [ML_LOAD] Classifier '{name}' version mismatch: saved v{model_version}, current v{MODEL_VERSION}")
-                                incompatible_models.append(name)
-                                continue
-
-                            # Загружаем классификатор
-                            classifier.model = joblib.load(model_file)
-                            classifier.scaler = joblib.load(scaler_file)
-                            classifier.is_fitted = True
-
-                            # Восстанавливаем метаданные
-                            if metadata_file.exists():
-                                with open(metadata_file, 'r') as f:
-                                    metadata = json.load(f)
-                                    classifier.samples_seen = metadata.get('samples_seen', 0)
-                                    classifier.classes_ = np.array(metadata.get('classes', [0, 1, 2]))
-
-                            classifiers_loaded += 1
-                            logger.info(f"✅ [ML_LOAD] Loaded classifier '{name}': {classifier.samples_seen} samples seen")
-
-                        except Exception as e:
-                            logger.warning(f"⚠️ [ML_LOAD] Failed to load classifier '{name}': {e}")
-                            incompatible_models.append(name)
-
-                # 🗑️ Удаляем несовместимые модели
-                if incompatible_models:
-                    logger.warning(f"🗑️ [ML_CLEANUP] Deleting {len(incompatible_models)} incompatible models: {incompatible_models}")
-                    for name in incompatible_models:
-                        try:
-                            (self.data_dir / f"{name}_model.pkl").unlink(missing_ok=True)
-                            (self.data_dir / f"{name}_classifier.pkl").unlink(missing_ok=True)
-                            (self.data_dir / f"{name}_scaler.pkl").unlink(missing_ok=True)
-                            (self.data_dir / f"{name}_metadata.json").unlink(missing_ok=True)
-                        except Exception as e:
-                            logger.debug(f"Failed to delete old model files for '{name}': {e}")
-
-                if models_loaded > 0 or classifiers_loaded > 0:
-                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded} regressors and {classifiers_loaded} classifiers")
-                else:
+                if not symbols_found:
                     logger.info(f"📚 [ML_LOAD] No saved models found - starting from scratch")
+                else:
+                    logger.info(f"🔍 [ML_LOAD] Found models for {len(symbols_found)} symbols: {', '.join(sorted(symbols_found))}")
+
+                    # Загружаем модели для каждого символа
+                    for symbol in sorted(symbols_found):
+                        symbol_models_loaded = 0
+                        symbol_classifiers_loaded = 0
+
+                        # Создаем пустые модели для символа
+                        models, classifiers = self._get_or_create_models(symbol)
+
+                        # Загружаем регрессоры для символа
+                        for model_name in self.model_template.keys():
+                            model_file = self.data_dir / f"{symbol}_{model_name}_model.pkl"
+                            scaler_file = self.data_dir / f"{symbol}_{model_name}_scaler.pkl"
+                            metadata_file = self.data_dir / f"{symbol}_{model_name}_metadata.json"
+
+                            if model_file.exists() and scaler_file.exists():
+                                try:
+                                    # Проверяем версию модели
+                                    model_version = None
+                                    if metadata_file.exists():
+                                        with open(metadata_file, 'r') as f:
+                                            metadata = json.load(f)
+                                            model_version = metadata.get('model_version', 1)
+
+                                    # Проверяем совместимость версии
+                                    if model_version != MODEL_VERSION:
+                                        logger.warning(f"⚠️ [ML_LOAD] {symbol}/{model_name} version mismatch: v{model_version} != v{MODEL_VERSION}")
+                                        incompatible_files.append(str(model_file))
+                                        continue
+
+                                    # Загружаем модель
+                                    models[model_name].model = joblib.load(model_file)
+                                    models[model_name].scaler = joblib.load(scaler_file)
+                                    models[model_name].is_fitted = True
+
+                                    # Восстанавливаем метаданные
+                                    if metadata_file.exists():
+                                        with open(metadata_file, 'r') as f:
+                                            metadata = json.load(f)
+                                            models[model_name].samples_seen = metadata.get('samples_seen', 0)
+
+                                    # Валидация
+                                    if not self._validate_model_sanity(model_name, models[model_name]):
+                                        logger.warning(f"⚠️ [ML_LOAD] {symbol}/{model_name} failed sanity check")
+                                        models[model_name].is_fitted = False
+                                        incompatible_files.append(str(model_file))
+                                        continue
+
+                                    symbol_models_loaded += 1
+
+                                except Exception as e:
+                                    logger.warning(f"⚠️ [ML_LOAD] Failed to load {symbol}/{model_name}: {e}")
+                                    incompatible_files.append(str(model_file))
+
+                        # Загружаем классификаторы для символа
+                        for clf_name in self.classifier_template.keys():
+                            model_file = self.data_dir / f"{symbol}_{clf_name}_classifier.pkl"
+                            scaler_file = self.data_dir / f"{symbol}_{clf_name}_scaler.pkl"
+                            metadata_file = self.data_dir / f"{symbol}_{clf_name}_metadata.json"
+
+                            if model_file.exists() and scaler_file.exists():
+                                try:
+                                    # Проверяем версию модели
+                                    model_version = None
+                                    if metadata_file.exists():
+                                        with open(metadata_file, 'r') as f:
+                                            metadata = json.load(f)
+                                            model_version = metadata.get('model_version', 1)
+
+                                    # Проверяем совместимость версии
+                                    if model_version != MODEL_VERSION:
+                                        logger.warning(f"⚠️ [ML_LOAD] {symbol}/{clf_name} classifier version mismatch")
+                                        incompatible_files.append(str(model_file))
+                                        continue
+
+                                    # Загружаем классификатор
+                                    classifiers[clf_name].model = joblib.load(model_file)
+                                    classifiers[clf_name].scaler = joblib.load(scaler_file)
+                                    classifiers[clf_name].is_fitted = True
+
+                                    # Восстанавливаем метаданные
+                                    if metadata_file.exists():
+                                        with open(metadata_file, 'r') as f:
+                                            metadata = json.load(f)
+                                            classifiers[clf_name].samples_seen = metadata.get('samples_seen', 0)
+                                            classifiers[clf_name].classes_ = np.array(metadata.get('classes', [0, 1, 2]))
+
+                                    symbol_classifiers_loaded += 1
+
+                                except Exception as e:
+                                    logger.warning(f"⚠️ [ML_LOAD] Failed to load {symbol}/{clf_name}: {e}")
+                                    incompatible_files.append(str(model_file))
+
+                        total_models_loaded += symbol_models_loaded
+                        total_classifiers_loaded += symbol_classifiers_loaded
+
+                        if symbol_models_loaded > 0 or symbol_classifiers_loaded > 0:
+                            logger.info(f"  ✅ [ML_LOAD] {symbol}: {symbol_models_loaded} regressors, {symbol_classifiers_loaded} classifiers")
+
+                    # Удаляем несовместимые файлы
+                    if incompatible_files:
+                        logger.warning(f"🗑️ [ML_CLEANUP] Deleting {len(incompatible_files)} incompatible model files")
+                        for file_path in incompatible_files:
+                            try:
+                                Path(file_path).unlink(missing_ok=True)
+                                # Также удаляем связанные файлы
+                                Path(file_path.replace('_model.pkl', '_scaler.pkl')).unlink(missing_ok=True)
+                                Path(file_path.replace('_model.pkl', '_metadata.json')).unlink(missing_ok=True)
+                                Path(file_path.replace('_classifier.pkl', '_scaler.pkl')).unlink(missing_ok=True)
+                                Path(file_path.replace('_classifier.pkl', '_metadata.json')).unlink(missing_ok=True)
+                            except Exception as e:
+                                logger.debug(f"Failed to delete {file_path}: {e}")
+
+                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {total_models_loaded} regressors and {total_classifiers_loaded} classifiers across {len(symbols_found)} symbols")
 
             # Восстанавливаем данные в память
             if len(historical_contexts) > 0:
@@ -987,51 +1090,79 @@ class AdvancedMLLearningSystem:
             with open(self.data_dir / "trade_outcomes.json", 'w') as f:
                 json.dump(outcomes_data, f, indent=2, default=str)
 
-            # Сохраняем модели и их метаданные
+            # 🆕 v4: Сохраняем модели для каждого символа отдельно
             if ML_AVAILABLE:
-                models_saved = 0
-                classifiers_saved = 0
+                total_models_saved = 0
+                total_classifiers_saved = 0
 
-                # Сохраняем регрессоры
-                for name, model in self.models.items():
-                    if model.is_fitted:
-                        # Сохраняем модель и скейлер
-                        joblib.dump(model.model, self.data_dir / f"{name}_model.pkl")
-                        joblib.dump(model.scaler, self.data_dir / f"{name}_scaler.pkl")
+                # Сохраняем модели всех символов
+                for symbol in self.models_by_symbol.keys():
+                    models = self.models_by_symbol[symbol]
+                    classifiers = self.classifiers_by_symbol[symbol]
 
-                        # Сохраняем метаданные (samples_seen и т.д.)
-                        metadata = {
-                            'samples_seen': model.samples_seen,
-                            'is_fitted': model.is_fitted,
-                            'saved_at': datetime.now(timezone.utc).isoformat(),
-                            'model_version': MODEL_VERSION  # 🔢 Версия модели для совместимости
-                        }
-                        with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
-                            json.dump(metadata, f, indent=2)
+                    symbol_models_saved = 0
+                    symbol_classifiers_saved = 0
 
-                        models_saved += 1
+                    # Сохраняем регрессоры для символа
+                    for name, model in models.items():
+                        if model.is_fitted:
+                            # Формируем имена файлов с префиксом символа
+                            model_file = f"{symbol}_{name}_model.pkl"
+                            scaler_file = f"{symbol}_{name}_scaler.pkl"
+                            metadata_file = f"{symbol}_{name}_metadata.json"
 
-                # 🆕 Сохраняем классификаторы
-                for name, classifier in self.classifiers.items():
-                    if classifier.is_fitted:
-                        # Сохраняем классификатор и скейлер
-                        joblib.dump(classifier.model, self.data_dir / f"{name}_classifier.pkl")
-                        joblib.dump(classifier.scaler, self.data_dir / f"{name}_scaler.pkl")
+                            # Сохраняем модель и скейлер
+                            joblib.dump(model.model, self.data_dir / model_file)
+                            joblib.dump(model.scaler, self.data_dir / scaler_file)
 
-                        # Сохраняем метаданные
-                        metadata = {
-                            'samples_seen': classifier.samples_seen,
-                            'is_fitted': classifier.is_fitted,
-                            'classes': classifier.classes_.tolist() if classifier.classes_ is not None else [0, 1, 2],
-                            'saved_at': datetime.now(timezone.utc).isoformat(),
-                            'model_version': MODEL_VERSION
-                        }
-                        with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
-                            json.dump(metadata, f, indent=2)
+                            # Сохраняем метаданные
+                            metadata = {
+                                'symbol': symbol,
+                                'model_name': name,
+                                'samples_seen': model.samples_seen,
+                                'is_fitted': model.is_fitted,
+                                'saved_at': datetime.now(timezone.utc).isoformat(),
+                                'model_version': MODEL_VERSION
+                            }
+                            with open(self.data_dir / metadata_file, 'w') as f:
+                                json.dump(metadata, f, indent=2)
 
-                        classifiers_saved += 1
+                            symbol_models_saved += 1
 
-                logger.info(f"💾 [ML_SAVE] Saved {models_saved} regressors and {classifiers_saved} classifiers with metadata")
+                    # Сохраняем классификаторы для символа
+                    for name, classifier in classifiers.items():
+                        if classifier.is_fitted:
+                            # Формируем имена файлов с префиксом символа
+                            model_file = f"{symbol}_{name}_classifier.pkl"
+                            scaler_file = f"{symbol}_{name}_scaler.pkl"
+                            metadata_file = f"{symbol}_{name}_metadata.json"
+
+                            # Сохраняем классификатор и скейлер
+                            joblib.dump(classifier.model, self.data_dir / model_file)
+                            joblib.dump(classifier.scaler, self.data_dir / scaler_file)
+
+                            # Сохраняем метаданные
+                            metadata = {
+                                'symbol': symbol,
+                                'model_name': name,
+                                'samples_seen': classifier.samples_seen,
+                                'is_fitted': classifier.is_fitted,
+                                'classes': classifier.classes_.tolist() if classifier.classes_ is not None else [0, 1, 2],
+                                'saved_at': datetime.now(timezone.utc).isoformat(),
+                                'model_version': MODEL_VERSION
+                            }
+                            with open(self.data_dir / metadata_file, 'w') as f:
+                                json.dump(metadata, f, indent=2)
+
+                            symbol_classifiers_saved += 1
+
+                    total_models_saved += symbol_models_saved
+                    total_classifiers_saved += symbol_classifiers_saved
+
+                    if symbol_models_saved > 0 or symbol_classifiers_saved > 0:
+                        logger.info(f"  💾 [ML_SAVE] {symbol}: {symbol_models_saved} regressors, {symbol_classifiers_saved} classifiers")
+
+                logger.info(f"💾 [ML_SAVE] Saved {total_models_saved} regressors and {total_classifiers_saved} classifiers across {len(self.models_by_symbol)} symbols")
 
             logger.info(f"💾 [ML_SAVE] Saved ML data: {len(self.market_contexts)} contexts, "
                        f"{len(self.trade_outcomes)} outcomes")
