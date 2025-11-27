@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # 🔢 MODEL VERSION - увеличивайте при изменении логики обучения!
 # v1: Initial implementation
-# v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
+# v2: Added target clipping (+/-20% PnL, 0-24h hold_time, 0-10% risk)
 # v3: Added trend direction classifier and trend strength predictor
 # v4: Separate models per trading pair (symbol-specific learning)
 MODEL_VERSION = 4
@@ -552,7 +552,7 @@ class AdvancedMLLearningSystem:
 
             # 🔧 ИСПРАВЛЕНИЕ: Целевые переменные В ПРОЦЕНТАХ (не абсолютные значения!)
             # Clip extreme values to prevent model from learning outliers
-            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим ±20%
+            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим +/-20%
 
             # Нормализуем hold_time в часах (0-24 часа)
             hold_time_hours = np.clip(trade_outcome.hold_time_minutes / 60, 0, 24)
@@ -794,9 +794,9 @@ class AdvancedMLLearningSystem:
 
             # Проверяем диапазоны в зависимости от типа модели
             if model_name == 'pnl_predictor':
-                # PnL должен быть в пределах ±50% (даже ±20% слишком много для одного trade)
+                # PnL должен быть в пределах +/-50% (даже +/-20% слишком много для одного trade)
                 if abs(prediction) > 50:
-                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected ±50%)")
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected +/-50%)")
                     return False
 
             elif model_name == 'win_probability':
