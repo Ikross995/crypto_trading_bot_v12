@@ -660,8 +660,9 @@ class AdvancedMLLearningSystem:
                     'confidence': 0.6,
                     'reason': 'Strong trend with solid support - ride the momentum'
                 })
-            
-            confidence = min(1.0, sum(model.samples_seen for model in self.models.values()) / 2000)
+
+            # Уверенность на основе количества сэмплов для данного символа
+            confidence = min(1.0, sum(model.samples_seen for model in models.values()) / 2000)
             
             return {
                 'confidence': confidence,
