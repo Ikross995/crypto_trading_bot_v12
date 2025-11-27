@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # 🔢 MODEL VERSION - увеличивайте при изменении логики обучения!
 # v1: Initial implementation
-# v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
+# v2: Added target clipping (+/-20% PnL, 0-24h hold_time, 0-10% risk)
 # v3: Added trend direction classifier and trend strength predictor
 # v4: Separate models per trading pair (symbol-specific learning)
 MODEL_VERSION = 4
@@ -552,7 +552,7 @@ class AdvancedMLLearningSystem:
 
             # 🔧 ИСПРАВЛЕНИЕ: Целевые переменные В ПРОЦЕНТАХ (не абсолютные значения!)
             # Clip extreme values to prevent model from learning outliers
-            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим ±20%
+            pnl_pct = np.clip(trade_outcome.pnl_pct, -20, 20)  # Ограничим +/-20%
 
             # Нормализуем hold_time в часах (0-24 часа)
             hold_time_hours = np.clip(trade_outcome.hold_time_minutes / 60, 0, 24)
@@ -709,46 +709,72 @@ class AdvancedMLLearningSystem:
             return {}
     
     async def _evaluate_model_performance(self):
-        """Оценка производительности моделей"""
+        """Оценка производительности моделей (для каждого символа отдельно)"""
         try:
             if len(self.trade_outcomes) < 30:
                 return
-            
+
             # Берем последние N сделок для оценки
             recent_outcomes = list(self.trade_outcomes)[-50:]
             recent_features = list(self.feature_history)[-50:]
-            
+
             if len(recent_features) != len(recent_outcomes):
                 return
-            
-            # Создаем массивы для оценки
-            X = np.array([list(asdict(f).values()) for f in recent_features])
-            
-            # Оцениваем каждую модель
-            for name, model in self.models.items():
-                if not model.is_fitted:
+
+            # Группируем сделки по символам
+            from collections import defaultdict
+            outcomes_by_symbol = defaultdict(list)
+            features_by_symbol = defaultdict(list)
+
+            for outcome, feature in zip(recent_outcomes, recent_features):
+                # Получаем символ из trade_id (format: "symbol_timestamp_...")
+                if '_' in outcome.trade_id:
+                    symbol = outcome.trade_id.split('_')[0]
+                    outcomes_by_symbol[symbol].append(outcome)
+                    features_by_symbol[symbol].append(feature)
+
+            # Оцениваем модели для каждого символа
+            for symbol in outcomes_by_symbol.keys():
+                if symbol not in self.models_by_symbol:
                     continue
-                
-                if name == 'pnl_predictor':
-                    y_true = [outcome.pnl_pct for outcome in recent_outcomes]
-                elif name == 'win_probability':
-                    y_true = [1.0 if outcome.pnl > 0 else 0.0 for outcome in recent_outcomes]
-                elif name == 'hold_time_predictor':
-                    y_true = [outcome.hold_time_minutes for outcome in recent_outcomes]
-                else:
+
+                symbol_outcomes = outcomes_by_symbol[symbol]
+                symbol_features = features_by_symbol[symbol]
+
+                if len(symbol_features) < 10:  # Минимум 10 сделок для оценки
                     continue
-                
-                y_pred = model.predict(X)
-                mse = mean_squared_error(y_true, y_pred)
-                
-                self.model_performance[name].append({
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'mse': float(mse),
-                    'samples': len(y_true)
-                })
-                
-                logger.info(f"📊 [ML_PERFORMANCE] {name}: MSE = {mse:.4f}")
-            
+
+                # Создаем массивы для оценки
+                X = np.array([list(asdict(f).values()) for f in symbol_features])
+
+                models = self.models_by_symbol[symbol]
+
+                # Оцениваем каждую модель
+                for name, model in models.items():
+                    if not model.is_fitted:
+                        continue
+
+                    if name == 'pnl_predictor':
+                        y_true = [outcome.pnl_pct for outcome in symbol_outcomes]
+                    elif name == 'win_probability':
+                        y_true = [1.0 if outcome.pnl > 0 else 0.0 for outcome in symbol_outcomes]
+                    elif name == 'hold_time_predictor':
+                        y_true = [outcome.hold_time_minutes for outcome in symbol_outcomes]
+                    else:
+                        continue
+
+                    y_pred = model.predict(X)
+                    mse = mean_squared_error(y_true, y_pred)
+
+                    perf_key = f"{symbol}_{name}"
+                    self.model_performance[perf_key].append({
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'mse': float(mse),
+                        'samples': len(y_true)
+                    })
+
+                    logger.info(f"📊 [ML_PERFORMANCE] {symbol} {name}: MSE = {mse:.4f}")
+
         except Exception as e:
             logger.error(f"❌ [ML_EVALUATION] Error: {e}")
     
@@ -768,9 +794,9 @@ class AdvancedMLLearningSystem:
 
             # Проверяем диапазоны в зависимости от типа модели
             if model_name == 'pnl_predictor':
-                # PnL должен быть в пределах ±50% (даже ±20% слишком много для одного trade)
+                # PnL должен быть в пределах +/-50% (даже +/-20% слишком много для одного trade)
                 if abs(prediction) > 50:
-                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected ±50%)")
+                    logger.warning(f"⚠️ [VALIDATION] Model '{model_name}' predicts absurd PnL: {prediction:.2f}% (expected +/-50%)")
                     return False
 
             elif model_name == 'win_probability':
