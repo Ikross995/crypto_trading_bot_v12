@@ -23,9 +23,9 @@ from pathlib import Path
 # ML библиотеки
 try:
     from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-    from sklearn.linear_model import SGDRegressor, LogisticRegression
+    from sklearn.linear_model import SGDRegressor, LogisticRegression, SGDClassifier
     from sklearn.preprocessing import StandardScaler, RobustScaler
-    from sklearn.metrics import mean_squared_error, classification_report
+    from sklearn.metrics import mean_squared_error, classification_report, accuracy_score
     from sklearn.model_selection import train_test_split
     import joblib
     ML_AVAILABLE = True
@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 # 🔢 MODEL VERSION - увеличивайте при изменении логики обучения!
 # v1: Initial implementation
 # v2: Added target clipping (±20% PnL, 0-24h hold_time, 0-10% risk)
-MODEL_VERSION = 2
+# v3: Added trend direction classifier and trend strength predictor
+MODEL_VERSION = 3
 
 @dataclass
 class MarketContext:
@@ -98,30 +99,38 @@ class TradeOutcome:
 @dataclass
 class MLFeatures:
     """Набор признаков для обучения ML моделей"""
-    
+
     # Технические признаки
     rsi_momentum: float
     macd_divergence: float
     volume_surge: float
     price_momentum: float
     volatility_regime: float
-    
+
     # Рыночные признаки
     market_stress: float
     trend_alignment: float
     support_strength: float
-    
+
     # Временные признаки
     session_volatility: float
     day_performance: float
-    
+
     # Мета-признаки
     signal_confluence: float
     historical_accuracy: float
 
+    # 🆕 НОВЫЕ признаки для распознавания трендов
+    price_velocity: float  # Скорость изменения цены
+    price_acceleration: float  # Ускорение изменения цены
+    ema_slope: float  # Наклон EMA (тренд)
+    higher_highs: float  # Паттерн растущих максимумов (0-1)
+    lower_lows: float  # Паттерн падающих минимумов (0-1)
+    consolidation_score: float  # Индикатор консолидации/флэта (0-1)
+
 class OnlineLearningModel:
-    """Модель онлайн-обучения"""
-    
+    """Модель онлайн-обучения для регрессии"""
+
     def __init__(self, name: str):
         self.name = name
         self.model = SGDRegressor(
@@ -160,13 +169,82 @@ class OnlineLearningModel:
         """Предсказание"""
         if not ML_AVAILABLE or not self.is_fitted:
             return np.zeros(len(X))
-            
+
         try:
             X_scaled = self.scaler.transform(X)
             return self.model.predict(X_scaled)
         except Exception as e:
             logger.error(f"❌ [ML_{self.name}] Prediction error: {e}")
             return np.zeros(len(X))
+
+
+class OnlineLearningClassifier:
+    """Модель онлайн-обучения для классификации (направление тренда)"""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.model = SGDClassifier(
+            loss='log_loss',  # Логистическая регрессия для вероятностей
+            learning_rate='adaptive',
+            eta0=0.01,
+            max_iter=1000,
+            tol=1e-3,
+            random_state=42
+        ) if ML_AVAILABLE else None
+        self.scaler = RobustScaler() if ML_AVAILABLE else None
+        self.is_fitted = False
+        self.samples_seen = 0
+        self.classes_ = None
+
+    def partial_fit(self, X: np.ndarray, y: np.ndarray):
+        """Обучение на новых данных"""
+        if not ML_AVAILABLE:
+            return
+
+        try:
+            if not self.is_fitted:
+                # Первоначальное обучение
+                # Для классификатора нужно указать все возможные классы
+                # 0 = DOWN, 1 = SIDEWAYS, 2 = UP
+                self.classes_ = np.array([0, 1, 2])
+                X_scaled = self.scaler.fit_transform(X)
+                self.model.partial_fit(X_scaled, y, classes=self.classes_)
+                self.is_fitted = True
+            else:
+                # Онлайн обновление
+                X_scaled = self.scaler.transform(X)
+                self.model.partial_fit(X_scaled, y)
+
+            self.samples_seen += len(X)
+            logger.debug(f"🧠 [ML_CLASSIFIER_{self.name}] Updated with {len(X)} samples, total: {self.samples_seen}")
+
+        except Exception as e:
+            logger.error(f"❌ [ML_CLASSIFIER_{self.name}] Training error: {e}")
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Предсказание класса"""
+        if not ML_AVAILABLE or not self.is_fitted:
+            return np.ones(len(X))  # Возвращаем SIDEWAYS по умолчанию
+
+        try:
+            X_scaled = self.scaler.transform(X)
+            return self.model.predict(X_scaled)
+        except Exception as e:
+            logger.error(f"❌ [ML_CLASSIFIER_{self.name}] Prediction error: {e}")
+            return np.ones(len(X))
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Предсказание вероятностей классов"""
+        if not ML_AVAILABLE or not self.is_fitted:
+            # Возвращаем равномерное распределение
+            return np.array([[0.33, 0.34, 0.33]] * len(X))
+
+        try:
+            X_scaled = self.scaler.transform(X)
+            return self.model.predict_proba(X_scaled)
+        except Exception as e:
+            logger.error(f"❌ [ML_CLASSIFIER_{self.name}] Prediction error: {e}")
+            return np.array([[0.33, 0.34, 0.33]] * len(X))
 
 class AdvancedMLLearningSystem:
     """Продвинутая система машинного обучения"""
@@ -181,19 +259,26 @@ class AdvancedMLLearningSystem:
         self.trade_outcomes = deque(maxlen=10000)
         self.feature_history = deque(maxlen=5000)
         
-        # ML модели
+        # ML модели (регрессоры)
         self.models = {
             'pnl_predictor': OnlineLearningModel('PnL'),
             'win_probability': OnlineLearningModel('WinProb'),
             'hold_time_predictor': OnlineLearningModel('HoldTime'),
-            'risk_estimator': OnlineLearningModel('Risk')
+            'risk_estimator': OnlineLearningModel('Risk'),
+            'trend_strength': OnlineLearningModel('TrendStrength')  # 🆕 Сила тренда (0-1)
+        }
+
+        # 🆕 ML классификаторы
+        self.classifiers = {
+            'trend_direction': OnlineLearningClassifier('TrendDirection')  # 0=DOWN, 1=SIDEWAYS, 2=UP
         }
         
         # Ensemble модели (для более сложных предсказаний)
         self.ensemble_models = {}
-        
+
         # Статистика производительности
-        self.model_performance = {name: [] for name in self.models.keys()}
+        all_model_names = list(self.models.keys()) + list(self.classifiers.keys())
+        self.model_performance = {name: [] for name in all_model_names}
         
         logger.info("🧠 [ADVANCED_ML] System initialized")
         self._load_historical_data()
@@ -242,7 +327,36 @@ class AdvancedMLLearningSystem:
             # Мета-признаки
             signal_confluence = signal_strength  # Как много индикаторов согласны
             historical_accuracy = recent_performance.get('recent_accuracy', 0.5)
-            
+
+            # 🆕 НОВЫЕ признаки для распознавания трендов
+            # Price velocity - скорость изменения цены (производная)
+            price_velocity = (market_context.ema_50 - market_context.sma_20) / market_context.sma_20
+
+            # Price acceleration - ускорение (вторая производная)
+            # Используем разницу между краткосрочным и долгосрочным momentum
+            price_acceleration = market_context.trend_strength * price_momentum
+
+            # EMA slope - наклон экспоненциальной скользящей средней
+            ema_slope = (market_context.ema_50 - market_context.sma_20) / market_context.sma_20
+
+            # Higher highs pattern - паттерн растущих максимумов
+            # Если resistance далеко и цена растет -> higher highs
+            higher_highs = max(0, min(1,
+                (market_context.resistance_distance / 10) * (1 if price_momentum > 0 else 0)
+            ))
+
+            # Lower lows pattern - паттерн падающих минимумов
+            # Если support далеко и цена падает -> lower lows
+            lower_lows = max(0, min(1,
+                (market_context.support_distance / 10) * (1 if price_momentum < 0 else 0)
+            ))
+
+            # Consolidation score - индикатор флэта/консолидации
+            # Высокий когда: низкая волатильность + цена между support/resistance
+            consolidation_score = max(0, min(1,
+                (1 - volatility_regime) * (1 - abs(price_momentum))
+            ))
+
             return MLFeatures(
                 rsi_momentum=rsi_momentum,
                 macd_divergence=macd_divergence,
@@ -255,7 +369,14 @@ class AdvancedMLLearningSystem:
                 session_volatility=session_volatility,
                 day_performance=day_performance,
                 signal_confluence=signal_confluence,
-                historical_accuracy=historical_accuracy
+                historical_accuracy=historical_accuracy,
+                # Новые признаки для трендов
+                price_velocity=price_velocity,
+                price_acceleration=price_acceleration,
+                ema_slope=ema_slope,
+                higher_highs=higher_highs,
+                lower_lows=lower_lows,
+                consolidation_score=consolidation_score
             )
             
         except Exception as e:
@@ -284,33 +405,73 @@ class AdvancedMLLearningSystem:
             features = self.extract_features(market_context, signal_strength, recent_performance)
             feature_array = np.array([list(asdict(features).values())])
             
-            # Получаем предсказания от всех моделей
+            # Получаем предсказания от всех моделей (регрессоров)
             predictions = {}
-            
+
             for name, model in self.models.items():
                 if model.is_fitted:
                     pred = model.predict(feature_array)[0]
                     predictions[name] = float(pred)
                 else:
                     predictions[name] = 0.0
+
+            # 🆕 Предсказания от классификаторов
+            trend_predictions = {}
+
+            for name, classifier in self.classifiers.items():
+                if classifier.is_fitted:
+                    # Получаем класс и вероятности
+                    pred_class = classifier.predict(feature_array)[0]
+                    pred_proba = classifier.predict_proba(feature_array)[0]
+                    trend_predictions[name] = {
+                        'class': int(pred_class),  # 0=DOWN, 1=SIDEWAYS, 2=UP
+                        'probabilities': pred_proba.tolist(),  # [P(DOWN), P(SIDEWAYS), P(UP)]
+                        'confidence': float(max(pred_proba))  # Максимальная вероятность
+                    }
+                else:
+                    trend_predictions[name] = {
+                        'class': 1,  # SIDEWAYS по умолчанию
+                        'probabilities': [0.33, 0.34, 0.33],
+                        'confidence': 0.34
+                    }
             
             # Метрики качества предсказания
-            prediction_confidence = min(1.0, max(0.1, 
-                sum(model.samples_seen for model in self.models.values()) / 1000
-            ))
-            
+            all_samples = sum(model.samples_seen for model in self.models.values()) + \
+                         sum(clf.samples_seen for clf in self.classifiers.values())
+            prediction_confidence = min(1.0, max(0.1, all_samples / 1000))
+
+            # 🆕 Интерпретация направления тренда
+            trend_info = trend_predictions.get('trend_direction', {})
+            trend_class = trend_info.get('class', 1)
+            trend_proba = trend_info.get('probabilities', [0.33, 0.34, 0.33])
+            trend_conf = trend_info.get('confidence', 0.34)
+
+            trend_direction_str = ['DOWN ⬇️', 'SIDEWAYS ↔️', 'UP ⬆️'][trend_class]
+
             result = {
                 'expected_pnl_pct': predictions.get('pnl_predictor', 0.0),
                 'win_probability': max(0.1, min(0.9, predictions.get('win_probability', 0.5))),
                 'expected_hold_time': max(5, predictions.get('hold_time_predictor', 30)),  # минуты
                 'risk_score': predictions.get('risk_estimator', 0.5),
                 'prediction_confidence': prediction_confidence,
-                'feature_importance': self._get_feature_importance()
+                'feature_importance': self._get_feature_importance(),
+                # 🆕 Предсказания тренда
+                'trend_direction': trend_direction_str,
+                'trend_direction_class': trend_class,
+                'trend_probabilities': {
+                    'down': trend_proba[0],
+                    'sideways': trend_proba[1],
+                    'up': trend_proba[2]
+                },
+                'trend_confidence': trend_conf,
+                'trend_strength': max(0, min(1, predictions.get('trend_strength', 0.5)))
             }
-            
-            logger.info(f"🎯 [ML_PREDICTION] Expected: {result['expected_pnl_pct']:+.2f}% PnL, "
-                       f"{result['win_probability']:.0%} win prob, {prediction_confidence:.2f} confidence")
-            
+
+            logger.info(f"🎯 [ML_PREDICTION] Trend: {trend_direction_str} ({trend_conf:.0%} conf), "
+                       f"Strength: {result['trend_strength']:.2f}, "
+                       f"Expected PnL: {result['expected_pnl_pct']:+.2f}%, "
+                       f"Win prob: {result['win_probability']:.0%}")
+
             return result
             
         except Exception as e:
@@ -355,13 +516,30 @@ class AdvancedMLLearningSystem:
                 'pnl_predictor': pnl_pct,
                 'win_probability': 1.0 if trade_outcome.pnl > 0 else 0.0,
                 'hold_time_predictor': hold_time_hours,
-                'risk_estimator': np.clip(risk_pct, 0, 10)  # Максимум 10% риск
+                'risk_estimator': np.clip(risk_pct, 0, 10),  # Максимум 10% риск
+                'trend_strength': np.clip(abs(pnl_pct) / 10, 0, 1)  # 🆕 Сила тренда (0-1, нормализованная)
             }
-            
-            # Обучаем все модели
+
+            # Обучаем все модели (регрессоры)
             for name, target in targets.items():
                 if name in self.models:
                     self.models[name].partial_fit(feature_array, np.array([target]))
+
+            # 🆕 Обучаем классификаторы
+            # Определяем направление тренда на основе PnL
+            if pnl_pct > 1.0:  # Значительный рост
+                trend_class = 2  # UP
+            elif pnl_pct < -1.0:  # Значительное падение
+                trend_class = 0  # DOWN
+            else:  # Минимальное движение
+                trend_class = 1  # SIDEWAYS
+
+            # Обучаем классификатор тренда
+            if 'trend_direction' in self.classifiers:
+                self.classifiers['trend_direction'].partial_fit(
+                    feature_array,
+                    np.array([trend_class])
+                )
             
             # Сохраняем данные
             self.market_contexts.append(market_context)
@@ -595,13 +773,29 @@ class AdvancedMLLearningSystem:
                         'pnl_predictor': pnl_pct,
                         'win_probability': 1.0 if outcome.pnl > 0 else 0.0,
                         'hold_time_predictor': hold_time_hours,
-                        'risk_estimator': np.clip(risk_pct, 0, 10)
+                        'risk_estimator': np.clip(risk_pct, 0, 10),
+                        'trend_strength': np.clip(abs(pnl_pct) / 10, 0, 1)  # 🆕 Сила тренда
                     }
 
-                    # Обучаем модели
+                    # Обучаем регрессоры
                     for name, target in targets.items():
                         if name in self.models:
                             self.models[name].partial_fit(feature_array, np.array([target]))
+
+                    # 🆕 Обучаем классификаторы
+                    # Определяем направление тренда
+                    if pnl_pct > 1.0:
+                        trend_class = 2  # UP
+                    elif pnl_pct < -1.0:
+                        trend_class = 0  # DOWN
+                    else:
+                        trend_class = 1  # SIDEWAYS
+
+                    if 'trend_direction' in self.classifiers:
+                        self.classifiers['trend_direction'].partial_fit(
+                            feature_array,
+                            np.array([trend_class])
+                        )
 
                 except Exception as e:
                     logger.debug(f"⚠️ [WARM_START] Failed to train on one trade: {e}")
@@ -655,8 +849,10 @@ class AdvancedMLLearningSystem:
             # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Загружаем сохраненные ML модели
             if ML_AVAILABLE:
                 models_loaded = 0
+                classifiers_loaded = 0
                 incompatible_models = []
 
+                # Загружаем регрессоры
                 for name, model in self.models.items():
                     model_file = self.data_dir / f"{name}_model.pkl"
                     scaler_file = self.data_dir / f"{name}_scaler.pkl"
@@ -696,10 +892,50 @@ class AdvancedMLLearningSystem:
                                 continue
 
                             models_loaded += 1
-                            logger.info(f"✅ [ML_LOAD] Loaded model '{name}': {model.samples_seen} samples seen")
+                            logger.info(f"✅ [ML_LOAD] Loaded regressor '{name}': {model.samples_seen} samples seen")
 
                         except Exception as e:
                             logger.warning(f"⚠️ [ML_LOAD] Failed to load model '{name}': {e}")
+                            incompatible_models.append(name)
+
+                # 🆕 Загружаем классификаторы
+                for name, classifier in self.classifiers.items():
+                    model_file = self.data_dir / f"{name}_classifier.pkl"
+                    scaler_file = self.data_dir / f"{name}_scaler.pkl"
+                    metadata_file = self.data_dir / f"{name}_metadata.json"
+
+                    if model_file.exists() and scaler_file.exists():
+                        try:
+                            # 🔢 Проверяем версию модели
+                            model_version = None
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    model_version = metadata.get('model_version', 1)
+
+                            # 🛡️ ЗАЩИТА: Проверяем совместимость версии
+                            if model_version != MODEL_VERSION:
+                                logger.warning(f"⚠️ [ML_LOAD] Classifier '{name}' version mismatch: saved v{model_version}, current v{MODEL_VERSION}")
+                                incompatible_models.append(name)
+                                continue
+
+                            # Загружаем классификатор
+                            classifier.model = joblib.load(model_file)
+                            classifier.scaler = joblib.load(scaler_file)
+                            classifier.is_fitted = True
+
+                            # Восстанавливаем метаданные
+                            if metadata_file.exists():
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    classifier.samples_seen = metadata.get('samples_seen', 0)
+                                    classifier.classes_ = np.array(metadata.get('classes', [0, 1, 2]))
+
+                            classifiers_loaded += 1
+                            logger.info(f"✅ [ML_LOAD] Loaded classifier '{name}': {classifier.samples_seen} samples seen")
+
+                        except Exception as e:
+                            logger.warning(f"⚠️ [ML_LOAD] Failed to load classifier '{name}': {e}")
                             incompatible_models.append(name)
 
                 # 🗑️ Удаляем несовместимые модели
@@ -708,13 +944,14 @@ class AdvancedMLLearningSystem:
                     for name in incompatible_models:
                         try:
                             (self.data_dir / f"{name}_model.pkl").unlink(missing_ok=True)
+                            (self.data_dir / f"{name}_classifier.pkl").unlink(missing_ok=True)
                             (self.data_dir / f"{name}_scaler.pkl").unlink(missing_ok=True)
                             (self.data_dir / f"{name}_metadata.json").unlink(missing_ok=True)
                         except Exception as e:
                             logger.debug(f"Failed to delete old model files for '{name}': {e}")
 
-                if models_loaded > 0:
-                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded}/{len(self.models)} ML models")
+                if models_loaded > 0 or classifiers_loaded > 0:
+                    logger.info(f"🧠 [ML_LOAD] Successfully loaded {models_loaded} regressors and {classifiers_loaded} classifiers")
                 else:
                     logger.info(f"📚 [ML_LOAD] No saved models found - starting from scratch")
 
@@ -753,6 +990,9 @@ class AdvancedMLLearningSystem:
             # Сохраняем модели и их метаданные
             if ML_AVAILABLE:
                 models_saved = 0
+                classifiers_saved = 0
+
+                # Сохраняем регрессоры
                 for name, model in self.models.items():
                     if model.is_fitted:
                         # Сохраняем модель и скейлер
@@ -771,7 +1011,27 @@ class AdvancedMLLearningSystem:
 
                         models_saved += 1
 
-                logger.info(f"💾 [ML_SAVE] Saved {models_saved} ML models with metadata")
+                # 🆕 Сохраняем классификаторы
+                for name, classifier in self.classifiers.items():
+                    if classifier.is_fitted:
+                        # Сохраняем классификатор и скейлер
+                        joblib.dump(classifier.model, self.data_dir / f"{name}_classifier.pkl")
+                        joblib.dump(classifier.scaler, self.data_dir / f"{name}_scaler.pkl")
+
+                        # Сохраняем метаданные
+                        metadata = {
+                            'samples_seen': classifier.samples_seen,
+                            'is_fitted': classifier.is_fitted,
+                            'classes': classifier.classes_.tolist() if classifier.classes_ is not None else [0, 1, 2],
+                            'saved_at': datetime.now(timezone.utc).isoformat(),
+                            'model_version': MODEL_VERSION
+                        }
+                        with open(self.data_dir / f"{name}_metadata.json", 'w') as f:
+                            json.dump(metadata, f, indent=2)
+
+                        classifiers_saved += 1
+
+                logger.info(f"💾 [ML_SAVE] Saved {models_saved} regressors and {classifiers_saved} classifiers with metadata")
 
             logger.info(f"💾 [ML_SAVE] Saved ML data: {len(self.market_contexts)} contexts, "
                        f"{len(self.trade_outcomes)} outcomes")
