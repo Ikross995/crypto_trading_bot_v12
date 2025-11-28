@@ -70,9 +70,9 @@ async def train_improved_ensemble(
         'open', 'high', 'low', 'volume',
         'rsi', 'macd', 'macd_signal',
         'bb_upper', 'bb_mid', 'bb_lower',
-        'sma_20', 'sma_50', 'ema_50',
-        'adx', 'volume_sma', 'obv', 'mfi',
-        'atr', 'stoch_k', 'stoch_d', 'cci'
+        'sma_20', 'sma_50', 'ema_50', 'atr',
+        'volume_sma', 'volume_delta', 'obv', 'volume_ratio',
+        'volume_spike', 'mfi', 'cvd', 'vwap_distance'
     ]
 
     X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
