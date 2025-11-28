@@ -445,7 +445,7 @@ class ImprovedEnsembleTrainer:
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
 
-        # GPU setup (same as gru_training_improved.py)
+        # GPU setup - disable cuDNN for RNN due to sm_120 incompatibility
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
             gpu_name = torch.cuda.get_device_name(0)
@@ -453,11 +453,11 @@ class ImprovedEnsembleTrainer:
 
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_memory:.1f} GB)")
             logger.info(f"   CUDA: {torch.version.cuda}")
-            logger.info(f"🚀 Mixed Precision: Enabled (AMP)")
+            logger.info(f"⚠️ Using CPU fallback for RNN layers (sm_120 workaround)")
 
-            # Оптимизации
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cudnn.enabled = True
+            # Disable cuDNN for RNN to avoid sm_120 kernel error
+            torch.backends.cudnn.enabled = False
+            torch.backends.cudnn.benchmark = False
         else:
             self.device = torch.device('cpu')
             logger.warning("⚠️ GPU not available, using CPU")
