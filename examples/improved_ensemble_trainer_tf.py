@@ -54,26 +54,25 @@ class PositionalEncoding(layers.Layer):
     def __init__(self, max_len=5000, **kwargs):
         super().__init__(**kwargs)
         self.max_len = max_len
+        self.pe = None
 
     def build(self, input_shape):
         _, seq_len, d_model = input_shape
 
         # Create positional encoding matrix
-        position = tf.range(self.max_len, dtype=tf.float32)[:, tf.newaxis]
-        div_term = tf.exp(tf.range(0, d_model, 2, dtype=tf.float32) * -(tf.math.log(10000.0) / d_model))
+        position = np.arange(self.max_len)[:, np.newaxis]
+        div_term = np.exp(np.arange(0, d_model, 2) * -(np.log(10000.0) / d_model))
 
-        pe = tf.zeros((self.max_len, d_model))
-        pe_updates_sin = tf.sin(position * div_term)
-        pe_updates_cos = tf.cos(position * div_term)
+        pe = np.zeros((self.max_len, d_model))
+        pe[:, 0::2] = np.sin(position * div_term)
+        pe[:, 1::2] = np.cos(position * div_term)
 
-        # Interleave sin and cos
-        indices_sin = tf.range(0, d_model, 2)
-        indices_cos = tf.range(1, d_model, 2)
-
-        pe = tf.tensor_scatter_nd_update(pe, indices_sin[:, tf.newaxis], tf.transpose(pe_updates_sin))
-        pe = tf.tensor_scatter_nd_update(pe, indices_cos[:, tf.newaxis], tf.transpose(pe_updates_cos))
-
-        self.pe = tf.Variable(pe, trainable=False, name='positional_encoding')
+        # Convert to TensorFlow variable
+        self.pe = tf.Variable(
+            initial_value=pe.astype(np.float32),
+            trainable=False,
+            name='positional_encoding'
+        )
 
     def call(self, x):
         seq_len = tf.shape(x)[1]
