@@ -44,7 +44,7 @@ try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
-    from torch.cuda.amp import autocast, GradScaler
+    from torch.amp import autocast, GradScaler
 except ImportError as e:
     print(f"❌ Import error: {e}")
     sys.exit(1)
@@ -445,7 +445,7 @@ class ImprovedEnsembleTrainer:
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
 
-        # GPU setup
+        # GPU setup - RTX 5070 Ti (sm_120) workaround
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
             gpu_name = torch.cuda.get_device_name(0)
@@ -454,9 +454,13 @@ class ImprovedEnsembleTrainer:
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_memory:.1f} GB)")
             logger.info(f"   CUDA: {torch.version.cuda}")
 
-            # Enable cuDNN optimizations
-            torch.backends.cudnn.enabled = True
-            torch.backends.cudnn.benchmark = True
+            # Disable cuDNN to avoid sm_120 kernel errors
+            # RTX 5070 Ti uses Blackwell architecture (sm_120) which is not yet
+            # supported by PyTorch cuDNN kernels. GPU will still be used for
+            # matrix operations, just without cuDNN RNN optimizations.
+            torch.backends.cudnn.enabled = False
+            logger.info(f"⚠️  cuDNN disabled (sm_120 not supported)")
+            logger.info(f"   GPU still active for matrix operations")
         else:
             self.device = torch.device('cpu')
             logger.warning("⚠️ GPU not available, using CPU")
@@ -635,7 +639,7 @@ class ImprovedEnsembleTrainer:
 
                 # Mixed precision training
                 if self.scaler is not None:
-                    with autocast():
+                    with autocast('cuda'):
                         predictions = model(batch_X).squeeze()
                         loss = criterion(predictions, batch_y)
                         loss = loss / accumulation_steps
@@ -671,7 +675,7 @@ class ImprovedEnsembleTrainer:
                 y_val_gpu = y_val_t.to(self.device)
 
                 if self.scaler is not None:
-                    with autocast():
+                    with autocast('cuda'):
                         val_predictions = model(X_val_gpu).squeeze()
                         val_loss = criterion(val_predictions, y_val_gpu).item()
                 else:
