@@ -64,7 +64,7 @@ async def train_improved_ensemble(
     logger.info(f"✅ Data prepared: {len(df):,} candles")
 
     # 3. Prepare sequences
-    from examples.gru_training_pytorch import prepare_sequences
+    from examples.gru_training_improved import prepare_sequences_no_leakage
 
     feature_columns = [
         'open', 'high', 'low', 'volume',
@@ -75,9 +75,14 @@ async def train_improved_ensemble(
         'atr', 'stoch_k', 'stoch_d', 'cci'
     ]
 
-    X_train, y_train, X_val, y_val, X_test, y_test, scalers = prepare_sequences(
-        df, feature_columns, sequence_length=60, train_split=0.7, val_split=0.15
-    )
+    X_train, X_val, X_test, y_train, y_val, y_test, feature_scaler, target_scaler = \
+        prepare_sequences_no_leakage(
+            df.copy(),
+            feature_columns,
+            sequence_length=60,
+            train_ratio=0.7,
+            val_ratio=0.15
+        )
 
     logger.info(f"📊 Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X_test):,}")
 
