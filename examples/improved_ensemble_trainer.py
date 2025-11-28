@@ -445,7 +445,7 @@ class ImprovedEnsembleTrainer:
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
 
-        # GPU setup - disable cuDNN for RNN due to sm_120 incompatibility
+        # GPU setup
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
             gpu_name = torch.cuda.get_device_name(0)
@@ -453,11 +453,10 @@ class ImprovedEnsembleTrainer:
 
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_memory:.1f} GB)")
             logger.info(f"   CUDA: {torch.version.cuda}")
-            logger.info(f"⚠️ Using CPU fallback for RNN layers (sm_120 workaround)")
 
-            # Disable cuDNN for RNN to avoid sm_120 kernel error
-            torch.backends.cudnn.enabled = False
-            torch.backends.cudnn.benchmark = False
+            # Enable cuDNN optimizations
+            torch.backends.cudnn.enabled = True
+            torch.backends.cudnn.benchmark = True
         else:
             self.device = torch.device('cpu')
             logger.warning("⚠️ GPU not available, using CPU")
@@ -466,8 +465,8 @@ class ImprovedEnsembleTrainer:
         self.model_performance: Dict[str, float] = {}
         self.model_weights: Dict[str, float] = {}
 
-        # Mixed precision scaler
-        self.scaler = GradScaler() if torch.cuda.is_available() else None
+        # Mixed precision scaler (use new API)
+        self.scaler = GradScaler('cuda') if torch.cuda.is_available() else None
 
     async def train_ensemble(
         self,
@@ -577,13 +576,13 @@ class ImprovedEnsembleTrainer:
         X_train, y_train = train_data
         X_val, y_val = val_data
 
-        # Convert to tensors
-        X_train_t = torch.FloatTensor(X_train).to(self.device)
-        y_train_t = torch.FloatTensor(y_train).to(self.device)
-        X_val_t = torch.FloatTensor(X_val).to(self.device)
-        y_val_t = torch.FloatTensor(y_val).to(self.device)
+        # Convert to CPU tensors first (avoid sm_120 kernel error in DataLoader)
+        X_train_t = torch.FloatTensor(X_train)
+        y_train_t = torch.FloatTensor(y_train)
+        X_val_t = torch.FloatTensor(X_val)
+        y_val_t = torch.FloatTensor(y_val)
 
-        # DataLoader with SHUFFLE=True
+        # DataLoader with CPU tensors (will move to GPU batch-by-batch)
         train_dataset = torch.utils.data.TensorDataset(X_train_t, y_train_t)
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
@@ -627,6 +626,10 @@ class ImprovedEnsembleTrainer:
             optimizer.zero_grad()
 
             for batch_idx, (batch_X, batch_y) in enumerate(train_loader):
+                # Move batch to GPU (if available)
+                batch_X = batch_X.to(self.device)
+                batch_y = batch_y.to(self.device)
+
                 # Data augmentation
                 batch_X = TimeSeriesAugmentation.augment(batch_X, training=True)
 
@@ -663,17 +666,21 @@ class ImprovedEnsembleTrainer:
             # Validation
             model.eval()
             with torch.no_grad():
+                # Move validation data to GPU for this epoch
+                X_val_gpu = X_val_t.to(self.device)
+                y_val_gpu = y_val_t.to(self.device)
+
                 if self.scaler is not None:
                     with autocast():
-                        val_predictions = model(X_val_t).squeeze()
-                        val_loss = criterion(val_predictions, y_val_t).item()
+                        val_predictions = model(X_val_gpu).squeeze()
+                        val_loss = criterion(val_predictions, y_val_gpu).item()
                 else:
-                    val_predictions = model(X_val_t).squeeze()
-                    val_loss = criterion(val_predictions, y_val_t).item()
+                    val_predictions = model(X_val_gpu).squeeze()
+                    val_loss = criterion(val_predictions, y_val_gpu).item()
 
                 # Directional accuracy
                 pred_dir = torch.sign(val_predictions)
-                target_dir = torch.sign(y_val_t)
+                target_dir = torch.sign(y_val_gpu)
                 dir_acc = (pred_dir == target_dir).float().mean().item()
 
             avg_train_loss = np.mean(train_losses)
