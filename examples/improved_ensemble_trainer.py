@@ -444,16 +444,22 @@ class ImprovedEnsembleTrainer:
         device: str = 'cuda'
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
-        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
 
-        # Check GPU capabilities
+        # GPU setup (same as gru_training_improved.py)
         if torch.cuda.is_available():
+            self.device = torch.device('cuda')
             gpu_name = torch.cuda.get_device_name(0)
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
-            logger.info(f"🎮 GPU: {gpu_name}")
-            logger.info(f"💾 VRAM: {gpu_memory:.1f} GB")
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+
+            logger.info(f"🎮 GPU: {gpu_name} ({gpu_memory:.1f} GB)")
+            logger.info(f"   CUDA: {torch.version.cuda}")
             logger.info(f"🚀 Mixed Precision: Enabled (AMP)")
+
+            # Оптимизации
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.enabled = True
         else:
+            self.device = torch.device('cpu')
             logger.warning("⚠️ GPU not available, using CPU")
 
         self.models: Dict[str, nn.Module] = {}
