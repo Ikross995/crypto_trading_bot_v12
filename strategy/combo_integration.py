@@ -38,7 +38,20 @@ class COMBOSignalIntegration:
         """
         self.config = config
         self.models = {}  # {symbol: {'ensemble': ..., 'rl_agent': ..., 'meta': ...}}
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Определяем device - CPU для sm_120 (RTX 5070 Ti) из-за отсутствия поддержки в PyTorch
+        if torch.cuda.is_available():
+            compute_capability = torch.cuda.get_device_capability(0)
+            sm_version = compute_capability[0] * 10 + compute_capability[1]
+
+            if sm_version >= 120:
+                logger.warning("⚠️  sm_120+ GPU detected - PyTorch doesn't support it yet")
+                logger.warning("   Using CPU for RL Agent to avoid CUDA kernel errors")
+                self.device = torch.device('cpu')
+            else:
+                self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
 
         logger.info("🚀 Initializing COMBO Signal Integration...")
         logger.info(f"   Device: {self.device}")

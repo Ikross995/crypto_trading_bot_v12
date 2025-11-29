@@ -2953,7 +2953,7 @@ class LiveTradingEngine:
 
         # 🧠 NEW: Enhanced ML Analysis of Signal Context
         enhanced_analysis = None
-        if self.enhanced_ai and md is not None:
+        if hasattr(self, 'enhanced_ai') and self.enhanced_ai and md is not None:
             try:
                 # Convert market data to DataFrame if needed
                 import pandas as pd
@@ -3655,7 +3655,7 @@ class LiveTradingEngine:
                                 )
 
                         # 🧠 NEW: Record trade opening with Enhanced ML system
-                        if self.enhanced_ai:
+                        if hasattr(self, 'enhanced_ai') and self.enhanced_ai:
                             try:
                                 from strategy.adaptive_learning import TradeRecord
                                 from datetime import datetime, timezone
