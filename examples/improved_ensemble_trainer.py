@@ -450,7 +450,7 @@ class ImprovedEnsembleTrainer:
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
 
-        # GPU setup - Check for sm_120 incompatibility
+        # GPU setup - Try to use GPU even with sm_120 (PyTorch may have updated)
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
@@ -461,19 +461,19 @@ class ImprovedEnsembleTrainer:
             logger.info(f"   CUDA: {torch.version.cuda}")
             logger.info(f"   Compute Capability: sm_{sm_version}")
 
-            # Check if GPU is supported (sm_120 = Blackwell architecture not supported yet)
+            # Always try to use GPU - let PyTorch decide if it's supported
+            self.device = torch.device('cuda')
+            self.use_amp = True
+
+            # Disable cuDNN for sm_120+ to avoid kernel errors
             if sm_version >= 120:
-                logger.warning("⚠️  PyTorch does not support sm_120+ yet!")
-                logger.warning("   Falling back to CPU training")
-                logger.warning("   (GPU support coming in PyTorch 2.6+)")
-                self.device = torch.device('cpu')
-                self.use_amp = False
-            else:
-                self.device = torch.device('cuda')
-                self.use_amp = True
-                # Disable cuDNN for older architectures if needed
                 torch.backends.cudnn.enabled = False
-                logger.info(f"✅ GPU enabled (cuDNN disabled for compatibility)")
+                logger.warning(f"⚠️  sm_120 detected - cuDNN disabled, trying GPU anyway")
+                logger.info(f"   If you get kernel errors, PyTorch doesn't support sm_120 yet")
+            else:
+                torch.backends.cudnn.enabled = False  # Keep disabled for stability
+
+            logger.info(f"🚀 GPU enabled! cuDNN: {torch.backends.cudnn.enabled}")
         else:
             self.device = torch.device('cpu')
             self.use_amp = False
