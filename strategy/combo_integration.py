@@ -59,63 +59,73 @@ class COMBOSignalIntegration:
             return True
 
         try:
-            # Пути к моделям
+            # Пути к моделям - проверяем оба варианта названий
             ensemble_path = Path(f'models/combo_ensemble_{symbol}')
+            improved_ensemble_path = Path(f'models/improved_ensemble_{symbol}')
             rl_agent_path = Path(f'models/combo_rl_agent_{symbol}.pt')
             meta_path = Path(f'data/combo_meta_learner_{symbol}.json')
 
-            # Проверка существования
-            if not ensemble_path.exists():
-                logger.warning(f"❌ Ensemble models not found for {symbol}: {ensemble_path}")
+            # Выбираем существующую директорию
+            if ensemble_path.exists():
+                final_ensemble_path = ensemble_path
+                logger.debug(f"Using combo_ensemble models for {symbol}")
+            elif improved_ensemble_path.exists():
+                final_ensemble_path = improved_ensemble_path
+                logger.info(f"📦 Using improved_ensemble models for {symbol}")
+            else:
+                logger.warning(f"❌ Ensemble models not found for {symbol}")
+                logger.warning(f"   Checked: {ensemble_path}")
+                logger.warning(f"   Checked: {improved_ensemble_path}")
                 logger.warning(f"   Run training first: python run_full_combo_system_multi.py --quick --symbols {symbol}")
-                return False
-
-            if not rl_agent_path.exists():
-                logger.warning(f"❌ RL Agent model not found for {symbol}: {rl_agent_path}")
                 return False
 
             # Загрузка Ensemble
             from examples.ensemble_trainer import EnsembleTrainer
             ensemble = EnsembleTrainer()
-            ensemble.load_ensemble(str(ensemble_path))
+            ensemble.load_ensemble(str(final_ensemble_path))
             logger.info(f"   ✅ Loaded Ensemble for {symbol}: {len(ensemble.models)} models")
 
-            # Загрузка RL Agent
-            from examples.rl_trading_agent import RLTradingAgent
-
-            # Создаем агента (размеры будут из чекпоинта)
-            checkpoint = torch.load(rl_agent_path, map_location=self.device)
-
-            # Правильно извлекаем state_dict из checkpoint
-            # Checkpoint может содержать: 'policy_net', 'target_net', 'optimizer', etc.
-            if 'policy_net' in checkpoint:
-                state_dict = checkpoint['policy_net']
-            elif 'policy_net_state' in checkpoint:
-                state_dict = checkpoint['policy_net_state']
+            # Загрузка RL Agent (опционально)
+            rl_agent = None
+            state_size = 22  # default
+            if not rl_agent_path.exists():
+                logger.info(f"   ⚠️  RL Agent not found for {symbol} - using Ensemble only")
             else:
-                # Fallback: весь checkpoint это state_dict
-                state_dict = checkpoint
+                from examples.rl_trading_agent import RLTradingAgent
 
-            # Определяем state_size из первого слоя
-            first_layer_key = 'fc1.weight'
-            if first_layer_key in state_dict:
-                state_size = state_dict[first_layer_key].shape[1]
-            else:
-                state_size = 22  # default
+                # Создаем агента (размеры будут из чекпоинта)
+                checkpoint = torch.load(rl_agent_path, map_location=self.device)
 
-            action_size = 4  # HOLD, LONG, SHORT, CLOSE
+                # Правильно извлекаем state_dict из checkpoint
+                # Checkpoint может содержать: 'policy_net', 'target_net', 'optimizer', etc.
+                if 'policy_net' in checkpoint:
+                    state_dict = checkpoint['policy_net']
+                elif 'policy_net_state' in checkpoint:
+                    state_dict = checkpoint['policy_net_state']
+                else:
+                    # Fallback: весь checkpoint это state_dict
+                    state_dict = checkpoint
 
-            rl_agent = RLTradingAgent(
-                state_size=state_size,
-                action_size=action_size,
-                device=self.device
-            )
+                # Определяем state_size из первого слоя
+                first_layer_key = 'fc1.weight'
+                if first_layer_key in state_dict:
+                    state_size = state_dict[first_layer_key].shape[1]
+                else:
+                    state_size = 22  # default
 
-            # Загружаем веса policy_net
-            rl_agent.policy_net.load_state_dict(state_dict)
-            rl_agent.policy_net.eval()
+                action_size = 4  # HOLD, LONG, SHORT, CLOSE
 
-            logger.info(f"   ✅ Loaded RL Agent for {symbol}")
+                rl_agent = RLTradingAgent(
+                    state_size=state_size,
+                    action_size=action_size,
+                    device=self.device
+                )
+
+                # Загружаем веса policy_net
+                rl_agent.policy_net.load_state_dict(state_dict)
+                rl_agent.policy_net.eval()
+
+                logger.info(f"   ✅ Loaded RL Agent for {symbol}")
 
             # Загрузка Meta-Learner (опционально)
             meta_learner = None
@@ -363,24 +373,27 @@ class COMBOSignalIntegration:
             # 2. Определяем режим рынка
             regime = self._detect_market_regime(df)
 
-            # 3. Получаем решение RL Agent
-            state = self._prepare_state(df, symbol)
+            # 3. Получаем решение RL Agent (если есть)
+            rl_direction = 'wait'  # default
+            rl_agent = models.get('rl_agent')
 
-            if state is None:
-                return self._wait_signal("Failed to prepare state")
+            if rl_agent is not None:
+                state = self._prepare_state(df, symbol)
 
-            rl_agent = models['rl_agent']
-            action = rl_agent.act(state, training=False)
+                if state is None:
+                    logger.warning(f"Failed to prepare state for {symbol}, using ensemble only")
+                else:
+                    action = rl_agent.act(state, training=False)
 
-            # Маппинг действий
-            action_map = {
-                0: 'wait',   # HOLD
-                1: 'buy',    # LONG
-                2: 'sell',   # SHORT
-                3: 'wait'    # CLOSE (интерпретируем как wait при генерации сигнала)
-            }
+                    # Маппинг действий
+                    action_map = {
+                        0: 'wait',   # HOLD
+                        1: 'buy',    # LONG
+                        2: 'sell',   # SHORT
+                        3: 'wait'    # CLOSE (интерпретируем как wait при генерации сигнала)
+                    }
 
-            rl_direction = action_map[action]
+                    rl_direction = action_map[action]
 
             # 4. Комбинируем сигналы
             # Ensemble предсказывает направление
