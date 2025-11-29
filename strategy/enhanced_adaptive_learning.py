@@ -25,18 +25,18 @@ logger = logging.getLogger(__name__)
 
 class EnhancedAdaptiveLearningSystem:
     """Продвинутая система адаптивного обучения с ML"""
-    
+
     def __init__(self, config):
         self.config = config
-        
+
         # Инициализируем компоненты ML системы
         self.ml_system = AdvancedMLLearningSystem(config)
         self.context_collector = MarketContextCollector()
-        
+
         # Кеш для текущего контекста рынка
         self.current_market_context = None
         self.recent_performance_cache = {}
-        
+
         # Улучшенные метрики
         self.enhanced_metrics = {
             'prediction_accuracy': 0.5,
@@ -45,13 +45,22 @@ class EnhancedAdaptiveLearningSystem:
             'model_performance': {},
             'recommendation_success_rate': 0.5
         }
-        
+
         # Статистика предсказаний
         self.prediction_history = []
         self.recommendation_history = []
 
         # Trade history для совместимости с Exit Manager
         self.trades_history = []  # List[TradeRecord]
+
+        # 📊 Dashboard visualization
+        try:
+            from strategy.learning_visualizer import LearningVisualizer
+            self.learning_visualizer = LearningVisualizer(output_dir="data/learning_reports")
+            logger.info("📊 [ENHANCED_ML] Learning Visualizer initialized for dashboard")
+        except Exception as e:
+            logger.warning(f"📊 [ENHANCED_ML] Failed to initialize Learning Visualizer: {e}")
+            self.learning_visualizer = None
 
         logger.info("🧠 [ENHANCED_ML] Advanced adaptive learning system initialized")
         
