@@ -4733,7 +4733,8 @@ class LiveTradingEngine:
             leverage = getattr(self.config, "leverage", 5.0)
 
             # FIXED: Use correct config attribute for SL
-            base_sl_pct = getattr(self.config, "sl_fixed_pct", 2.0)
+            # sl_fixed_pct is already in fraction (0.01 = 1%) from settings.py
+            base_sl_pct = getattr(self.config, "sl_fixed_pct", 0.02)
 
             # FIXED: Use configuration TP levels instead of hardcoded ones
             config_tp_levels = (
@@ -4772,14 +4773,16 @@ class LiveTradingEngine:
 
             if side.upper() == "BUY":
                 # Long position: SL below entry, TP above entry
-                sl_level = self._round_price(entry_price * (1 - sl_pct / 100), symbol)
+                # sl_pct is already in fraction (0.01 = 1%), no /100 needed
+                sl_level = self._round_price(entry_price * (1 - sl_pct), symbol)
                 tp_levels = [
                     self._round_price(entry_price * (1 + tp_pct / 100), symbol)
                     for tp_pct in tp_levels_pct
                 ]
             else:
                 # Short position: SL above entry, TP below entry
-                sl_level = self._round_price(entry_price * (1 + sl_pct / 100), symbol)
+                # sl_pct is already in fraction (0.01 = 1%), no /100 needed
+                sl_level = self._round_price(entry_price * (1 + sl_pct), symbol)
                 tp_levels = [
                     self._round_price(entry_price * (1 - tp_pct / 100), symbol)
                     for tp_pct in tp_levels_pct
