@@ -193,14 +193,15 @@ class BinanceClient:
     def _sync_time(self):
         """Synchronize with Binance server time to prevent -1021 errors."""
         now = time.time()
-        if self.client is None or (now - self._last_time_sync) < 2.0:
+        # Sync more frequently (every 0.5s instead of 2s) for better accuracy
+        if self.client is None or (now - self._last_time_sync) < 0.5:
             return
         try:
             # Get Binance server time directly (avoid safe_call recursion)
             server_time_response = self.client.futures_time()
             server_time = server_time_response['serverTime']
             local_time = int(time.time() * 1000)
-            
+
             # Calculate time offset
             self._time_offset = server_time - local_time
             logger.debug(f"[TIME_SYNC] Server: {server_time}, Local: {local_time}, Offset: {self._time_offset}ms")

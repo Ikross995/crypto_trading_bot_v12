@@ -178,7 +178,27 @@ class EnsembleTrainer:
         device: str = 'cuda'
     ):
         self.configs = configs or ENSEMBLE_CONFIGS
-        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
+
+        # GPU setup - Try to use GPU even with sm_120 (PyTorch may have updated)
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            compute_capability = torch.cuda.get_device_capability(0)
+            sm_version = compute_capability[0] * 10 + compute_capability[1]
+
+            # Always try GPU - let PyTorch decide
+            self.device = torch.device('cuda')
+
+            if sm_version >= 120:
+                torch.backends.cudnn.enabled = False
+                logger.warning(f"⚠️  {gpu_name} (sm_{sm_version}) - cuDNN disabled, trying GPU anyway")
+                logger.info(f"   If you get kernel errors, PyTorch doesn't support sm_120 yet")
+            else:
+                torch.backends.cudnn.enabled = False  # Keep disabled for stability
+
+            logger.info(f"🚀 GPU enabled! {gpu_name}")
+        else:
+            self.device = torch.device('cpu')
+            logger.info("📊 Using CPU")
 
         self.models: Dict[str, nn.Module] = {}
         self.model_performance: Dict[str, float] = {}

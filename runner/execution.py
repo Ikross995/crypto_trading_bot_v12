@@ -47,7 +47,8 @@ class TradeExecutor:
             return 0.0
         sl_dist = abs(entry_px - stop_px)
         if sl_dist <= 0:
-            sl_dist = entry_px * float(getattr(self.cfg, "sl_fixed_pct", 0.3)) / 100.0
+            # sl_fixed_pct is already in fraction (0.01 = 1%) from settings.py
+            sl_dist = entry_px * float(getattr(self.cfg, "sl_fixed_pct", 0.003))
         if sl_dist <= 0:
             return 0.0
         usd = bal * (risk_pct / 100.0)
@@ -76,11 +77,12 @@ class TradeExecutor:
         if px <= 0:
             return {"status":"SKIP", "reason":"no price"}
 
-        sl_fpct = float(getattr(cfg, "sl_fixed_pct", 0.3))
+        # sl_fixed_pct is already in fraction (0.01 = 1%) from settings.py
+        sl_fpct = float(getattr(cfg, "sl_fixed_pct", 0.003))
         if pos_side == "LONG":
-            sl_px = px * (1.0 - sl_fpct/100.0)
+            sl_px = px * (1.0 - sl_fpct)  # Already in fraction, no /100 needed
         else:
-            sl_px = px * (1.0 + sl_fpct/100.0)
+            sl_px = px * (1.0 + sl_fpct)  # Already in fraction, no /100 needed
 
         qty = self._calc_qty(symbol, px, sl_px)
         if qty <= 0:
