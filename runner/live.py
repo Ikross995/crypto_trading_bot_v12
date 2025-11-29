@@ -3391,7 +3391,7 @@ class LiveTradingEngine:
 
                         # CRITICAL FIX: On testnet, use MARKET orders for reliable fills
                         # Testnet has very low liquidity, causing LIMIT orders to hang
-                        if self.cfg.testnet:
+                        if self.config.testnet:
                             limit_price = None  # Use MARKET order
                             self.logger.info("[ORDER_TYPE] Using MARKET order for testnet (better fill rate)")
                         else:
