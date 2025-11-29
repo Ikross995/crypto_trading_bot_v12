@@ -450,32 +450,46 @@ class ImprovedEnsembleTrainer:
     ):
         self.configs = configs or IMPROVED_ENSEMBLE_CONFIGS
 
-        # GPU setup - RTX 5070 Ti (sm_120) workaround
+        # GPU setup - Check for sm_120 incompatibility
         if torch.cuda.is_available():
-            self.device = torch.device('cuda')
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            compute_capability = torch.cuda.get_device_capability(0)
+            sm_version = compute_capability[0] * 10 + compute_capability[1]
 
-            logger.info(f"🎮 GPU: {gpu_name} ({gpu_memory:.1f} GB)")
+            logger.info(f"🎮 GPU Detected: {gpu_name} ({gpu_memory:.1f} GB)")
             logger.info(f"   CUDA: {torch.version.cuda}")
+            logger.info(f"   Compute Capability: sm_{sm_version}")
 
-            # Disable cuDNN to avoid sm_120 kernel errors
-            # RTX 5070 Ti uses Blackwell architecture (sm_120) which is not yet
-            # supported by PyTorch cuDNN kernels. GPU will still be used for
-            # matrix operations, just without cuDNN RNN optimizations.
-            torch.backends.cudnn.enabled = False
-            logger.info(f"⚠️  cuDNN disabled (sm_120 not supported)")
-            logger.info(f"   GPU still active for matrix operations")
+            # Check if GPU is supported (sm_120 = Blackwell architecture not supported yet)
+            if sm_version >= 120:
+                logger.warning("⚠️  PyTorch does not support sm_120+ yet!")
+                logger.warning("   Falling back to CPU training")
+                logger.warning("   (GPU support coming in PyTorch 2.6+)")
+                self.device = torch.device('cpu')
+                self.use_amp = False
+            else:
+                self.device = torch.device('cuda')
+                self.use_amp = True
+                # Disable cuDNN for older architectures if needed
+                torch.backends.cudnn.enabled = False
+                logger.info(f"✅ GPU enabled (cuDNN disabled for compatibility)")
         else:
             self.device = torch.device('cpu')
+            self.use_amp = False
             logger.warning("⚠️ GPU not available, using CPU")
 
         self.models: Dict[str, nn.Module] = {}
         self.model_performance: Dict[str, float] = {}
         self.model_weights: Dict[str, float] = {}
 
-        # Mixed precision scaler (use new API)
-        self.scaler = GradScaler('cuda') if torch.cuda.is_available() else None
+        # Mixed precision scaler (only if using GPU and AMP supported)
+        if self.use_amp and self.device.type == 'cuda':
+            self.scaler = GradScaler('cuda')
+            logger.info("✅ Mixed Precision (AMP) enabled")
+        else:
+            self.scaler = None
+            logger.info("📊 Using full precision (FP32)")
 
     async def train_ensemble(
         self,
@@ -591,14 +605,14 @@ class ImprovedEnsembleTrainer:
         X_val_t = torch.FloatTensor(X_val)
         y_val_t = torch.FloatTensor(y_val)
 
-        # DataLoader with CPU tensors (will move to GPU batch-by-batch)
+        # DataLoader with CPU tensors (will move to GPU batch-by-batch if GPU available)
         train_dataset = torch.utils.data.TensorDataset(X_train_t, y_train_t)
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=batch_size,
             shuffle=True,  # ✅ ВКЛЮЧЕНО!
             num_workers=0,
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=self.device.type == 'cuda'
         )
 
         # Improved optimizer with weight decay
