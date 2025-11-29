@@ -79,11 +79,41 @@ class COMBOSignalIntegration:
                 logger.warning(f"   Run training first: python run_full_combo_system_multi.py --quick --symbols {symbol}")
                 return False
 
-            # Загрузка Ensemble
-            from examples.ensemble_trainer import EnsembleTrainer
-            ensemble = EnsembleTrainer()
-            ensemble.load_ensemble(str(final_ensemble_path))
-            logger.info(f"   ✅ Loaded Ensemble for {symbol}: {len(ensemble.models)} models")
+            # Загрузка Ensemble - определяем тип по файлам
+            improved_models = list(final_ensemble_path.glob("*_improved.pt"))
+
+            if improved_models:
+                # Модели из improved_ensemble_trainer - загружаем напрямую
+                logger.info(f"   📦 Loading {len(improved_models)} improved ensemble models...")
+
+                ensemble_models = {}
+                for model_file in improved_models:
+                    try:
+                        checkpoint = torch.load(model_file, map_location=self.device)
+                        model_name = model_file.stem.replace('_improved', '')
+                        ensemble_models[model_name] = {
+                            'state_dict': checkpoint.get('model_state_dict'),
+                            'performance': checkpoint.get('performance', 0.0),
+                            'weight': checkpoint.get('weight', 1.0 / len(improved_models))
+                        }
+                        logger.info(f"      ✅ {model_name}: perf={checkpoint.get('performance', 0):.4f}")
+                    except Exception as e:
+                        logger.warning(f"      ⚠️  Failed to load {model_file.name}: {e}")
+
+                # Создаём mock ensemble объект для совместимости
+                class MockEnsemble:
+                    def __init__(self, models):
+                        self.models = models
+                        self.model_weights = {k: v['weight'] for k, v in models.items()}
+
+                ensemble = MockEnsemble(ensemble_models)
+                logger.info(f"   ✅ Loaded Improved Ensemble for {symbol}: {len(ensemble.models)} models")
+            else:
+                # Старые модели из ensemble_trainer
+                from examples.ensemble_trainer import EnsembleTrainer
+                ensemble = EnsembleTrainer()
+                ensemble.load_ensemble(str(final_ensemble_path))
+                logger.info(f"   ✅ Loaded Ensemble for {symbol}: {len(ensemble.models)} models")
 
             # Загрузка RL Agent (опционально)
             rl_agent = None
