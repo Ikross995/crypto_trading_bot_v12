@@ -2950,6 +2950,14 @@ class LiveTradingEngine:
                             rl_confidence, signals_agree
                         )
 
+                        # Add RL Agent to indicator breakdown display
+                        rl_emoji = "🟢 BUY" if rl_direction == "buy" else ("🔴 SELL" if rl_direction == "sell" else "⏸️  WAIT")
+                        rl_status = "✅ AGREE" if signals_agree else "⚠️  CONFLICT"
+                        self.logger.info(
+                            "  └─ 1️⃣3️⃣ RL Agent        │ %s │ Conf: %.0f%% │ %s",
+                            rl_emoji, rl_confidence * 100, rl_status
+                        )
+
             except Exception as rl_e:
                 self.logger.warning("🤖 [RL_FILTER] Error filtering signal with RL Agent: %s", rl_e)
 
