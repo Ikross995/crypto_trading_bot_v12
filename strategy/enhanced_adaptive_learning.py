@@ -56,11 +56,11 @@ class EnhancedAdaptiveLearningSystem:
         # 📊 Dashboard visualization
         try:
             from strategy.learning_visualizer import LearningVisualizer
-            self.learning_visualizer = LearningVisualizer(output_dir="data/learning_reports")
+            self._learning_visualizer = LearningVisualizer(output_dir="data/learning_reports")
             logger.info("📊 [ENHANCED_ML] Learning Visualizer initialized for dashboard")
         except Exception as e:
             logger.warning(f"📊 [ENHANCED_ML] Failed to initialize Learning Visualizer: {e}")
-            self.learning_visualizer = None
+            self._learning_visualizer = None
 
         logger.info("🧠 [ENHANCED_ML] Advanced adaptive learning system initialized")
         
@@ -625,10 +625,10 @@ class EnhancedAdaptiveLearningSystem:
         """Backward compatibility property for advanced_ai access"""
         return self.ml_system
     
-    @property  
+    @property
     def learning_visualizer(self):
         """Backward compatibility property for learning_visualizer access"""
-        return None  # Placeholder for now
+        return getattr(self, '_learning_visualizer', None)
     
     async def get_advanced_ai_recommendations(self, market_data: Dict = None):
         """Backward compatibility method for advanced AI recommendations"""
