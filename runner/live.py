@@ -2462,11 +2462,13 @@ class LiveTradingEngine:
                     await self.enhanced_ai.save_all_data()
 
                     # Log ML statistics
-                    if hasattr(self.enhanced_ai, 'ml_system'):
-                        ml_samples = sum(
-                            getattr(model, 'samples_seen', 0)
-                            for model in self.enhanced_ai.ml_system.models.values()
-                        )
+                    if hasattr(self.enhanced_ai, 'ml_system') and hasattr(self.enhanced_ai.ml_system, 'models_by_symbol'):
+                        ml_samples = 0
+                        for symbol_models in self.enhanced_ai.ml_system.models_by_symbol.values():
+                            ml_samples += sum(
+                                getattr(model, 'samples_seen', 0)
+                                for model in symbol_models.values()
+                            )
                         self.logger.info(f"✅ [SHUTDOWN] ML models saved ({ml_samples} samples trained)")
                     else:
                         self.logger.info("✅ [SHUTDOWN] ML learning data saved")
