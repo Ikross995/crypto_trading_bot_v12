@@ -418,6 +418,7 @@ class COMBOSignalIntegration:
 
             # 3. Получаем решение RL Agent (если есть)
             rl_direction = 'wait'  # default
+            action = None  # default
             rl_agent = models.get('rl_agent')
 
             if rl_agent is not None:
