@@ -343,19 +343,24 @@ class TimeSeriesAugmentation:
 
     @staticmethod
     def augment(x: torch.Tensor, training: bool = True) -> torch.Tensor:
-        """Применить аугментацию"""
-        if not training:
-            return x
+        """
+        Применить аугментацию
 
-        # 50% вероятность добавить шум
-        if torch.rand(1).item() < 0.5:
-            x = TimeSeriesAugmentation.add_noise(x, noise_level=0.01)
-
-        # 50% вероятность масштабировать
-        if torch.rand(1).item() < 0.5:
-            x = TimeSeriesAugmentation.scale(x, scale_range=(0.98, 1.02))
-
+        DISABLED for sm_120 compatibility (RTX 5070 Ti)
+        - torch.randn_like() and .to(device) cause kernel errors
+        - Will be re-enabled when PyTorch adds sm_120 support
+        """
+        # Temporarily disabled due to sm_120 kernel errors
         return x
+
+        # Original code (disabled):
+        # if not training:
+        #     return x
+        # if torch.rand(1).item() < 0.5:
+        #     x = TimeSeriesAugmentation.add_noise(x, noise_level=0.01)
+        # if torch.rand(1).item() < 0.5:
+        #     x = TimeSeriesAugmentation.scale(x, scale_range=(0.98, 1.02))
+        # return x
 
 
 # ==========================================
