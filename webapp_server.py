@@ -151,19 +151,6 @@ def index():
 
 @app.route('/simple')
 def simple_dashboard():
-    """Старый автогенерируемый дашборд."""
-    try:
-        enhanced_path = Path('data/learning_reports/enhanced_dashboard.html')
-        if enhanced_path.exists():
-            return send_from_directory('data/learning_reports', 'enhanced_dashboard.html')
-        else:
-            return jsonify({'error': 'Old dashboard not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/simple')
-def simple_dashboard():
     """Простой дашборд (старая версия)."""
     return send_from_directory('telegram_webapp', 'dashboard.html')
 

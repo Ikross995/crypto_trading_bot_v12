@@ -1,0 +1,46 @@
+[1mdiff --git a/.env b/.env[m
+[1mindex 7d5c83f..e69aea9 100644[m
+[1m--- a/.env[m
+[1m+++ b/.env[m
+[36m@@ -15,8 +15,8 @@[m [mLOG_LEVEL=INFO[m
+ # ==========================================[m
+ # 🔑 API CREDENTIALS (BINANCE)[m
+ # ==========================================[m
+[31m-BINANCE_API_KEY=[m
+[31m-BINANCE_API_SECRET=[m
+[32m+[m[32mBINANCE_API_KEY=ORNN8WGnFZGCxT6I9c2PmQE7APN7ozQeMMX01xObcjp51LhfliJ4blO4I4ryMxd4[m
+[32m+[m[32mBINANCE_API_SECRET=qJItAlkXMIePU77WvTWgbB3zF2UlOm5AbgAN936TWe2e30GaZuK34liOuW2LslbK[m
+ # ==========================================[m
+ # 📊 TRADING PARAMETERS[m
+ # ==========================================[m
+[36m@@ -116,13 +116,13 @@[m [mLEVEL_SPACING_PCT=2.0[m
+ # 🛡️ STOP LOSS & TAKE PROFIT (15m OPTIMIZED)[m
+ # ==========================================[m
+ # Fixed stop loss: 2% (wider for 15m swings)[m
+[31m-SL_FIXED_PCT=2.0[m
+[32m+[m[32mSL_FIXED_PCT=1.0[m
+ [m
+ # ATR-based stop loss multiplier[m
+[31m-SL_ATR_MULT=2.0[m
+[32m+[m[32mSL_ATR_MULT=1.5[m
+ [m
+ # Take profit levels (R:R ratios)[m
+[31m-TP_LEVELS=1.2,1.8,2.3[m
+[32m+[m[32mTP_LEVELS=1.2,1.5,2.2[m
+ [m
+ # TP shares (% of position to close at each level)[m
+ TP_SHARES=0.30,0.40,0.30[m
+[36m@@ -220,11 +220,8 @@[m [mUSE_IMBA_SIGNALS=true[m
+ # ==========================================[m
+ # 📢 TELEGRAM NOTIFICATIONS (OPTIONAL)[m
+ # ==========================================[m
+[31m-# Bot token from @BotFather[m
+[31m-TG_BOT_TOKEN=[m
+[31m-[m
+[31m-# Chat ID (get from @userinfobot)[m
+[31m-TG_CHAT_ID=[m
+[32m+[m[32mTG_BOT_TOKEN=8339499545:AAHWvw1rqCwRzKR3-DoN6UfxRzFtQh7G8lg[m
+[32m+[m[32mTG_CHAT_ID=865994606[m
+ [m
+ # Enable trade notifications (position open/close alerts)[m
+ TG_TRADE_NOTIFICATIONS=true[m

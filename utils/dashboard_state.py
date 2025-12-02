@@ -84,14 +84,21 @@ class DashboardStateManager:
 
                     pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
 
+                    # Получаем TP и SL если есть
+                    stop_loss = pos_data.get('stop_loss', None)
+                    take_profit_levels = pos_data.get('take_profit', [])
+
                     positions_list.append({
                         'symbol': symbol,
                         'side': side,
+                        'entryPrice': round(entry_price, 4),
+                        'currentPrice': round(current_price, 4),
+                        'quantity': round(quantity, 6),
                         'pnl': round(pnl, 2),
                         'pnlPct': round(pnl_pct, 2),
-                        'entry': round(entry_price, 2),
-                        'current': round(current_price, 2),
-                        'leverage': leverage
+                        'leverage': leverage,
+                        'stopLoss': round(stop_loss, 4) if stop_loss else None,
+                        'takeProfit': take_profit_levels if take_profit_levels else None
                     })
                 except Exception as e:
                     print(f"Warning: Error processing position {symbol}: {e}")

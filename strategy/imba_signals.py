@@ -42,6 +42,13 @@ SIGNAL_WEIGHTS = {
     "vwap_pullback": 0.8,       # Moderate frequency
     "vwap_bands_mr": 0.7,       # ⚠️ VWAP Mean Rev - VERY FREQUENT, NOISY - reduced weight
     "obi": 1.0,                 # Orderbook imbalance (when available)
+    # 🧠 ML Feature Signals (from 18 MLFeatures → 6 trading signals)
+    "consolidation_breakout": 1.4,  # Breakout from consolidation - high quality, rare
+    "trend_structure": 1.3,         # Higher highs / lower lows - reliable structure
+    "price_momentum": 1.2,          # Velocity & acceleration - accurate impulse moves
+    "ema_slope_trend": 1.1,         # EMA slope strength - stable trend following
+    "volatility_regime": 1.0,       # Volatility expansion - medium accuracy
+    "market_stress": 0.9,           # Mean reversion on stress - riskier
 }
 
 
@@ -931,7 +938,7 @@ class IMBASignalAggregator:
         # Detect regime
         regime = self.regime_detector.detect_regime(df)
         
-        # Generate all signals (12 indicators now!)
+        # Generate all signals (11 base + 6 ML feature = 17 indicators now!)
         signals = [
             IMBASignals.bb_squeeze(df),
             IMBASignals.vwap_pullback(df),
@@ -945,6 +952,11 @@ class IMBASignalAggregator:
             IMBASignals.fvg(df),             # 🔥 NEW! Fair Value Gaps
             IMBASignals.volume_profile(df),  # 🔥 NEW! Volume Profile POC
         ]
+
+        # 🧠 Add ML Feature Signals (6 new signals from 18 MLFeatures)
+        from strategy.imba_signals_ml_features import get_all_ml_feature_signals
+        ml_signals = get_all_ml_feature_signals(df)
+        signals.extend(ml_signals)
         
         # Aggregate votes with weighted voting
         votes = {"buy": 0.0, "sell": 0.0}

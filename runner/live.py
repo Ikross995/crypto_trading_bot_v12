@@ -2546,6 +2546,30 @@ class LiveTradingEngine:
                     except Exception as tp_e:
                         self.logger.debug("🤖 [TP_MONITOR] Error: %s", tp_e)
 
+                # 🧠 Validate pending signals for ML learning (every 20 iterations ~ 20 seconds)
+                if self.iteration % 20 == 0:
+                    try:
+                        from strategy.signal_validator import get_signal_validator
+                        validator = get_signal_validator(self.config)
+
+                        from datetime import datetime, timezone
+                        validated_count = validator.validate_pending_signals(datetime.now(timezone.utc))
+
+                        if validated_count > 0:
+                            self.logger.debug(
+                                f"📝 [SIGNAL_VALIDATOR] Validated {validated_count} pending signals for ML learning"
+                            )
+
+                            # Get training data if we have enough samples
+                            training_data = validator.get_training_data_for_ml(min_samples=30)
+                            if training_data and hasattr(self, 'enhanced_ai') and self.enhanced_ai:
+                                features, labels = training_data
+                                self.logger.info(
+                                    f"🧠 [SIGNAL_ML] {len(labels)} validated signals ready for ML training"
+                                )
+                    except Exception as sv_e:
+                        self.logger.debug("[SIGNAL_VALIDATOR] Validation error: %s", sv_e)
+
                 # Advanced AI periodic learning and optimization (every 20 iterations ~ 20 seconds)
                 if self.adaptive_learning and self.iteration % 20 == 0:
                     try:
@@ -4654,6 +4678,27 @@ class LiveTradingEngine:
                 len(tp_levels),
                 sl_level or 0.0,
             )
+
+            # CRITICAL: Update active_positions with TP/SL data for dashboard
+            if symbol in self.active_positions:
+                tp_data = []
+                if tp_levels:
+                    # Split quantity across TP levels (50%, 30%, 20%)
+                    qty_percents = [0.5, 0.3, 0.2]
+                    for i, tp_price in enumerate(tp_levels[:3]):  # Max 3 levels
+                        tp_data.append({
+                            'price': round(tp_price, 4),
+                            'amount': round(qty * qty_percents[i], 6)
+                        })
+
+                self.active_positions[symbol].update({
+                    'stop_loss': round(sl_level, 4) if sl_level else None,
+                    'take_profit': tp_data if tp_data else None
+                })
+                self.logger.info(
+                    "[TP_SL] Updated active_positions for %s with TP/SL data",
+                    symbol
+                )
 
             # Register position with trailing stop manager
             if self.trailing_stop_manager and tp_levels and sl_level:

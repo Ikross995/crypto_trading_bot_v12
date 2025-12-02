@@ -58,6 +58,12 @@ import numpy as np
 
 from core.config import Config
 
+# Signal Validator for ML learning
+try:
+    from strategy.signal_validator import get_signal_validator
+except ImportError:
+    get_signal_validator = None  # type: ignore
+
 # LSTM Integration
 try:
     from models.lstm import LSTMPredictor  # type: ignore
@@ -791,10 +797,41 @@ class SignalGenerator:
                 funding_rate=None,
                 alt_prices=None
             )
-            
+
             # Convert IMBA result to TradingSignal
             direction = imba_result.get('direction', 'wait')
             confidence = imba_result.get('confidence', 0.0)
+
+            # 🧠 RECORD SIGNAL FOR ML LEARNING (even if rejected!)
+            # This allows ML to learn from signal patterns without entering trades
+            if get_signal_validator is not None and direction in ('buy', 'sell'):
+                try:
+                    validator = get_signal_validator(self.config)
+                    current_price = df['close'].iloc[-1]
+
+                    # Extract market context and active signals
+                    market_context = imba_result.get('regime', {})
+                    imba_votes = imba_result.get('votes', {})
+                    active_signals = imba_result.get('signals', [])
+
+                    # Record signal for later validation
+                    signal_id = validator.record_signal(
+                        symbol=symbol,
+                        direction=direction,
+                        strength=confidence,
+                        price=current_price,
+                        market_context=market_context,
+                        imba_votes=imba_votes,
+                        active_signals=active_signals
+                    )
+
+                    self.logger.debug(
+                        f"📝 [SIGNAL_VALIDATOR] Recorded {direction.upper()} signal for {symbol} "
+                        f"(id={signal_id[:8]}, strength={confidence:.2f}) for ML learning"
+                    )
+                except Exception as ve:
+                    self.logger.warning(f"[SIGNAL_VALIDATOR] Failed to record signal: {ve}")
+
             
             # CRITICAL: Check filters_passed and direction FIRST
             filters_passed = imba_result.get('filters_passed', True)
