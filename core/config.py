@@ -58,10 +58,10 @@ class Config(BaseModel):
     level_spacing_pct: float = Field(default=1.5, ge=0.5, le=5.0)  # Spacing between DCA levels (%)
     level_multipliers: list[float] = Field(default=[1.0, 1.5, 2.0, 2.5, 3.0])  # Quantity multipliers per DCA level
 
-    # Stop Loss & Take Profit - BALANCED FOR PROFITABILITY WITH LEVERAGE
+    # Stop Loss & Take Profit - OPTIMIZED FOR INTRADAY TRADING
     sl_fixed_pct: float = Field(default=2.0, ge=0.1, le=10.0)  # 2% SL for safe risk management
     sl_atr_mult: float = Field(default=1.5, ge=0.5, le=5.0)  # ATR multiplier for volatility-based SL
-    tp_levels: str = Field(default="1.5,3.0,5.0")  # SMART TP: 1.5%, 3%, 5% - balanced for leverage trading
+    tp_levels: str = Field(default="1.2,1.8,2.3")  # Intraday TP: 1.2%, 1.8%, 2.3% - realistic for day trading
     tp_shares: str = Field(default="0.4,0.35,0.25")  # Distribution: 40%, 35%, 25% - front-loaded profits
     be_trigger_r: float = Field(default=0.5, ge=0.0, le=5.0)  # Безубыток раньше
     trail_enable: bool = Field(default=True)
@@ -245,7 +245,7 @@ class Config(BaseModel):
     def parse_tp_levels(self) -> List[float]:
         """Parse TP levels string to list of percentages."""
         if not self.tp_levels:
-            return [1.5, 3.0, 5.0]  # Default values - balanced for leverage trading
+            return [1.2, 1.8, 2.3]  # Default values - optimized for intraday trading
         return [float(x.strip()) for x in self.tp_levels.split(",") if x.strip()]
 
     def parse_tp_shares(self) -> List[float]:
@@ -314,7 +314,7 @@ class Config(BaseModel):
             # Stop Loss & Take Profit
             'sl_fixed_pct': float(os.getenv('SL_FIXED_PCT', '2.0')),  # Balanced SL for futures
             'sl_atr_mult': float(os.getenv('SL_ATR_MULT', '1.5')),  # ATR multiplier
-            'tp_levels': os.getenv('TP_LEVELS', '1.5,3.0,5.0'),  # Smart TP levels for leverage trading
+            'tp_levels': os.getenv('TP_LEVELS', '1.2,1.8,2.3'),  # Intraday TP levels
             'tp_shares': os.getenv('TP_SHARES', '0.4,0.35,0.25'),  # Front-loaded profit distribution
             'be_trigger_r': float(os.getenv('BE_TRIGGER_R', '0.5')),  # Безубыток раньше
             'trail_enable': os.getenv('TRAIL_ENABLE', 'true').lower() == 'true',

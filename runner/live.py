@@ -4612,26 +4612,47 @@ class LiveTradingEngine:
                     sl_level = dynamic_result.get('stop_loss')
                     primary_tp = dynamic_result.get('take_profit')
 
-                    # Create 3-level TP structure
-                    if primary_tp:
-                        if side == 'BUY':
-                            tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,  # 60% to target
-                                primary_tp,  # 100% to target
-                                primary_tp * 1.2 - entry_price * 0.2   # 120% to target
-                            ]
-                        else:  # SELL
-                            # CRITICAL FIX: TP3 must be BELOW entry for SHORT
-                            # Calculate 120% movement from entry downwards
-                            tp_levels = [
-                                primary_tp * 0.6 + entry_price * 0.4,  # 60% to target
-                                primary_tp,  # 100% to target
-                                primary_tp * 1.2 - entry_price * 0.2   # 120% to target (same formula as BUY)
-                            ]
+                    # Create 3-level TP structure using config percentages
+                    # Base TP levels from config: [1.2, 1.8, 2.3]
+                    config_tp_pcts = self.config.parse_tp_levels()
+
+                    # ADAPTIVE TP: Adjust based on signal strength
+                    # Strong signal (>= 2.0) → +20% wider TPs (more confident)
+                    # Medium signal (1.0-2.0) → base TPs
+                    # Weak signal (< 1.0) → -15% tighter TPs (less confident, take profit earlier)
+                    if strength >= 2.0:
+                        tp_multiplier = 1.20  # Strong signal: wider targets
+                    elif strength >= 1.5:
+                        tp_multiplier = 1.10  # Good signal: slightly wider
+                    elif strength >= 1.0:
+                        tp_multiplier = 1.0   # Normal signal: base targets
+                    elif strength >= 0.5:
+                        tp_multiplier = 0.90  # Weak signal: tighter targets
+                    else:
+                        tp_multiplier = 0.85  # Very weak: take profit quickly
+
+                    # Apply multiplier to TP percentages
+                    adjusted_tp_pcts = [pct * tp_multiplier for pct in config_tp_pcts]
+
+                    if side == 'BUY':
+                        # LONG: TP levels ABOVE entry
+                        tp_levels = [
+                            entry_price * (1 + pct / 100) for pct in adjusted_tp_pcts
+                        ]
+                    else:  # SELL
+                        # SHORT: TP levels BELOW entry
+                        tp_levels = [
+                            entry_price * (1 - pct / 100) for pct in adjusted_tp_pcts
+                        ]
 
                     self.logger.info(
-                        "[DYNAMIC_TP_SL] %s: Using ATR-based stops (regime=%s)",
-                        symbol,
+                        "[DYNAMIC_TP_SL] %s %s: Entry=%.6f, TPs=%s (base: %s%%, mult: %.2f, strength: %.2f), SL=%.6f (regime=%s)",
+                        symbol, side, entry_price,
+                        [f"{tp:.6f}" for tp in tp_levels],
+                        config_tp_pcts,
+                        tp_multiplier,
+                        strength,
+                        sl_level or 0,
                         regime or "UNKNOWN"
                     )
 
@@ -4783,25 +4804,22 @@ class LiveTradingEngine:
             # sl_fixed_pct is already in fraction (0.01 = 1%) from settings.py
             base_sl_pct = getattr(self.config, "sl_fixed_pct", 0.02)
 
-            # FIXED: Use configuration TP levels instead of hardcoded ones
-            config_tp_levels = (
-                self.config.parse_tp_levels()
-            )  # Get from config: [1.5, 3.0, 5.0]
+            # Get TP levels from config: [1.2, 1.8, 2.3] - optimized for intraday
+            config_tp_levels = self.config.parse_tp_levels()
 
-            # SMART TP ADJUSTMENT: Apply strength multiplier but keep TPs reasonable for leverage
-            # Higher strength = slightly more aggressive targets, but not extreme
+            # ADAPTIVE TP: Adjust based on signal strength
+            # Strong signal → wider TPs (more confident in move)
+            # Weak signal → tighter TPs (take profit earlier)
             if strength >= 2.0:
-                # Very strong signals: +20% more aggressive
-                strength_multiplier = 1.2
+                strength_multiplier = 1.20  # Very strong: +20%
             elif strength >= 1.5:
-                # Strong signals: +10% more aggressive
-                strength_multiplier = 1.1
+                strength_multiplier = 1.10  # Strong: +10%
             elif strength >= 1.0:
-                # Normal signals: use base levels
-                strength_multiplier = 1.0
+                strength_multiplier = 1.0   # Normal: base levels
+            elif strength >= 0.5:
+                strength_multiplier = 0.90  # Weak: -10%
             else:
-                # Weak signals: -10% more conservative
-                strength_multiplier = 0.9
+                strength_multiplier = 0.85  # Very weak: -15%
 
             # Apply strength adjustment to TP levels
             tp_levels_pct = [tp * strength_multiplier for tp in config_tp_levels]
