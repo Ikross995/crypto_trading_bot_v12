@@ -238,14 +238,29 @@ class BinanceClient:
         logger.debug(f"[SIGN] Using timestamp: {server_time} (local: {local_time}, offset: {time_offset}ms)")
         return p
 
-    def _rest(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
+    def _rest(self, method: str, path: str, payload: Dict[str, Any], use_body: bool = False) -> Any:
+        """
+        REST API call with signature.
+
+        Args:
+            method: HTTP method (GET, POST, DELETE)
+            path: API endpoint path
+            payload: Request parameters
+            use_body: If True, send POST data in request body instead of query params
+                      (required for some endpoints like algoOrder)
+        """
         url = self._base + path
         signed = self._sign(payload)
         try:
             if method == "GET":
                 r = self.session.get(url, params=signed, headers=self._headers(), timeout=10)
             elif method == "POST":
-                r = self.session.post(url, params=signed, headers=self._headers(), timeout=10)
+                if use_body:
+                    # Send as form data in body (for algoOrder endpoint)
+                    r = self.session.post(url, data=signed, headers=self._headers(), timeout=10)
+                else:
+                    # Send as query params (standard behavior)
+                    r = self.session.post(url, params=signed, headers=self._headers(), timeout=10)
             elif method == "DELETE":
                 r = self.session.delete(url, params=signed, headers=self._headers(), timeout=10)
             else:
@@ -439,7 +454,8 @@ class BinanceClient:
 
         # Use REST API directly for algo orders
         # python-binance SDK may not have this method yet
-        return self._rest("POST", "/fapi/v1/algoOrder", params)
+        # Note: algoOrder requires data in request body, not query params
+        return self._rest("POST", "/fapi/v1/algoOrder", params, use_body=True)
 
     def cancel_algo_order(self, symbol: str, algoId: int) -> Dict[str, Any]:
         """Cancel an algo order by algoId."""
