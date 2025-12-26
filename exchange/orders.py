@@ -46,8 +46,10 @@ def _as_type(tp: TypeLike) -> str:
     if isinstance(tp, OrderType):
         return tp.value
     s = str(tp).upper()
-    if s in ("MARKET","LIMIT","STOP_MARKET","STOP","TAKE_PROFIT","TAKE_PROFIT_MARKET"):
-        return s if s != "STOP" else "STOP_MARKET"
+    # NOTE: STOP and STOP_MARKET are now treated separately
+    # As of late 2025, STOP_MARKET is no longer supported on standard endpoint
+    if s in ("MARKET", "LIMIT", "STOP_MARKET", "STOP", "TAKE_PROFIT", "TAKE_PROFIT_MARKET"):
+        return s
     return "MARKET"
 
 def _as_tif(tif: TimeInForceLike) -> str:
@@ -251,16 +253,25 @@ class OrderManager:
         position_side: str = "BOTH"
     ) -> Optional[Order]:
         """
-        Place STOP_MARKET for SL.
+        Place STOP order for SL.
+
+        NOTE: As of late 2025, Binance Futures no longer supports STOP_MARKET
+        on the standard /fapi/v1/order endpoint. We use STOP (limit) instead,
+        with the limit price set slightly worse than stop price to ensure fill.
+
         Anti-2021: move stop 2-3 ticks away from mark to avoid immediate trigger.
         """
         try:
             if stop_price is None or stop_price <= 0:
                 raise ValueError("stop_price must be positive")
 
+            if quantity is None or quantity <= 0:
+                raise ValueError("quantity must be positive (closePosition no longer supported)")
+
             f = self._get_symbol_filters(symbol)
             mark = self._get_mark_or_last(symbol)
             eps = 2.0 * f["tick_size"]
+            tick = f["tick_size"]
 
             s = _as_side(side)
             sp = float(stop_price)
@@ -269,32 +280,45 @@ class OrderManager:
             if mark > 0:
                 if s == "SELL":  # closing LONG -> stop below mark
                     if sp >= mark:
-                        sp = max(mark - 3.0 * eps, f["tick_size"])
+                        sp = max(mark - 3.0 * eps, tick)
                 else:            # BUY (closing SHORT) -> stop above mark
                     if sp <= mark:
                         sp = mark + 3.0 * eps
 
-            sp = round_price(symbol, sp, f["tick_size"])
+            sp = round_price(symbol, sp, tick)
+
+            # Calculate limit price (slightly worse than stop to ensure fill)
+            # For SELL stop: limit below stop price
+            # For BUY stop: limit above stop price
+            slippage_pct = 0.005  # 0.5% slippage buffer
+            if s == "SELL":
+                limit_price = sp * (1 - slippage_pct)
+            else:
+                limit_price = sp * (1 + slippage_pct)
+            limit_price = round_price(symbol, limit_price, tick)
+
             wkt = _as_working_type(working_type)
 
+            # Validate quantity
+            q, _ = self._validate_order_params(symbol, side, float(quantity), order_type="STOP")
+
+            # Use STOP (limit) instead of STOP_MARKET
+            # STOP_MARKET is no longer supported on standard endpoint
             params = {
                 "symbol": symbol.upper(),
                 "side": s,
-                "type": "STOP_MARKET",
+                "type": "STOP",  # CHANGED: STOP instead of STOP_MARKET
+                "quantity": str(q),
+                "price": str(limit_price),  # Required for STOP orders
                 "stopPrice": str(sp),
+                "timeInForce": "GTC",
                 "workingType": wkt,
+                "reduceOnly": "true",
                 "newOrderRespType": "RESULT",
                 "positionSide": position_side
             }
 
-            if close_position:
-                params["closePosition"] = "true"
-            else:
-                if quantity is None:
-                    raise ValueError("Quantity required when not using closePosition")
-                q, _ = self._validate_order_params(symbol, side, float(quantity), order_type="STOP_MARKET")
-                params["quantity"] = str(q)
-                params["reduceOnly"] = "true"
+            logger.info(f"[STOP_ORDER] Placing {s} STOP: {symbol} qty={q} stop@{sp} limit@{limit_price}")
 
             resp = self.client.place_order(**params)
             return self._response_to_order(resp)
@@ -375,11 +399,26 @@ class OrderManager:
     def _setup_stop_loss(self, symbol: str, side: SideLike, stop_price: float) -> None:
         try:
             self._cancel_existing_exit_order(symbol, "stop_loss")
+
+            # Get current position quantity for reduceOnly order
+            # (closePosition is no longer supported on standard endpoint)
+            positions = self.client.get_positions()
+            position_qty = 0.0
+            for pos in positions:
+                if pos.get('symbol') == symbol.upper():
+                    position_qty = abs(float(pos.get('positionAmt', 0)))
+                    break
+
+            if position_qty <= 0:
+                logger.warning(f"No position found for {symbol}, cannot setup stop loss")
+                return
+
             order = self.place_stop_market_order(
                 symbol=symbol,
                 side=side,
+                quantity=position_qty,  # Use actual position qty instead of closePosition
                 stop_price=stop_price,
-                close_position=True,
+                close_position=False,   # CRITICAL: Don't use closePosition (requires Algo API)
                 working_type=_as_working_type(self.config.exit_working_type)
             )
             if order:
@@ -388,7 +427,7 @@ class OrderManager:
                     "price": float(order.stop_price or stop_price),
                     "timestamp": time.time()
                 }
-                logger.info(f"Setup stop loss for {symbol} @ {order.stop_price or stop_price}")
+                logger.info(f"Setup stop loss for {symbol} @ {order.stop_price or stop_price} (qty={position_qty})")
         except Exception as e:
             logger.error(f"Failed to setup stop loss for {symbol}: {e}")
 

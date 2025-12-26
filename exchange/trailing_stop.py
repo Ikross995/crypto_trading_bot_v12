@@ -422,9 +422,61 @@ class TrailingStopManager:
         """Monitor all registered positions and update SL if needed."""
         for symbol in list(self._positions.keys()):
             try:
+                # CRITICAL: First ensure stop loss exists!
+                await self._ensure_stop_exists(symbol)
+
+                # Then check for TP fills and update SL accordingly
                 await self.check_and_update(symbol)
             except Exception as e:
                 logger.error(f"[TRAIL_SL] Error monitoring {symbol}: {e}")
+
+    async def _ensure_stop_exists(self, symbol: str) -> bool:
+        """
+        Check if stop loss order exists for position, place one if not.
+
+        CRITICAL: This ensures positions ALWAYS have a stop loss!
+
+        Returns:
+            True if SL exists or was placed, False on error
+        """
+        if symbol not in self._positions:
+            return False
+
+        pos_data = self._positions[symbol]
+        side = pos_data["side"]
+        last_sl = pos_data.get("last_sl", 0)
+
+        if last_sl <= 0:
+            logger.warning(f"[TRAIL_SL] {symbol}: No SL price registered, cannot ensure SL")
+            return False
+
+        try:
+            # Check if any SL order exists
+            open_orders = self.client.get_open_orders(symbol)
+            has_sl = False
+
+            for order in open_orders:
+                order_type = order.get('type', '').upper()
+                if order_type in ('STOP_MARKET', 'STOP', 'STOP_LOSS_LIMIT'):
+                    has_sl = True
+                    logger.debug(f"[TRAIL_SL] {symbol}: Found existing SL order {order.get('orderId')}")
+                    break
+
+            if not has_sl:
+                # NO STOP LOSS! Place one immediately
+                logger.warning(f"⚠️ [TRAIL_SL] {symbol}: NO STOP LOSS FOUND! Placing SL @ {last_sl:.4f}")
+
+                close_side = "SELL" if side == "BUY" else "BUY"
+                await self._place_stop_loss_order(symbol, close_side, last_sl)
+
+                logger.info(f"✅ [TRAIL_SL] {symbol}: Stop loss restored @ {last_sl:.4f}")
+                return True
+
+            return True
+
+        except Exception as e:
+            logger.error(f"[TRAIL_SL] {symbol}: Failed to ensure SL exists: {e}")
+            return False
     
     async def _cancel_existing_sl_orders(self, symbol: str) -> None:
         """Cancel existing stop loss orders for symbol."""
@@ -449,22 +501,49 @@ class TrailingStopManager:
             logger.warning(f"[TRAIL_SL] Failed to cancel existing SL orders for {symbol}: {e}")
     
     async def _place_stop_loss_order(self, symbol: str, side: str, stop_price: float) -> None:
-        """Place new stop loss order."""
+        """Place new stop loss order using STOP (limit) type.
+
+        NOTE: As of late 2025, Binance Futures no longer supports STOP_MARKET
+        on the standard /fapi/v1/order endpoint. We use STOP (limit) instead.
+        """
         try:
             # Round stop price to proper precision using exchange filters
             rounded_stop_price = adjust_price(symbol, stop_price)
 
-            # Place STOP_MARKET order with closePosition=true
+            # Get position quantity (closePosition no longer works on standard endpoint)
+            positions = self.client.get_positions()
+            position_qty = 0.0
+            for pos in positions:
+                if pos.get('symbol') == symbol.upper():
+                    position_qty = abs(float(pos.get('positionAmt', 0)))
+                    break
+
+            if position_qty <= 0:
+                logger.warning(f"[TRAIL_SL] No position found for {symbol}, cannot place SL")
+                return
+
+            # Calculate limit price (slightly worse than stop to ensure fill)
+            slippage_pct = 0.005  # 0.5% slippage buffer
+            if side == "SELL":
+                limit_price = rounded_stop_price * (1 - slippage_pct)
+            else:
+                limit_price = rounded_stop_price * (1 + slippage_pct)
+            limit_price = adjust_price(symbol, limit_price)
+
+            # Place STOP (limit) order - STOP_MARKET no longer supported on standard endpoint
             order_result = self.client.place_order(
                 symbol=symbol,
                 side=side,
-                type="STOP_MARKET",
+                type="STOP",  # CHANGED: STOP instead of STOP_MARKET
+                quantity=position_qty,
+                price=limit_price,  # Required for STOP orders
                 stopPrice=rounded_stop_price,
-                closePosition="true",  # Close entire position
-                workingType="MARK_PRICE"  # Use mark price to avoid manipulation
+                timeInForce="GTC",
+                reduceOnly="true",
+                workingType="MARK_PRICE"
             )
 
-            logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} @ {rounded_stop_price:.4f} "
+            logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} {position_qty} @ stop={rounded_stop_price:.4f} limit={limit_price:.4f} "
                        f"(order: {order_result.get('orderId', 'N/A')})")
 
         except Exception as e:
@@ -474,3 +553,57 @@ class TrailingStopManager:
     def get_status(self, symbol: str) -> Optional[dict]:
         """Get current trailing stop status for a symbol."""
         return self._positions.get(symbol)
+
+    async def sync_positions_from_exchange(self) -> None:
+        """
+        Sync positions from exchange and ensure all have stop losses.
+
+        CRITICAL: Call this on startup and periodically to catch positions
+        without registered trailing stops.
+        """
+        try:
+            positions = self.client.get_positions()
+            synced = 0
+
+            for pos in positions:
+                symbol = pos.get('symbol', '')
+                position_amt = float(pos.get('positionAmt', 0))
+
+                if position_amt == 0:
+                    continue  # No position
+
+                # Check if already registered
+                if symbol in self._positions:
+                    continue  # Already tracking
+
+                # New position found - register it
+                entry_price = float(pos.get('entryPrice', 0))
+                side = "BUY" if position_amt > 0 else "SELL"
+
+                if entry_price <= 0:
+                    continue
+
+                # Calculate default SL (2% from entry)
+                sl_distance = 0.02
+                if side == "BUY":
+                    default_sl = entry_price * (1 - sl_distance)
+                else:
+                    default_sl = entry_price * (1 + sl_distance)
+
+                logger.warning(f"⚠️ [TRAIL_SL] {symbol}: Found untracked position! "
+                              f"Side={side}, Entry={entry_price:.4f}, Registering with SL={default_sl:.4f}")
+
+                self.register_position(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    side=side,
+                    tp_levels=[],  # Unknown TP levels
+                    initial_sl=default_sl
+                )
+                synced += 1
+
+            if synced > 0:
+                logger.info(f"[TRAIL_SL] Synced {synced} positions from exchange")
+
+        except Exception as e:
+            logger.error(f"[TRAIL_SL] Failed to sync positions from exchange: {e}")

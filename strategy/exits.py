@@ -180,12 +180,15 @@ class ExitManager:
             logger.debug(f"[STOP_LOSS] 📋 Order details: side={order_side.value}, working_type={self.config.exit_working_type}")
             
             # Place stop market order with detailed logging
+            # NOTE: closePosition no longer works on standard endpoint (requires Algo API)
+            # Using position quantity + reduceOnly instead
             logger.info(f"[STOP_LOSS] 📤 Placing stop order for {symbol}...")
             order = self.order_manager.place_stop_market_order(
                 symbol=symbol,
                 side=order_side,
+                quantity=abs(position.quantity),  # Use actual position qty
                 stop_price=stop_price,
-                close_position=True,  # Close entire position
+                close_position=False,  # Don't use closePosition (requires Algo API)
                 working_type=WorkingType(self.config.exit_working_type)
             )
             
@@ -416,13 +419,15 @@ class ExitManager:
             # Place new trailing stop order
             position = trailing["position"]
             order_side = OrderSide.SELL if position.is_long else OrderSide.BUY
-            
+
             if self.order_manager:
+                # NOTE: closePosition no longer works (requires Algo API)
                 order = self.order_manager.place_stop_market_order(
                     symbol=symbol,
                     side=order_side,
+                    quantity=abs(position.quantity),  # Use actual position qty
                     stop_price=new_stop_price,
-                    close_position=True,
+                    close_position=False,  # Don't use closePosition
                     working_type=WorkingType.MARK_PRICE
                 )
                 

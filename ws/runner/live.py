@@ -2531,6 +2531,12 @@ class LiveTradingEngine:
                 # Monitor trailing stops after processing all symbols
                 if self.trailing_stop_manager:
                     try:
+                        # Every 30 iterations (~30 sec): sync positions from exchange
+                        # This catches positions without registered trailing stops
+                        if self.iteration % 30 == 0:
+                            await self.trailing_stop_manager.sync_positions_from_exchange()
+
+                        # Check all positions: ensure SL exists + update after TP fills
                         await self.trailing_stop_manager.monitor_all_positions()
                     except Exception as trail_e:
                         self.logger.error("[TRAIL_SL] Monitoring error: %s", trail_e)
@@ -4422,6 +4428,15 @@ class LiveTradingEngine:
 
                     self.logger.info("[TRAIL_SL] Trailing stop manager initialized")
 
+                    # CRITICAL: Sync existing positions from exchange on startup
+                    # This ensures positions opened before restart have stop losses
+                    try:
+                        import asyncio
+                        asyncio.create_task(self.trailing_stop_manager.sync_positions_from_exchange())
+                        self.logger.info("[TRAIL_SL] Started sync of existing positions")
+                    except Exception as sync_e:
+                        self.logger.warning(f"[TRAIL_SL] Initial sync failed: {sync_e}")
+
                 except Exception as trail_e:
                     self.logger.warning(
                         "[TRAIL_SL] Failed to initialize trailing stop manager: %s",
@@ -4963,11 +4978,37 @@ class LiveTradingEngine:
             # Round SL price to tick size
             rounded_sl_price = self._round_price(sl_price)
 
+            # Get position quantity (closePosition no longer works - requires Algo API)
+            position_qty = 0.0
+            if hasattr(self, "client") and self.client:
+                try:
+                    positions = self.client.get_positions()
+                    for pos in positions:
+                        if pos.get('symbol') == symbol.upper():
+                            position_qty = abs(float(pos.get('positionAmt', 0)))
+                            break
+                except Exception as e:
+                    self.logger.warning(f"[SL_ORDER] Failed to get position qty: {e}")
+
+            if position_qty <= 0:
+                self.logger.warning(f"[SL_ORDER] No position found for {symbol}, cannot place SL")
+                return
+
+            # Calculate limit price (slightly worse than stop to ensure fill)
+            slippage_pct = 0.005  # 0.5% slippage buffer
+            if sl_side == "SELL":
+                limit_price = rounded_sl_price * (1 - slippage_pct)
+            else:
+                limit_price = rounded_sl_price * (1 + slippage_pct)
+            limit_price = self._round_price(limit_price)
+
             self.logger.info(
-                "[SL_ORDER] Placing %s STOP_MARKET (closePosition): %s @ %.2f",
+                "[SL_ORDER] Placing %s STOP: %s qty=%.4f @ stop=%.4f limit=%.4f",
                 sl_side,
                 symbol,
+                position_qty,
                 rounded_sl_price,
+                limit_price,
             )
 
             if hasattr(self, "client") and self.client:
@@ -4977,20 +5018,25 @@ class LiveTradingEngine:
                     "[TIME_SYNC] Using client internal timestamp handling"
                 )
 
-                # Place STOP_MARKET order with closePosition=true
-                # This closes entire position when stop price is hit
+                # Place STOP (limit) order - STOP_MARKET no longer supported on standard endpoint
                 sl_result = self.client.place_order(
                     symbol=symbol,
                     side=sl_side,
-                    type="STOP_MARKET",
+                    type="STOP",  # CHANGED: STOP instead of STOP_MARKET
+                    quantity=position_qty,
+                    price=limit_price,  # Required for STOP orders
                     stopPrice=rounded_sl_price,
-                    closePosition="true",  # Close all position
-                    workingType="MARK_PRICE",  # Use mark price to avoid manipulation
+                    timeInForce="GTC",
+                    reduceOnly="true",
+                    workingType="MARK_PRICE",
                 )
 
                 self.logger.info(
-                    "[SL_SUCCESS] Stop loss placed: %s (closePosition=true)",
+                    "[SL_SUCCESS] Stop loss placed: %s (qty=%s, stop=%.4f, limit=%.4f)",
                     sl_result.get("orderId", "N/A"),
+                    position_qty,
+                    rounded_sl_price,
+                    limit_price,
                 )
 
         except Exception as e:
