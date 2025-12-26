@@ -623,12 +623,7 @@ class AdvancedMLLearningSystem:
 
             # Анализируем текущие рыночные условия
             features = self.extract_features(current_market, 1.0, recent_performance)
-
-            # DEBUG: Проверяем количество признаков
-            features_dict = asdict(features)
-            logger.info(f"🔍 [DEBUG_{symbol}] Feature count: {len(features_dict)}, Fields: {list(features_dict.keys())}")
-
-            feature_array = np.array([list(features_dict.values())])
+            feature_array = np.array([list(asdict(features).values())])
 
             # Получаем предсказания от моделей КОНКРЕТНОЙ ПАРЫ
             expected_pnl = models['pnl_predictor'].predict(feature_array)[0]
