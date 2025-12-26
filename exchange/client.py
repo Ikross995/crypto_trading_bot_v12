@@ -238,7 +238,7 @@ class BinanceClient:
         logger.debug(f"[SIGN] Using timestamp: {server_time} (local: {local_time}, offset: {time_offset}ms)")
         return p
 
-    def _rest(self, method: str, path: str, payload: Dict[str, Any], use_body: bool = False) -> Any:
+    def _rest(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
         """
         REST API call with signature.
 
@@ -246,8 +246,6 @@ class BinanceClient:
             method: HTTP method (GET, POST, DELETE)
             path: API endpoint path
             payload: Request parameters
-            use_body: If True, send POST data in request body instead of query params
-                      (required for some endpoints like algoOrder)
         """
         url = self._base + path
         signed = self._sign(payload)
@@ -255,12 +253,7 @@ class BinanceClient:
             if method == "GET":
                 r = self.session.get(url, params=signed, headers=self._headers(), timeout=10)
             elif method == "POST":
-                if use_body:
-                    # Send as form data in body (for algoOrder endpoint)
-                    r = self.session.post(url, data=signed, headers=self._headers(), timeout=10)
-                else:
-                    # Send as query params (standard behavior)
-                    r = self.session.post(url, params=signed, headers=self._headers(), timeout=10)
+                r = self.session.post(url, params=signed, headers=self._headers(), timeout=10)
             elif method == "DELETE":
                 r = self.session.delete(url, params=signed, headers=self._headers(), timeout=10)
             else:
@@ -271,6 +264,57 @@ class BinanceClient:
             return data
         except Exception as e:
             logger.error("REST call failed: %s %s payload=%s err=%s", method, path, payload, e)
+            raise
+
+    def _rest_algo_order(self, payload: Dict[str, Any]) -> Any:
+        """
+        Special REST call for Algo Order API which requires specific signing.
+
+        Binance Algo Order API documentation states that for POST requests,
+        the signature should be calculated on totalParams (query string + body).
+        We'll send all params in the query string for simplicity, which works
+        for most Binance endpoints.
+        """
+        url = self._base + "/fapi/v1/algoOrder"
+
+        # Add timestamp and recvWindow before signing
+        p = dict(payload or {})
+        recv = int(getattr(self.cfg, "recv_window_ms", getattr(self.cfg, "RECV_WINDOW_MS", 7000)))
+
+        # Use server-synchronized timestamp
+        local_time = int(time.time() * 1000)
+        time_offset = getattr(self, '_time_offset', 0)
+        server_time = local_time + time_offset
+
+        p["timestamp"] = server_time
+        p["recvWindow"] = recv
+
+        # Build query string with sorted keys (consistent with _sign method)
+        query_string = "&".join(f"{k}={p[k]}" for k in sorted(p.keys()) if p[k] is not None)
+
+        # Calculate signature on the query string
+        sig = hmac.new(
+            self.api_secret.encode("utf-8"),
+            query_string.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Append signature to query string
+        full_query = query_string + "&signature=" + sig
+
+        logger.debug(f"[ALGO_ORDER] URL: {url}")
+        logger.debug(f"[ALGO_ORDER] Query (unsigned): {query_string}")
+
+        try:
+            # Send as query params (not body) - this is what works for other endpoints
+            r = self.session.post(url + "?" + full_query, headers=self._headers(), timeout=10)
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"status": r.status_code, "text": r.text}
+            if not r.ok:
+                logger.error(f"REST POST /fapi/v1/algoOrder failed [{r.status_code}]: {data}")
+                raise RuntimeError(f"REST POST /fapi/v1/algoOrder failed [{r.status_code}]: {data}")
+            return data
+        except Exception as e:
+            logger.error("Algo order REST call failed: payload=%s err=%s", payload, e)
             raise
 
     def _rest_unsigned(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
@@ -452,10 +496,9 @@ class BinanceClient:
                 "closePosition": params.get("closePosition", False),
             }
 
-        # Use REST API directly for algo orders
+        # Use REST API directly for algo orders with special signing
         # python-binance SDK may not have this method yet
-        # Note: algoOrder requires data in request body, not query params
-        return self._rest("POST", "/fapi/v1/algoOrder", params, use_body=True)
+        return self._rest_algo_order(params)
 
     def cancel_algo_order(self, symbol: str, algoId: int) -> Dict[str, Any]:
         """Cancel an algo order by algoId."""
