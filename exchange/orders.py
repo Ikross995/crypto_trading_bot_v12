@@ -397,39 +397,33 @@ class OrderManager:
             self._setup_take_profits(symbol, side, take_profits, tp_quantities)
 
     def _setup_stop_loss(self, symbol: str, side: SideLike, stop_price: float) -> None:
+        """
+        Register stop loss level for SOFTWARE monitoring.
+
+        NOTE: Binance Futures no longer supports STOP/STOP_MARKET orders on standard endpoint.
+        Stop losses are now handled by TrailingStopManager using SOFTWARE monitoring:
+        - It monitors mark price in real-time
+        - When SL level is hit, it closes position with MARKET order
+
+        This method just records the SL level for tracking purposes.
+        The actual SL execution is done by trailing_stop_manager.
+        """
         try:
             self._cancel_existing_exit_order(symbol, "stop_loss")
 
-            # Get current position quantity for reduceOnly order
-            # (closePosition is no longer supported on standard endpoint)
-            positions = self.client.get_positions()
-            position_qty = 0.0
-            for pos in positions:
-                if pos.get('symbol') == symbol.upper():
-                    position_qty = abs(float(pos.get('positionAmt', 0)))
-                    break
+            # Record the SL level (for tracking/display purposes)
+            # Actual monitoring is done by TrailingStopManager
+            self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
+                "order_id": "SOFTWARE_SL",  # No exchange order - software monitoring
+                "price": float(stop_price),
+                "timestamp": time.time(),
+                "type": "SOFTWARE"  # Mark as software SL
+            }
 
-            if position_qty <= 0:
-                logger.warning(f"No position found for {symbol}, cannot setup stop loss")
-                return
+            logger.info(f"📋 [SOFTWARE_SL] Registered stop loss for {symbol} @ {stop_price:.4f} (monitored by TrailingStopManager)")
 
-            order = self.place_stop_market_order(
-                symbol=symbol,
-                side=side,
-                quantity=position_qty,  # Use actual position qty instead of closePosition
-                stop_price=stop_price,
-                close_position=False,   # CRITICAL: Don't use closePosition (requires Algo API)
-                working_type=_as_working_type(self.config.exit_working_type)
-            )
-            if order:
-                self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
-                    "order_id": order.order_id,
-                    "price": float(order.stop_price or stop_price),
-                    "timestamp": time.time()
-                }
-                logger.info(f"Setup stop loss for {symbol} @ {order.stop_price or stop_price} (qty={position_qty})")
         except Exception as e:
-            logger.error(f"Failed to setup stop loss for {symbol}: {e}")
+            logger.error(f"Failed to register stop loss for {symbol}: {e}")
 
     def _setup_take_profits(self, symbol: str, side: SideLike,
                             prices: List[float], quantities: List[float]) -> None:

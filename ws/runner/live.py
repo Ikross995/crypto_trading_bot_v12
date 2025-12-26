@@ -4967,76 +4967,67 @@ class LiveTradingEngine:
     async def _place_stop_loss_order(
         self, symbol: str, side: str, qty: float, sl_price: float
     ) -> None:
-        """Place stop loss order (cancels existing exit orders first)."""
-        try:
-            # Cancel existing exit orders before placing new ones
-            await self._cancel_exit_orders(symbol)
+        """Register stop loss level for SOFTWARE monitoring.
 
-            # Determine SL order side (opposite of entry)
-            sl_side = "SELL" if side == "BUY" else "BUY"
+        NOTE: Binance Futures no longer supports STOP/STOP_MARKET orders on standard endpoint.
+        Stop losses are handled by TrailingStopManager using SOFTWARE monitoring:
+        - It monitors mark price in real-time
+        - When SL level is hit, it closes position with MARKET order
+
+        This method ensures the position is registered with trailing_stop_manager.
+        """
+        try:
+            # Cancel existing exit orders (if any exchange orders exist)
+            await self._cancel_exit_orders(symbol)
 
             # Round SL price to tick size
             rounded_sl_price = self._round_price(sl_price)
 
-            # Get position quantity (closePosition no longer works - requires Algo API)
-            position_qty = 0.0
-            if hasattr(self, "client") and self.client:
-                try:
-                    positions = self.client.get_positions()
-                    for pos in positions:
-                        if pos.get('symbol') == symbol.upper():
-                            position_qty = abs(float(pos.get('positionAmt', 0)))
-                            break
-                except Exception as e:
-                    self.logger.warning(f"[SL_ORDER] Failed to get position qty: {e}")
-
-            if position_qty <= 0:
-                self.logger.warning(f"[SL_ORDER] No position found for {symbol}, cannot place SL")
-                return
-
-            # Calculate limit price (slightly worse than stop to ensure fill)
-            slippage_pct = 0.005  # 0.5% slippage buffer
-            if sl_side == "SELL":
-                limit_price = rounded_sl_price * (1 - slippage_pct)
-            else:
-                limit_price = rounded_sl_price * (1 + slippage_pct)
-            limit_price = self._round_price(limit_price)
-
             self.logger.info(
-                "[SL_ORDER] Placing %s STOP: %s qty=%.4f @ stop=%.4f limit=%.4f",
-                sl_side,
+                "[SOFTWARE_SL] Registering stop loss for %s: side=%s @ %.4f",
                 symbol,
-                position_qty,
+                side,
                 rounded_sl_price,
-                limit_price,
             )
 
-            if hasattr(self, "client") and self.client:
-                # Skip time sync - method not available in BinanceClient
-                # Binance client handles timestamp internally
-                self.logger.debug(
-                    "[TIME_SYNC] Using client internal timestamp handling"
-                )
+            # Ensure position is registered with TrailingStopManager for SOFTWARE SL monitoring
+            if hasattr(self, "trailing_stop_manager") and self.trailing_stop_manager:
+                # Get entry price
+                entry_price = 0.0
+                if hasattr(self, "client") and self.client:
+                    try:
+                        positions = self.client.get_positions()
+                        for pos in positions:
+                            if pos.get('symbol') == symbol.upper():
+                                entry_price = float(pos.get('entryPrice', 0))
+                                break
+                    except Exception:
+                        pass
 
-                # Place STOP (limit) order - STOP_MARKET no longer supported on standard endpoint
-                sl_result = self.client.place_order(
-                    symbol=symbol,
-                    side=sl_side,
-                    type="STOP",  # CHANGED: STOP instead of STOP_MARKET
-                    quantity=position_qty,
-                    price=limit_price,  # Required for STOP orders
-                    stopPrice=rounded_sl_price,
-                    timeInForce="GTC",
-                    reduceOnly="true",
-                    workingType="MARK_PRICE",
-                )
+                if entry_price > 0:
+                    # Register position with trailing stop manager for SOFTWARE SL
+                    self.trailing_stop_manager.register_position(
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        side=side,
+                        tp_levels=[],  # TPs handled separately
+                        initial_sl=rounded_sl_price
+                    )
 
-                self.logger.info(
-                    "[SL_SUCCESS] Stop loss placed: %s (qty=%s, stop=%.4f, limit=%.4f)",
-                    sl_result.get("orderId", "N/A"),
-                    position_qty,
-                    rounded_sl_price,
-                    limit_price,
+                    self.logger.info(
+                        "[SOFTWARE_SL] ✅ Stop loss registered: %s @ %.4f (monitored by TrailingStopManager)",
+                        symbol,
+                        rounded_sl_price,
+                    )
+                else:
+                    self.logger.warning(
+                        "[SOFTWARE_SL] Could not get entry price for %s, SL not registered",
+                        symbol,
+                    )
+            else:
+                self.logger.warning(
+                    "[SOFTWARE_SL] TrailingStopManager not available, SL not registered for %s",
+                    symbol,
                 )
 
         except Exception as e:

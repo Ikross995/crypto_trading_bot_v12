@@ -1,14 +1,17 @@
 """
 Trailing Stop Loss Manager with Take Profit Integration.
 
-Automatically adjusts stop loss after each take profit fill:
-- After 1st TP: Move SL to 50% between entry and current price (partial protection)
-- After 2nd TP: Move SL to break-even (entry price)
-- After 3rd TP: Keep trailing or close remaining position
+SOFTWARE STOP LOSS IMPLEMENTATION (December 2025):
+Binance Futures no longer supports STOP_MARKET or STOP orders on the standard
+/fapi/v1/order endpoint - they require the Algo Order API.
+This manager now implements SOFTWARE stop loss monitoring:
+- Monitors mark price in real-time
+- When SL price is hit, closes position with MARKET order
+- No exchange-side stop orders needed
 
 Features:
-- Monitors TP order fills in real-time
-- Cancels old SL before placing new one
+- Monitors TP order fills and adjusts SL level
+- SOFTWARE stop loss - monitors price and executes MARKET order when hit
 - Prevents spam with cooldown logic
 - Supports both LONG and SHORT positions
 """
@@ -313,24 +316,18 @@ class TrailingStopManager:
             logger.warning(f"[TRAIL_SL] {symbol}: New SL {new_sl:.4f} is not better than old {old_sl:.4f}")
             return False
         
-        # Cancel old SL and place new one
+        # SOFTWARE SL: Just update the internal level - no exchange orders needed
+        # The _check_software_stop_loss() method monitors price and closes with MARKET when hit
         try:
-            logger.info(f"[TRAIL_SL] {symbol}: Updating SL: {old_sl:.4f} → {new_sl:.4f} "
+            logger.info(f"[TRAIL_SL] {symbol}: Updating SOFTWARE SL: {old_sl:.4f} → {new_sl:.4f} "
                        f"(after {tp_filled_count} TP fills, rule: {adjustment_rule})")
-            
-            # CRITICAL FIX: Cancel existing SL orders directly via client
-            await self._cancel_existing_sl_orders(symbol)
-            
-            # Place new SL order directly via client
-            close_side = "SELL" if side == "BUY" else "BUY"
-            await self._place_stop_loss_order(symbol, close_side, new_sl)
-            
-            # Update internal state
+
+            # Update internal state - this is what _check_software_stop_loss uses
             pos_data["last_sl"] = new_sl
-            
-            logger.info(f"[TRAIL_SL] {symbol}: SL updated successfully to {new_sl:.4f}")
+
+            logger.info(f"✅ [TRAIL_SL] {symbol}: SL level updated to {new_sl:.4f} (software monitoring)")
             return True
-        
+
         except Exception as e:
             logger.error(f"[TRAIL_SL] {symbol}: Failed to update SL: {e}")
             return False
@@ -422,22 +419,23 @@ class TrailingStopManager:
         """Monitor all registered positions and update SL if needed."""
         for symbol in list(self._positions.keys()):
             try:
-                # CRITICAL: First ensure stop loss exists!
-                await self._ensure_stop_exists(symbol)
+                # CRITICAL: Check if stop loss should trigger (SOFTWARE SL)
+                await self._check_software_stop_loss(symbol)
 
                 # Then check for TP fills and update SL accordingly
                 await self.check_and_update(symbol)
             except Exception as e:
                 logger.error(f"[TRAIL_SL] Error monitoring {symbol}: {e}")
 
-    async def _ensure_stop_exists(self, symbol: str) -> bool:
+    async def _check_software_stop_loss(self, symbol: str) -> bool:
         """
-        Check if stop loss order exists for position, place one if not.
+        SOFTWARE STOP LOSS: Check if current price hit stop loss level.
 
-        CRITICAL: This ensures positions ALWAYS have a stop loss!
+        Since Binance no longer supports STOP orders on standard endpoint,
+        we monitor price ourselves and close with MARKET order when SL hit.
 
         Returns:
-            True if SL exists or was placed, False on error
+            True if SL was triggered and position closed, False otherwise
         """
         if symbol not in self._positions:
             return False
@@ -447,70 +445,52 @@ class TrailingStopManager:
         last_sl = pos_data.get("last_sl", 0)
 
         if last_sl <= 0:
-            logger.warning(f"[TRAIL_SL] {symbol}: No SL price registered, cannot ensure SL")
+            logger.warning(f"[SOFT_SL] {symbol}: No SL price registered")
             return False
 
         try:
-            # Check if any SL order exists
-            open_orders = self.client.get_open_orders(symbol)
-            has_sl = False
+            # Get current mark price
+            mark_price = float(self.client.get_mark_price(symbol))
 
-            for order in open_orders:
-                order_type = order.get('type', '').upper()
-                if order_type in ('STOP_MARKET', 'STOP', 'STOP_LOSS_LIMIT'):
-                    has_sl = True
-                    logger.debug(f"[TRAIL_SL] {symbol}: Found existing SL order {order.get('orderId')}")
-                    break
+            if mark_price <= 0:
+                return False
 
-            if not has_sl:
-                # NO STOP LOSS! Place one immediately
-                logger.warning(f"⚠️ [TRAIL_SL] {symbol}: NO STOP LOSS FOUND! Placing SL @ {last_sl:.4f}")
+            # Check if SL triggered
+            sl_triggered = False
 
-                close_side = "SELL" if side == "BUY" else "BUY"
-                await self._place_stop_loss_order(symbol, close_side, last_sl)
+            if side == "BUY":  # Long position - SL triggers when price falls below SL
+                if mark_price <= last_sl:
+                    sl_triggered = True
+                    logger.warning(f"🛑 [SOFT_SL] {symbol} LONG: Mark {mark_price:.4f} <= SL {last_sl:.4f} - TRIGGERED!")
+            else:  # Short position - SL triggers when price rises above SL
+                if mark_price >= last_sl:
+                    sl_triggered = True
+                    logger.warning(f"🛑 [SOFT_SL] {symbol} SHORT: Mark {mark_price:.4f} >= SL {last_sl:.4f} - TRIGGERED!")
 
-                logger.info(f"✅ [TRAIL_SL] {symbol}: Stop loss restored @ {last_sl:.4f}")
+            if sl_triggered:
+                # Close position with MARKET order
+                await self._close_position_market(symbol, side)
                 return True
 
-            return True
-
-        except Exception as e:
-            logger.error(f"[TRAIL_SL] {symbol}: Failed to ensure SL exists: {e}")
             return False
-    
-    async def _cancel_existing_sl_orders(self, symbol: str) -> None:
-        """Cancel existing stop loss orders for symbol."""
-        try:
-            open_orders = self.client.get_open_orders(symbol)
-            
-            for order in open_orders:
-                order_type = order.get('type', '').upper()
-                is_sl_order = (
-                    order_type in ('STOP_MARKET', 'STOP', 'STOP_LOSS_LIMIT') or
-                    order.get('closePosition', False)
-                )
-                
-                if is_sl_order:
-                    try:
-                        self.client.cancel_order(symbol=symbol, orderId=order['orderId'])
-                        logger.info(f"🎯 [TRAIL_SL] Cancelled existing SL order {order['orderId']} for {symbol}")
-                    except Exception as e:
-                        logger.warning(f"[TRAIL_SL] Failed to cancel SL order {order['orderId']}: {e}")
-        
-        except Exception as e:
-            logger.warning(f"[TRAIL_SL] Failed to cancel existing SL orders for {symbol}: {e}")
-    
-    async def _place_stop_loss_order(self, symbol: str, side: str, stop_price: float) -> None:
-        """Place new stop loss order using STOP (limit) type.
 
-        NOTE: As of late 2025, Binance Futures no longer supports STOP_MARKET
-        on the standard /fapi/v1/order endpoint. We use STOP (limit) instead.
+        except Exception as e:
+            logger.error(f"[SOFT_SL] {symbol}: Failed to check SL: {e}")
+            return False
+
+    async def _close_position_market(self, symbol: str, position_side: str) -> bool:
+        """
+        Close position immediately with MARKET order.
+
+        Args:
+            symbol: Trading pair
+            position_side: Current position side ("BUY" for long, "SELL" for short)
+
+        Returns:
+            True if position closed successfully
         """
         try:
-            # Round stop price to proper precision using exchange filters
-            rounded_stop_price = adjust_price(symbol, stop_price)
-
-            # Get position quantity (closePosition no longer works on standard endpoint)
+            # Get position quantity
             positions = self.client.get_positions()
             position_qty = 0.0
             for pos in positions:
@@ -519,37 +499,40 @@ class TrailingStopManager:
                     break
 
             if position_qty <= 0:
-                logger.warning(f"[TRAIL_SL] No position found for {symbol}, cannot place SL")
-                return
+                logger.warning(f"[SOFT_SL] {symbol}: No position found to close")
+                self.unregister_position(symbol)
+                return False
 
-            # Calculate limit price (slightly worse than stop to ensure fill)
-            slippage_pct = 0.005  # 0.5% slippage buffer
-            if side == "SELL":
-                limit_price = rounded_stop_price * (1 - slippage_pct)
-            else:
-                limit_price = rounded_stop_price * (1 + slippage_pct)
-            limit_price = adjust_price(symbol, limit_price)
+            # Determine close side (opposite of position)
+            close_side = "SELL" if position_side == "BUY" else "BUY"
 
-            # Place STOP (limit) order - STOP_MARKET no longer supported on standard endpoint
+            logger.info(f"🛑 [SOFT_SL] {symbol}: Closing position with MARKET order: {close_side} {position_qty}")
+
+            # Place market order to close
             order_result = self.client.place_order(
                 symbol=symbol,
-                side=side,
-                type="STOP",  # CHANGED: STOP instead of STOP_MARKET
+                side=close_side,
+                type="MARKET",
                 quantity=position_qty,
-                price=limit_price,  # Required for STOP orders
-                stopPrice=rounded_stop_price,
-                timeInForce="GTC",
-                reduceOnly="true",
-                workingType="MARK_PRICE"
+                reduceOnly="true"
             )
 
-            logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} {position_qty} @ stop={rounded_stop_price:.4f} limit={limit_price:.4f} "
-                       f"(order: {order_result.get('orderId', 'N/A')})")
+            order_id = order_result.get('orderId', 'N/A')
+            logger.info(f"✅ [SOFT_SL] {symbol}: Position closed! Order ID: {order_id}")
+
+            # Unregister position
+            self.unregister_position(symbol)
+
+            return True
 
         except Exception as e:
-            logger.error(f"[TRAIL_SL] Failed to place SL order for {symbol}: {e}")
-            raise
+            logger.error(f"[SOFT_SL] {symbol}: Failed to close position: {e}")
+            return False
     
+    # NOTE: _cancel_existing_sl_orders and _place_stop_loss_order removed
+    # Binance no longer supports STOP orders on standard endpoint (requires Algo API)
+    # We now use SOFTWARE stop loss - see _check_software_stop_loss() and _close_position_market()
+
     def get_status(self, symbol: str) -> Optional[dict]:
         """Get current trailing stop status for a symbol."""
         return self._positions.get(symbol)
