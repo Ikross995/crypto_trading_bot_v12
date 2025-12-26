@@ -196,10 +196,13 @@ class RegimeDetector:
 
         # ========== VOLATILE REGIME ==========
         else:
-            # В волатильности блокируем mean-reversion - слишком рискованно
-            if signal_name in mean_reversion_signals and regime.adx > 22:
+            # 🔧 FIXED: Блокируем mean-reversion ВСЕГДА в volatile (ADX 20-25)
+            # Раньше: блокировали только при ADX > 22
+            # Теперь: блокируем ВСЕ mean-reversion в любой волатильности
+            if signal_name in mean_reversion_signals:
                 logger.warning(
-                    f"🚫 BLOCKED {signal_name} in VOLATILE regime (ADX={regime.adx:.1f})"
+                    f"🚫 BLOCKED {signal_name} in VOLATILE regime (ADX={regime.adx:.1f}) - "
+                    f"mean-reversion опасен при неопределенном тренде!"
                 )
                 return False
             return True
