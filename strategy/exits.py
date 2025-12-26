@@ -179,31 +179,40 @@ class ExitManager:
             order_side = OrderSide.SELL if position.is_long else OrderSide.BUY
             logger.debug(f"[STOP_LOSS] 📋 Order details: side={order_side.value}, working_type={self.config.exit_working_type}")
             
-            # SOFTWARE STOP LOSS: Register SL level for monitoring
-            # NOTE: Binance no longer supports STOP orders on standard endpoint (requires Algo API)
-            # TrailingStopManager monitors price and closes with MARKET order when SL hit
-            logger.info(f"[STOP_LOSS] 📋 Registering SOFTWARE stop loss for {symbol} @ {stop_price:.4f}")
-
-            # Create exit order record (for tracking purposes)
-            exit_order = ExitOrder(
-                exit_type=ExitType.STOP_LOSS,
-                price=stop_price,
-                quantity=0.0,  # Full position
-                order_id="SOFTWARE_SL",  # No exchange order - software monitoring
-                status=ExitStatus.ACTIVE,
-                created_at=time.time(),
-                metadata={
-                    "position_side": "long" if position.is_long else "short",
-                    "entry_price": position.entry_price,
-                    "stop_distance_pct": stop_distance_pct,
-                    "type": "SOFTWARE"  # Mark as software SL
-                }
+            # Place STOP_MARKET via Algo Order API (closePosition=true)
+            logger.info(f"[STOP_LOSS] 📤 Placing stop order via Algo API for {symbol}...")
+            order = self.order_manager.place_stop_market_order(
+                symbol=symbol,
+                side=order_side,
+                stop_price=stop_price,
+                close_position=True,  # Close entire position
+                working_type=WorkingType(self.config.exit_working_type)
             )
 
-            self.active_exits[symbol].append(exit_order)
-            logger.info(f"[STOP_LOSS] ✅ SOFTWARE SL registered for {symbol}: "
-                       f"stop={format_price(stop_price)}, distance={stop_distance_pct:.2f}%")
-            return True
+            if order and order.order_id:
+                exit_order = ExitOrder(
+                    exit_type=ExitType.STOP_LOSS,
+                    price=stop_price,
+                    quantity=0.0,  # Full position
+                    order_id=order.order_id,
+                    status=ExitStatus.ACTIVE,
+                    created_at=time.time(),
+                    metadata={
+                        "position_side": "long" if position.is_long else "short",
+                        "entry_price": position.entry_price,
+                        "stop_distance_pct": stop_distance_pct,
+                        "type": "ALGO"  # Algo order
+                    }
+                )
+
+                self.active_exits[symbol].append(exit_order)
+                logger.info(f"[STOP_LOSS] ✅ Algo SL placed for {symbol}: "
+                           f"algoId={order.order_id}, stop={format_price(stop_price)}, "
+                           f"distance={stop_distance_pct:.2f}%")
+                return True
+            else:
+                logger.error(f"[STOP_LOSS] ❌ Failed to place algo order for {symbol}")
+                return False
             
         except Exception as e:
             logger.error(f"[STOP_LOSS] ❌ Exception for {symbol}: {e}")
@@ -396,36 +405,47 @@ class ExitManager:
                 self._update_stop_price(symbol, new_stop_price, trailing)
 
     def _update_stop_price(self, symbol: str, new_stop_price: float, trailing: dict) -> None:
-        """Update trailing stop price (SOFTWARE SL - no exchange orders)."""
+        """Update trailing stop price via Algo Order API."""
         try:
             old_stop = trailing.get("stop_price")
             trailing["stop_price"] = new_stop_price
 
-            # SOFTWARE STOP LOSS: Just update the internal level
-            # TrailingStopManager monitors price and closes with MARKET when hit
-            # No exchange orders needed
-
-            # Cancel existing trailing stop record if exists
+            # Cancel existing trailing stop orders
             self._cancel_trailing_stop_order(symbol)
 
-            # Add to active exits (for tracking purposes)
-            exit_order = ExitOrder(
-                exit_type=ExitType.TRAILING_STOP,
-                price=new_stop_price,
-                quantity=0.0,
-                order_id="SOFTWARE_TRAILING_SL",  # No exchange order
-                status=ExitStatus.ACTIVE,
-                created_at=time.time(),
-                metadata={"type": "SOFTWARE"}
-            )
+            # Place new trailing stop via Algo API
+            position = trailing["position"]
+            order_side = OrderSide.SELL if position.is_long else OrderSide.BUY
 
-            if symbol not in self.active_exits:
-                self.active_exits[symbol] = []
+            if self.order_manager:
+                order = self.order_manager.place_stop_market_order(
+                    symbol=symbol,
+                    side=order_side,
+                    stop_price=new_stop_price,
+                    close_position=True,  # Close entire position
+                    working_type=WorkingType.MARK_PRICE
+                )
 
-            self.active_exits[symbol].append(exit_order)
+                if order and order.order_id:
+                    exit_order = ExitOrder(
+                        exit_type=ExitType.TRAILING_STOP,
+                        price=new_stop_price,
+                        quantity=0.0,
+                        order_id=order.order_id,
+                        status=ExitStatus.ACTIVE,
+                        created_at=time.time(),
+                        metadata={"type": "ALGO"}
+                    )
 
-            logger.debug(f"Trailing stop updated for {symbol}: "
-                        f"{format_price(old_stop) if old_stop else 'None'} -> {format_price(new_stop_price)} (SOFTWARE)")
+                    if symbol not in self.active_exits:
+                        self.active_exits[symbol] = []
+
+                    self.active_exits[symbol].append(exit_order)
+
+                    logger.debug(f"Trailing stop updated for {symbol}: "
+                                f"{format_price(old_stop) if old_stop else 'None'} -> {format_price(new_stop_price)} (Algo)")
+                else:
+                    logger.warning(f"Failed to place trailing stop order for {symbol}")
 
         except Exception as e:
             logger.error(f"Failed to update trailing stop price for {symbol}: {e}")

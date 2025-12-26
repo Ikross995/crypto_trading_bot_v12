@@ -4967,32 +4967,56 @@ class LiveTradingEngine:
     async def _place_stop_loss_order(
         self, symbol: str, side: str, qty: float, sl_price: float
     ) -> None:
-        """Register stop loss level for SOFTWARE monitoring.
+        """Place stop loss order via Algo Order API.
 
-        NOTE: Binance Futures no longer supports STOP/STOP_MARKET orders on standard endpoint.
-        Stop losses are handled by TrailingStopManager using SOFTWARE monitoring:
-        - It monitors mark price in real-time
-        - When SL level is hit, it closes position with MARKET order
+        As of December 2025, Binance requires conditional orders to be placed
+        via /fapi/v1/algoOrder endpoint. Uses closePosition=true to close
+        entire position when triggered.
 
-        This method ensures the position is registered with trailing_stop_manager.
+        Also registers with TrailingStopManager for software monitoring backup.
         """
         try:
-            # Cancel existing exit orders (if any exchange orders exist)
+            # Cancel existing exit orders
             await self._cancel_exit_orders(symbol)
 
             # Round SL price to tick size
             rounded_sl_price = self._round_price(sl_price)
 
+            # Determine SL order side (opposite of entry)
+            sl_side = "SELL" if side == "BUY" else "BUY"
+
             self.logger.info(
-                "[SOFTWARE_SL] Registering stop loss for %s: side=%s @ %.4f",
+                "[ALGO_SL] Placing stop loss for %s: %s @ %.4f",
                 symbol,
-                side,
+                sl_side,
                 rounded_sl_price,
             )
 
-            # Ensure position is registered with TrailingStopManager for SOFTWARE SL monitoring
+            # Place via Algo Order API
+            if hasattr(self, "client") and self.client:
+                try:
+                    sl_result = self.client.place_algo_order(
+                        algoType="CONDITIONAL",
+                        symbol=symbol,
+                        side=sl_side,
+                        type="STOP_MARKET",
+                        triggerPrice=str(rounded_sl_price),
+                        closePosition="true",
+                        workingType="MARK_PRICE"
+                    )
+
+                    algo_id = sl_result.get("algoId", "N/A")
+                    self.logger.info(
+                        "[ALGO_SL] ✅ Stop loss placed: %s (algoId=%s, trigger=%.4f)",
+                        symbol,
+                        algo_id,
+                        rounded_sl_price,
+                    )
+                except Exception as e:
+                    self.logger.error("[ALGO_SL] Failed to place algo order: %s", e)
+
+            # Also register with TrailingStopManager for software monitoring backup
             if hasattr(self, "trailing_stop_manager") and self.trailing_stop_manager:
-                # Get entry price
                 entry_price = 0.0
                 if hasattr(self, "client") and self.client:
                     try:
@@ -5005,30 +5029,13 @@ class LiveTradingEngine:
                         pass
 
                 if entry_price > 0:
-                    # Register position with trailing stop manager for SOFTWARE SL
                     self.trailing_stop_manager.register_position(
                         symbol=symbol,
                         entry_price=entry_price,
                         side=side,
-                        tp_levels=[],  # TPs handled separately
+                        tp_levels=[],
                         initial_sl=rounded_sl_price
                     )
-
-                    self.logger.info(
-                        "[SOFTWARE_SL] ✅ Stop loss registered: %s @ %.4f (monitored by TrailingStopManager)",
-                        symbol,
-                        rounded_sl_price,
-                    )
-                else:
-                    self.logger.warning(
-                        "[SOFTWARE_SL] Could not get entry price for %s, SL not registered",
-                        symbol,
-                    )
-            else:
-                self.logger.warning(
-                    "[SOFTWARE_SL] TrailingStopManager not available, SL not registered for %s",
-                    symbol,
-                )
 
         except Exception as e:
             self.logger.error("[SL_FAILED] Failed to place stop loss: %s", e)

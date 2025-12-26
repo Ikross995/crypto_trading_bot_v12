@@ -253,20 +253,16 @@ class OrderManager:
         position_side: str = "BOTH"
     ) -> Optional[Order]:
         """
-        Place STOP order for SL.
+        Place STOP_MARKET order via Algo Order API.
 
-        NOTE: As of late 2025, Binance Futures no longer supports STOP_MARKET
-        on the standard /fapi/v1/order endpoint. We use STOP (limit) instead,
-        with the limit price set slightly worse than stop price to ensure fill.
+        As of December 2025, Binance requires conditional orders (STOP_MARKET,
+        STOP, TAKE_PROFIT, etc.) to be placed via /fapi/v1/algoOrder endpoint.
 
         Anti-2021: move stop 2-3 ticks away from mark to avoid immediate trigger.
         """
         try:
             if stop_price is None or stop_price <= 0:
                 raise ValueError("stop_price must be positive")
-
-            if quantity is None or quantity <= 0:
-                raise ValueError("quantity must be positive (closePosition no longer supported)")
 
             f = self._get_symbol_filters(symbol)
             mark = self._get_mark_or_last(symbol)
@@ -276,7 +272,7 @@ class OrderManager:
             s = _as_side(side)
             sp = float(stop_price)
 
-            # Anti -2021 immediate trigger fix
+            # Anti-2021 immediate trigger fix
             if mark > 0:
                 if s == "SELL":  # closing LONG -> stop below mark
                     if sp >= mark:
@@ -286,46 +282,63 @@ class OrderManager:
                         sp = mark + 3.0 * eps
 
             sp = round_price(symbol, sp, tick)
-
-            # Calculate limit price (slightly worse than stop to ensure fill)
-            # For SELL stop: limit below stop price
-            # For BUY stop: limit above stop price
-            slippage_pct = 0.005  # 0.5% slippage buffer
-            if s == "SELL":
-                limit_price = sp * (1 - slippage_pct)
-            else:
-                limit_price = sp * (1 + slippage_pct)
-            limit_price = round_price(symbol, limit_price, tick)
-
             wkt = _as_working_type(working_type)
 
-            # Validate quantity
-            q, _ = self._validate_order_params(symbol, side, float(quantity), order_type="STOP")
-
-            # Use STOP (limit) instead of STOP_MARKET
-            # STOP_MARKET is no longer supported on standard endpoint
+            # Build Algo Order params
+            # Note: triggerPrice is used instead of stopPrice in Algo API
             params = {
+                "algoType": "CONDITIONAL",
                 "symbol": symbol.upper(),
                 "side": s,
-                "type": "STOP",  # CHANGED: STOP instead of STOP_MARKET
-                "quantity": str(q),
-                "price": str(limit_price),  # Required for STOP orders
-                "stopPrice": str(sp),
-                "timeInForce": "GTC",
+                "type": "STOP_MARKET",  # Algo API supports STOP_MARKET
+                "triggerPrice": str(sp),
                 "workingType": wkt,
-                "reduceOnly": "true",
-                "newOrderRespType": "RESULT",
                 "positionSide": position_side
             }
 
-            logger.info(f"[STOP_ORDER] Placing {s} STOP: {symbol} qty={q} stop@{sp} limit@{limit_price}")
+            if close_position:
+                # closePosition=true closes entire position
+                params["closePosition"] = "true"
+                logger.info(f"[ALGO_SL] Placing {s} STOP_MARKET (closePosition): {symbol} trigger@{sp}")
+            else:
+                # Use quantity with reduceOnly
+                if quantity is None or quantity <= 0:
+                    raise ValueError("quantity must be positive when not using closePosition")
+                q, _ = self._validate_order_params(symbol, side, float(quantity), order_type="STOP_MARKET")
+                params["quantity"] = str(q)
+                params["reduceOnly"] = "true"
+                logger.info(f"[ALGO_SL] Placing {s} STOP_MARKET: {symbol} qty={q} trigger@{sp}")
 
-            resp = self.client.place_order(**params)
-            return self._response_to_order(resp)
+            # Use Algo Order API
+            resp = self.client.place_algo_order(**params)
+
+            # Convert algo response to Order object
+            return self._algo_response_to_order(resp, sp)
 
         except Exception as e:
             logger.error(f"Failed to place stop order {symbol} {_as_side(side)} stop@{stop_price}: {e}")
             return None
+
+    def _algo_response_to_order(self, r: Dict, stop_price: float = None) -> Optional[Order]:
+        """Convert Algo Order API response to Order object."""
+        if not r:
+            return None
+        return Order(
+            symbol=r.get("symbol", ""),
+            side=OrderSide(r.get("side", "BUY")) if r.get("side") else None,
+            order_type=OrderType(r.get("type", "MARKET")) if r.get("type") else None,
+            quantity=float(r.get("quantity", "0") or 0),
+            price=float(r.get("price", "0") or 0) if r.get("price") else None,
+            stop_price=float(r.get("triggerPrice", "0") or stop_price or 0),
+            order_id=str(r.get("algoId", "")),  # Algo orders use algoId
+            client_order_id=r.get("clientAlgoId"),
+            status=OrderStatus.NEW if r.get("algoStatus") == "NEW" else None,
+            filled_qty=0.0,  # Algo orders don't have executedQty until triggered
+            avg_price=None,
+            timestamp=datetime.now(),
+            reduce_only=str(r.get("reduceOnly", "false")).lower() == "true",
+            close_position=str(r.get("closePosition", "false")).lower() == "true",
+        )
 
     # -------------------- Open orders / Exits -------------------- #
     def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_order_id: Optional[str] = None) -> bool:
@@ -398,32 +411,55 @@ class OrderManager:
 
     def _setup_stop_loss(self, symbol: str, side: SideLike, stop_price: float) -> None:
         """
-        Register stop loss level for SOFTWARE monitoring.
+        Place stop loss order via Algo Order API.
 
-        NOTE: Binance Futures no longer supports STOP/STOP_MARKET orders on standard endpoint.
-        Stop losses are now handled by TrailingStopManager using SOFTWARE monitoring:
-        - It monitors mark price in real-time
-        - When SL level is hit, it closes position with MARKET order
+        As of December 2025, Binance requires conditional orders to be placed
+        via /fapi/v1/algoOrder endpoint.
 
-        This method just records the SL level for tracking purposes.
-        The actual SL execution is done by trailing_stop_manager.
+        Uses closePosition=true to close entire position when triggered.
+        Software monitoring in TrailingStopManager serves as backup.
         """
         try:
             self._cancel_existing_exit_order(symbol, "stop_loss")
 
-            # Record the SL level (for tracking/display purposes)
-            # Actual monitoring is done by TrailingStopManager
-            self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
-                "order_id": "SOFTWARE_SL",  # No exchange order - software monitoring
-                "price": float(stop_price),
-                "timestamp": time.time(),
-                "type": "SOFTWARE"  # Mark as software SL
-            }
+            # Place STOP_MARKET via Algo API with closePosition=true
+            order = self.place_stop_market_order(
+                symbol=symbol,
+                side=side,
+                stop_price=stop_price,
+                close_position=True,  # Close entire position
+                working_type=_as_working_type(self.config.exit_working_type)
+            )
 
-            logger.info(f"📋 [SOFTWARE_SL] Registered stop loss for {symbol} @ {stop_price:.4f} (monitored by TrailingStopManager)")
+            if order and order.order_id:
+                self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
+                    "order_id": order.order_id,
+                    "algo_id": order.order_id,  # Store algo ID for cancellation
+                    "price": float(order.stop_price or stop_price),
+                    "timestamp": time.time(),
+                    "type": "ALGO"  # Mark as Algo order
+                }
+                logger.info(f"✅ [ALGO_SL] Stop loss placed for {symbol} @ {order.stop_price or stop_price:.4f} (algoId={order.order_id})")
+            else:
+                # Fallback: register for software monitoring
+                self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
+                    "order_id": "SOFTWARE_SL",
+                    "price": float(stop_price),
+                    "timestamp": time.time(),
+                    "type": "SOFTWARE"
+                }
+                logger.warning(f"⚠️ [ALGO_SL] Failed to place algo order, using SOFTWARE SL for {symbol} @ {stop_price:.4f}")
 
         except Exception as e:
-            logger.error(f"Failed to register stop loss for {symbol}: {e}")
+            logger.error(f"Failed to setup stop loss for {symbol}: {e}")
+            # Fallback to software monitoring
+            self._exit_orders.setdefault(symbol, {})["stop_loss"] = {
+                "order_id": "SOFTWARE_SL",
+                "price": float(stop_price),
+                "timestamp": time.time(),
+                "type": "SOFTWARE"
+            }
+            logger.warning(f"⚠️ [ALGO_SL] Exception, using SOFTWARE SL for {symbol} @ {stop_price:.4f}")
 
     def _setup_take_profits(self, symbol: str, side: SideLike,
                             prices: List[float], quantities: List[float]) -> None:

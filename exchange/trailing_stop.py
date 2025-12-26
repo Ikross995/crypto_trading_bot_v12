@@ -316,20 +316,28 @@ class TrailingStopManager:
             logger.warning(f"[TRAIL_SL] {symbol}: New SL {new_sl:.4f} is not better than old {old_sl:.4f}")
             return False
         
-        # SOFTWARE SL: Just update the internal level - no exchange orders needed
-        # The _check_software_stop_loss() method monitors price and closes with MARKET when hit
+        # Update SL: Try Algo API first, fallback to software monitoring
         try:
-            logger.info(f"[TRAIL_SL] {symbol}: Updating SOFTWARE SL: {old_sl:.4f} → {new_sl:.4f} "
+            logger.info(f"[TRAIL_SL] {symbol}: Updating SL: {old_sl:.4f} → {new_sl:.4f} "
                        f"(after {tp_filled_count} TP fills, rule: {adjustment_rule})")
 
-            # Update internal state - this is what _check_software_stop_loss uses
+            # Cancel existing SL orders (both regular and algo)
+            await self._cancel_existing_sl_orders(symbol)
+
+            # Place new SL via Algo API
+            close_side = "SELL" if side == "BUY" else "BUY"
+            await self._place_algo_stop_loss(symbol, close_side, new_sl)
+
+            # Update internal state for software monitoring backup
             pos_data["last_sl"] = new_sl
 
-            logger.info(f"✅ [TRAIL_SL] {symbol}: SL level updated to {new_sl:.4f} (software monitoring)")
+            logger.info(f"✅ [TRAIL_SL] {symbol}: SL updated to {new_sl:.4f}")
             return True
 
         except Exception as e:
             logger.error(f"[TRAIL_SL] {symbol}: Failed to update SL: {e}")
+            # At least update internal state for software monitoring
+            pos_data["last_sl"] = new_sl
             return False
     
     def _calculate_new_sl(self, entry: float, current: float, side: str, rule: str) -> Optional[float]:
@@ -529,9 +537,58 @@ class TrailingStopManager:
             logger.error(f"[SOFT_SL] {symbol}: Failed to close position: {e}")
             return False
     
-    # NOTE: _cancel_existing_sl_orders and _place_stop_loss_order removed
-    # Binance no longer supports STOP orders on standard endpoint (requires Algo API)
-    # We now use SOFTWARE stop loss - see _check_software_stop_loss() and _close_position_market()
+    async def _cancel_existing_sl_orders(self, symbol: str) -> None:
+        """Cancel existing stop loss orders (both regular and algo orders)."""
+        try:
+            # Cancel regular stop orders
+            open_orders = self.client.get_open_orders(symbol)
+            for order in open_orders:
+                order_type = order.get('type', '').upper()
+                if order_type in ('STOP_MARKET', 'STOP', 'STOP_LOSS_LIMIT'):
+                    try:
+                        self.client.cancel_order(symbol=symbol, orderId=order['orderId'])
+                        logger.info(f"[TRAIL_SL] Cancelled regular SL order {order['orderId']} for {symbol}")
+                    except Exception as e:
+                        logger.debug(f"[TRAIL_SL] Failed to cancel order {order['orderId']}: {e}")
+
+            # Cancel algo stop orders
+            try:
+                algo_orders = self.client.get_algo_orders(symbol=symbol)
+                for algo in algo_orders:
+                    if algo.get('algoStatus') == 'NEW' and algo.get('type') in ('STOP_MARKET', 'STOP'):
+                        try:
+                            self.client.cancel_algo_order(symbol=symbol, algoId=algo['algoId'])
+                            logger.info(f"[TRAIL_SL] Cancelled algo SL order {algo['algoId']} for {symbol}")
+                        except Exception as e:
+                            logger.debug(f"[TRAIL_SL] Failed to cancel algo order {algo['algoId']}: {e}")
+            except Exception as e:
+                logger.debug(f"[TRAIL_SL] Failed to get/cancel algo orders for {symbol}: {e}")
+
+        except Exception as e:
+            logger.warning(f"[TRAIL_SL] Failed to cancel existing SL orders for {symbol}: {e}")
+
+    async def _place_algo_stop_loss(self, symbol: str, side: str, stop_price: float) -> None:
+        """Place new stop loss order via Algo Order API."""
+        try:
+            rounded_stop_price = adjust_price(symbol, stop_price)
+
+            # Place STOP_MARKET via Algo API with closePosition=true
+            result = self.client.place_algo_order(
+                algoType="CONDITIONAL",
+                symbol=symbol,
+                side=side,
+                type="STOP_MARKET",
+                triggerPrice=str(rounded_stop_price),
+                closePosition="true",
+                workingType="MARK_PRICE"
+            )
+
+            algo_id = result.get('algoId', 'N/A')
+            logger.info(f"🎯 [TRAIL_SL] Placed new SL via Algo API for {symbol}: {side} @ {rounded_stop_price:.4f} (algoId={algo_id})")
+
+        except Exception as e:
+            logger.error(f"[TRAIL_SL] Failed to place algo SL order for {symbol}: {e}")
+            raise
 
     def get_status(self, symbol: str) -> Optional[dict]:
         """Get current trailing stop status for a symbol."""

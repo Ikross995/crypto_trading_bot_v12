@@ -390,6 +390,80 @@ class BinanceClient:
         # REST fallback
         return self._rest("POST", "/fapi/v1/order", params)
 
+    def place_algo_order(self, **order_params) -> Dict[str, Any]:
+        """
+        Place conditional order via Algo Order API.
+
+        As of December 2025, Binance requires STOP_MARKET/TAKE_PROFIT_MARKET/STOP/
+        TAKE_PROFIT/TRAILING_STOP_MARKET to be placed via /fapi/v1/algoOrder endpoint.
+
+        Required params:
+            algoType: "CONDITIONAL" (only supported type)
+            symbol: Trading pair
+            side: BUY or SELL
+            type: STOP_MARKET, TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET
+            triggerPrice: Price that triggers the order
+
+        Optional params:
+            quantity: Order quantity (cannot use with closePosition=true)
+            price: Limit price (required for STOP, TAKE_PROFIT)
+            closePosition: true to close entire position
+            workingType: MARK_PRICE or CONTRACT_PRICE
+            reduceOnly: true for reduce-only orders
+            timeInForce: GTC, IOC, FOK, GTX
+            positionSide: BOTH, LONG, SHORT
+            priceProtect: true to enable price protection
+        """
+        params = {k: v for k, v in order_params.items() if v is not None}
+
+        # Ensure algoType is set
+        params.setdefault("algoType", "CONDITIONAL")
+
+        symbol = (params.get("symbol") or "").upper()
+        order_type = params.get("type", "")
+
+        if self.dry_run or not self.api_key or not self.api_secret:
+            # simulate acknowledgment
+            return {
+                "algoId": int(time.time() * 1000),
+                "clientAlgoId": f"SIM-ALGO-{int(time.time() * 1000)}",
+                "algoStatus": "NEW",
+                "symbol": symbol,
+                "side": params.get("side"),
+                "type": order_type,
+                "triggerPrice": params.get("triggerPrice"),
+                "quantity": params.get("quantity"),
+                "reduceOnly": params.get("reduceOnly", False),
+                "closePosition": params.get("closePosition", False),
+            }
+
+        # Use REST API directly for algo orders
+        # python-binance SDK may not have this method yet
+        return self._rest("POST", "/fapi/v1/algoOrder", params)
+
+    def cancel_algo_order(self, symbol: str, algoId: int) -> Dict[str, Any]:
+        """Cancel an algo order by algoId."""
+        if self.dry_run or not self.api_key or not self.api_secret:
+            return {"algoId": algoId, "algoStatus": "CANCELLED"}
+
+        return self._rest("DELETE", "/fapi/v1/algoOrder", {
+            "symbol": symbol.upper(),
+            "algoId": algoId
+        })
+
+    def get_algo_orders(self, symbol: str = None, algoId: int = None) -> List[Dict]:
+        """Get all algo orders (active, cancelled, triggered, finished)."""
+        if self.dry_run or not self.api_key or not self.api_secret:
+            return []
+
+        params = {}
+        if symbol:
+            params["symbol"] = symbol.upper()
+        if algoId:
+            params["algoId"] = algoId
+
+        return self._rest("GET", "/fapi/v1/allAlgoOrders", params)
+
     def get_account_balance(self) -> float:
         if self.client:
             try:
