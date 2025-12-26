@@ -2,6 +2,11 @@
 Example: Train and use GRU model for price prediction
 """
 
+# Fix imports for Windows/standalone execution
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import asyncio
 import pandas as pd
 import numpy as np
@@ -9,7 +14,7 @@ from datetime import datetime, timedelta
 import logging
 
 from models.gru_predictor import GRUPricePredictor
-from data.indicators import calculate_technical_indicators  # Your indicators function
+# from data.indicators import calculate_technical_indicators  # Your indicators function
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,14 +80,16 @@ async def train_gru_model():
     df = await prepare_training_data(symbol='BTCUSDT', days=365)
 
     # 2. Select features
+    # NOTE: 'close' is the target, so we DON'T include it in features!
     feature_columns = [
-        'open', 'high', 'low', 'close', 'volume',
+        'open', 'high', 'low', 'volume',  # OHLCV without close
         'rsi', 'macd', 'sma_20', 'ema_50',
         'bb_upper', 'bb_lower', 'volume_sma'
     ]
 
     # Ensure all features exist
-    df_features = df[feature_columns]
+    # We need to include 'close' in the dataframe but it will be used as target, not feature
+    df_features = df[feature_columns + ['close']]
 
     # 3. Initialize GRU model
     predictor = GRUPricePredictor(
@@ -140,8 +147,9 @@ async def use_trained_model():
     # Prepare recent data (last 60 candles)
     df = await prepare_training_data(symbol='BTCUSDT', days=7)
 
+    # NOTE: Same features as training (without 'close')
     feature_columns = [
-        'open', 'high', 'low', 'close', 'volume',
+        'open', 'high', 'low', 'volume',
         'rsi', 'macd', 'sma_20', 'ema_50',
         'bb_upper', 'bb_lower', 'volume_sma'
     ]

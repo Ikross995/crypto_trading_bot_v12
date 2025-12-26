@@ -31,7 +31,7 @@ def _fetch_filters(symbol: str) -> dict:
     out = {
         "tick": 0.01,
         "step": 0.001,
-        "minNotional": float(cfg.MIN_TP_NOTIONAL_USDT),
+        "minNotional": float(getattr(cfg, 'min_tp_notional_usdt', 5.0)),
         "pp": {"multiplierUp": 5.0, "multiplierDown": 5.0},
     }
     try:

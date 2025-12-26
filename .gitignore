@@ -96,6 +96,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+.env
 .env.local
 .env.*.local
 venv/
@@ -166,3 +167,8 @@ models/checkpoints/
 *.backup
 temp/
 tmp/
+
+# ML learning data
+ml_learning_data/
+enhanced_learning_data/
+data/learning_reports/dashboard_history.json

@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Trading Bot Dashboard</title>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+
+    <!-- Socket.IO (for web server mode) -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-primary: #0a0a1a;
+            --bg-secondary: #12122a;
+            --bg-card: rgba(255,255,255,0.03);
+            --border-color: rgba(255,255,255,0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255,255,255,0.7);
+            --text-muted: rgba(255,255,255,0.5);
+            --accent-primary: #667eea;
+            --accent-secondary: #764ba2;
+            --positive: #00ff88;
+            --negative: #ff4757;
+            --warning: #ffa502;
+            --gradient-main: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-positive: linear-gradient(135deg, #00ff88 0%, #00d9ff 100%);
+            --gradient-negative: linear-gradient(135deg, #ff4757 0%, #ff6b81 100%);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--gradient-main);
+            padding: 24px 32px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        }
+
+        .header-left h1 {
+            font-size: 1.8em;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .header-left p {
+            opacity: 0.9;
+            font-size: 0.95em;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .connection-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,0,0,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85em;
+        }
+
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--positive);
+            animation: pulse 2s infinite;
+        }
+
+        .connection-dot.offline { background: var(--negative); animation: none; }
+        .connection-dot.connecting { background: var(--warning); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(102, 126, 234, 0.3);
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.15);
+        }
+
+        .stat-card .label {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 1.8em;
+            font-weight: 700;
+        }
+
+        .stat-card .change {
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
+
+        .positive { color: var(--positive); }
+        .negative { color: var(--negative); }
+        .warning { color: var(--warning); }
+
+        /* Main Grid Layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-header h2 {
+            font-size: 1.1em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 350px;
+        }
+
+        .chart-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .chart-tab {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+        }
+
+        .chart-tab:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--text-primary);
+        }
+
+        .chart-tab.active {
+            background: var(--gradient-main);
+            color: white;
+            border-color: transparent;
+        }
+
+        /* Positions Table */
+        .positions-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .positions-table th,
+        .positions-table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .positions-table th {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .positions-table tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+
+        .positions-table .symbol {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .side-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .side-badge.long { background: rgba(0,255,136,0.15); color: var(--positive); }
+        .side-badge.short { background: rgba(255,71,87,0.15); color: var(--negative); }
+
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .metrics-grid { grid-template-columns: 1fr; }
+        }
+
+        .metric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+        }
+
+        .metric-item .label {
+            color: var(--text-muted);
+            font-size: 0.9em;
+        }
+
+        .metric-item .value {
+            font-weight: 600;
+        }
+
+        /* Performance Cards */
+        .perf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .perf-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .perf-card h3 {
+            font-size: 0.95em;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Combo Performance */
+        .combo-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .combo-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        .combo-item .symbol {
+            font-weight: 600;
+        }
+
+        .combo-item .stats {
+            display: flex;
+            gap: 16px;
+            font-size: 0.9em;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--gradient-main);
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        /* Refresh Button */
+        .refresh-btn {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--gradient-main);
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .refresh-btn.spinning {
+            animation: spin 1s linear infinite;
+        }
+
+        /* Mode Indicator */
+        .mode-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 20px;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+        }
+
+        /* Scrollable Table */
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+        }
+
+        /* Recommendations */
+        .recommendation {
+            padding: 12px 16px;
+            background: rgba(255,165,2,0.1);
+            border-left: 3px solid var(--warning);
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+
+        /* Last Update */
+        .last-update {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: 24px;
+            padding: 16px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { padding: 12px; }
+            .header { padding: 16px; }
+            .header-left h1 { font-size: 1.4em; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .stat-card .value { font-size: 1.4em; }
+            .card { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <h1>Trading Bot Dashboard</h1>
+                <p id="subtitle">Advanced Real-Time Analytics</p>
+            </div>
+            <div class="header-right">
+                <div class="connection-badge">
+                    <span class="connection-dot" id="connectionDot"></span>
+                    <span id="connectionStatus">Connecting...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="label">Balance</div>
+                <div class="value" id="balance">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Equity</div>
+                <div class="value" id="equity">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total P&L</div>
+                <div class="value" id="totalPnl">$0.00</div>
+                <div class="change" id="roiPct">0.00%</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Open Positions</div>
+                <div class="value" id="openPositions">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Win Rate</div>
+                <div class="value" id="winRate">0%</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Profit Factor</div>
+                <div class="value" id="profitFactor">0.00</div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Chart Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Performance Charts</h2>
+                </div>
+                <div class="chart-tabs">
+                    <button class="chart-tab active" data-chart="equity">Equity</button>
+                    <button class="chart-tab" data-chart="pnl">P&L</button>
+                    <button class="chart-tab" data-chart="drawdown">Drawdown</button>
+                    <button class="chart-tab" data-chart="winrate">Win Rate</button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Metrics Panel -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Key Metrics</h2>
+                </div>
+                <div class="metrics-grid" id="metricsGrid">
+                    <div class="metric-item">
+                        <span class="label">Sharpe Ratio</span>
+                        <span class="value" id="sharpeRatio">0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Sortino Ratio</span>
+                        <span class="value" id="sortinoRatio">0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Max Drawdown</span>
+                        <span class="value negative" id="maxDrawdown">0.00%</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Calmar Ratio</span>
+                        <span class="value" id="calmarRatio">0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Total Trades</span>
+                        <span class="value" id="totalTrades">0</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Avg Trade</span>
+                        <span class="value" id="avgTrade">$0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Best Trade</span>
+                        <span class="value positive" id="bestTrade">$0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Worst Trade</span>
+                        <span class="value negative" id="worstTrade">$0.00</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Kelly Criterion</span>
+                        <span class="value" id="kellyCriterion">0.00%</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Market Trend</span>
+                        <span class="value" id="marketTrend">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Positions Section -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <h2>Open Positions</h2>
+                <span id="positionsCount">0 positions</span>
+            </div>
+            <div class="table-container">
+                <table class="positions-table" id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Entry</th>
+                            <th>Current</th>
+                            <th>Qty</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                            <th>TP</th>
+                            <th>SL</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionsBody">
+                        <tr><td colspan="9" class="empty-state">No open positions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Performance Grid -->
+        <div class="perf-grid" id="perfGrid">
+            <!-- Combo Performance -->
+            <div class="perf-card" id="comboPerformance">
+                <h3>Symbol Performance</h3>
+                <div class="combo-list" id="comboList">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Market Conditions -->
+            <div class="perf-card" id="marketConditions">
+                <h3>Market Conditions</h3>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <span class="label">Volatility</span>
+                        <span class="value" id="volatility">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">24h Change</span>
+                        <span class="value" id="priceChange24h">0%</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Fear & Greed</span>
+                        <span class="value" id="fearGreed">50</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">BTC Dominance</span>
+                        <span class="value" id="btcDominance">50%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ML Stats -->
+            <div class="perf-card" id="mlStats">
+                <h3>ML Learning System</h3>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <span class="label">Samples</span>
+                        <span class="value" id="mlSamples">0 / 50</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Accuracy</span>
+                        <span class="value" id="mlAccuracy">0%</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Confidence</span>
+                        <span class="value" id="mlConfidence">0</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Win Prob</span>
+                        <span class="value" id="mlWinProb">0%</span>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="mlProgress" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div class="card" id="recommendationsCard" style="margin-bottom: 24px; display: none;">
+            <div class="card-header">
+                <h2>AI Recommendations</h2>
+            </div>
+            <div id="recommendationsList"></div>
+        </div>
+
+        <!-- Last Update -->
+        <div class="last-update">
+            Last updated: <span id="lastUpdate">-</span>
+        </div>
+    </div>
+
+    <!-- Mode Indicator -->
+    <div class="mode-indicator" id="modeIndicator">Mode: Detecting...</div>
+
+    <!-- Refresh Button -->
+    <button class="refresh-btn" id="refreshBtn" title="Refresh Data">&#x21bb;</button>
+
+    <script>
+        // ==================== Configuration ====================
+        const CONFIG = {
+            DATA_PATH: '../data/',
+            API_BASE: '',
+            REFRESH_INTERVAL: 30000, // 30 seconds for local mode
+            WS_RECONNECT_DELAY: 3000
+        };
+
+        // ==================== State ====================
+        let state = {
+            mode: 'detecting', // 'local' or 'server'
+            socket: null,
+            mainChart: null,
+            currentChartType: 'equity',
+            dashboardData: null,
+            historyData: [],
+            comboData: {},
+            isConnected: false
+        };
+
+        // ==================== Utility Functions ====================
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined || isNaN(num)) return '0';
+            return Number(num).toLocaleString('en-US', {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+        }
+
+        function formatCurrency(num) {
+            if (num === null || num === undefined || isNaN(num)) return '$0.00';
+            const sign = num >= 0 ? '' : '-';
+            return sign + '$' + formatNumber(Math.abs(num), 2);
+        }
+
+        function formatPercent(num) {
+            if (num === null || num === undefined || isNaN(num)) return '0.00%';
+            const sign = num >= 0 ? '+' : '';
+            return sign + formatNumber(num, 2) + '%';
+        }
+
+        function getValueClass(value) {
+            if (value > 0) return 'positive';
+            if (value < 0) return 'negative';
+            return '';
+        }
+
+        function updateElement(id, value, className = null) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+                if (className !== null) {
+                    el.className = 'value ' + className;
+                }
+            }
+        }
+
+        // ==================== Mode Detection ====================
+        async function detectMode() {
+            const modeIndicator = document.getElementById('modeIndicator');
+
+            // Check if running from file://
+            if (window.location.protocol === 'file:') {
+                state.mode = 'local';
+                modeIndicator.textContent = 'Mode: Local (File)';
+                updateConnectionStatus(true, 'Local Mode');
+                return 'local';
+            }
+
+            // Try to connect to API
+            try {
+                const response = await fetch('/api/health', {
+                    timeout: 3000,
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                if (response.ok) {
+                    state.mode = 'server';
+                    modeIndicator.textContent = 'Mode: Server (WebSocket)';
+                    return 'server';
+                }
+            } catch (e) {
+                console.log('Server not available, falling back to local mode');
+            }
+
+            state.mode = 'local';
+            modeIndicator.textContent = 'Mode: Local (File)';
+            updateConnectionStatus(true, 'Local Mode');
+            return 'local';
+        }
+
+        // ==================== Connection Status ====================
+        function updateConnectionStatus(connected, statusText = null) {
+            const dot = document.getElementById('connectionDot');
+            const text = document.getElementById('connectionStatus');
+
+            state.isConnected = connected;
+
+            if (connected) {
+                dot.className = 'connection-dot';
+                text.textContent = statusText || 'Connected';
+            } else {
+                dot.className = 'connection-dot offline';
+                text.textContent = statusText || 'Disconnected';
+            }
+        }
+
+        // ==================== Data Loading ====================
+        async function loadLocalData() {
+            try {
+                // Load dashboard_state.json
+                const dashboardResponse = await fetch(CONFIG.DATA_PATH + 'dashboard_state.json');
+                if (dashboardResponse.ok) {
+                    state.dashboardData = await dashboardResponse.json();
+                }
+
+                // Load dashboard_history.json
+                const historyResponse = await fetch(CONFIG.DATA_PATH + 'learning_reports/dashboard_history.json');
+                if (historyResponse.ok) {
+                    state.historyData = await historyResponse.json();
+                }
+
+                // Load combo performance for each symbol
+                const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT'];
+                for (const symbol of symbols) {
+                    try {
+                        const comboResponse = await fetch(CONFIG.DATA_PATH + `combo_performance_${symbol}.json`);
+                        if (comboResponse.ok) {
+                            state.comboData[symbol] = await comboResponse.json();
+                        }
+                    } catch (e) {
+                        // Symbol data not available
+                    }
+                }
+
+                renderDashboard();
+                return true;
+            } catch (error) {
+                console.error('Error loading local data:', error);
+                return false;
+            }
+        }
+
+        async function loadServerData() {
+            try {
+                // Load main dashboard data
+                const dashResponse = await fetch('/api/dashboard', {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                if (dashResponse.ok) {
+                    state.dashboardData = await dashResponse.json();
+                }
+
+                // Load history data
+                const histResponse = await fetch('/api/history', {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                if (histResponse.ok) {
+                    state.historyData = await histResponse.json();
+                }
+
+                // Load combo performance
+                const combosResponse = await fetch('/api/combos', {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                if (combosResponse.ok) {
+                    state.comboData = await combosResponse.json();
+                }
+
+                renderDashboard();
+                return true;
+            } catch (error) {
+                console.error('Error loading server data:', error);
+            }
+            return false;
+        }
+
+        // ==================== WebSocket Connection ====================
+        function initWebSocket() {
+            if (state.mode !== 'server') return;
+
+            try {
+                state.socket = io(window.location.origin, {
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionDelay: CONFIG.WS_RECONNECT_DELAY
+                });
+
+                state.socket.on('connect', () => {
+                    console.log('WebSocket connected');
+                    updateConnectionStatus(true, 'Real-time');
+                });
+
+                state.socket.on('disconnect', () => {
+                    console.log('WebSocket disconnected');
+                    updateConnectionStatus(false, 'Reconnecting...');
+                });
+
+                state.socket.on('dashboard_update', (data) => {
+                    state.dashboardData = data;
+                    renderDashboard();
+                });
+
+                state.socket.on('position_update', (data) => {
+                    if (state.dashboardData) {
+                        state.dashboardData.positions = data.positions || data;
+                        renderPositions();
+                    }
+                });
+
+            } catch (error) {
+                console.error('WebSocket error:', error);
+            }
+        }
+
+        // ==================== Render Functions ====================
+        function renderDashboard() {
+            const data = state.dashboardData;
+            const history = state.historyData;
+
+            // Use latest history entry if available
+            const latestHistory = history && history.length > 0 ? history[history.length - 1] : {};
+
+            // Merge data sources
+            const d = { ...latestHistory, ...data };
+
+            // Update stats
+            updateElement('balance', formatCurrency(d.balance || d.account_balance));
+            updateElement('equity', formatCurrency(d.equity));
+
+            const pnl = d.totalPnl || d.total_pnl || 0;
+            updateElement('totalPnl', formatCurrency(pnl), getValueClass(pnl));
+
+            const roi = d.roiPct || ((d.total_pnl / d.account_balance) * 100) || 0;
+            updateElement('roiPct', formatPercent(roi), getValueClass(roi));
+
+            updateElement('openPositions', d.openPositions || d.open_positions || 0);
+
+            const winRate = d.winRate || (d.win_rate * 100) || 0;
+            updateElement('winRate', formatNumber(winRate, 1) + '%', getValueClass(winRate - 50));
+
+            const pf = d.profitFactor || d.profit_factor || 0;
+            updateElement('profitFactor', formatNumber(pf, 2), getValueClass(pf - 1));
+
+            // Update metrics
+            updateElement('sharpeRatio', formatNumber(d.sharpeRatio || d.sharpe_ratio || 0, 2));
+            updateElement('sortinoRatio', formatNumber(d.sortino_ratio || 0, 2));
+
+            const maxDD = d.maxDrawdownPct || d.max_drawdown || 0;
+            updateElement('maxDrawdown', formatNumber(maxDD, 2) + '%');
+
+            updateElement('calmarRatio', formatNumber(d.calmar_ratio || 0, 2));
+            updateElement('totalTrades', d.totalTrades || d.total_trades || 0);
+            updateElement('avgTrade', formatCurrency(d.avg_trade || 0));
+            updateElement('bestTrade', formatCurrency(d.best_trade || 0));
+            updateElement('worstTrade', formatCurrency(d.worst_trade || 0));
+            updateElement('kellyCriterion', formatNumber((d.kelly_criterion || 0) * 100, 1) + '%');
+
+            const trend = d.market_trend || d.marketTrend || '-';
+            updateElement('marketTrend', trend.charAt(0).toUpperCase() + trend.slice(1));
+
+            // Market conditions
+            updateElement('volatility', formatNumber((d.market_volatility || 0) * 100, 2) + '%');
+            updateElement('priceChange24h', formatPercent(d.price_change_24h || 0), getValueClass(d.price_change_24h));
+            updateElement('fearGreed', formatNumber(d.fear_greed_index || 50, 0));
+            updateElement('btcDominance', formatNumber(d.btc_dominance || 50, 1) + '%');
+
+            // ML Stats
+            const mlSamples = d.ml_samples_collected || 0;
+            const mlNeeded = d.ml_samples_needed || 50;
+            updateElement('mlSamples', `${mlSamples} / ${mlNeeded}`);
+            updateElement('mlAccuracy', formatNumber(d.ml_prediction_accuracy || 0, 1) + '%');
+            updateElement('mlConfidence', formatNumber(d.learning_confidence || d.confidence_threshold || 0, 2));
+            updateElement('mlWinProb', formatNumber((d.ml_win_probability || 0) * 100, 1) + '%');
+
+            const mlProgress = document.getElementById('mlProgress');
+            if (mlProgress) {
+                mlProgress.style.width = Math.min((mlSamples / mlNeeded) * 100, 100) + '%';
+            }
+
+            // Positions
+            renderPositions();
+
+            // Combo Performance
+            renderComboPerformance();
+
+            // Chart
+            renderChart();
+
+            // Last update
+            const lastUpdate = d.lastUpdate || d.timestamp || new Date().toISOString();
+            document.getElementById('lastUpdate').textContent = new Date(lastUpdate).toLocaleString();
+        }
+
+        function renderPositions() {
+            const data = state.dashboardData;
+            const history = state.historyData;
+            const latestHistory = history && history.length > 0 ? history[history.length - 1] : {};
+
+            const positions = data?.positions || latestHistory?.open_positions_details || [];
+            const tbody = document.getElementById('positionsBody');
+            const countEl = document.getElementById('positionsCount');
+
+            countEl.textContent = `${positions.length} position${positions.length !== 1 ? 's' : ''}`;
+
+            if (!positions || positions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No open positions</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = positions.map(pos => {
+                const pnl = pos.pnl || 0;
+                const pnlPct = pos.pnl_pct || pos.pnlPct || 0;
+                const side = (pos.side || 'LONG').toUpperCase();
+                const sideClass = side === 'LONG' ? 'long' : 'short';
+
+                return `
+                    <tr>
+                        <td class="symbol">${pos.symbol}</td>
+                        <td><span class="side-badge ${sideClass}">${side}</span></td>
+                        <td>$${formatNumber(pos.entry_price || pos.entryPrice, 4)}</td>
+                        <td>$${formatNumber(pos.current_price || pos.currentPrice, 4)}</td>
+                        <td>${formatNumber(pos.quantity || pos.qty, 4)}</td>
+                        <td class="${getValueClass(pnl)}">${formatCurrency(pnl)}</td>
+                        <td class="${getValueClass(pnlPct)}">${formatPercent(pnlPct)}</td>
+                        <td>${pos.take_profit || pos.tp ? '$' + formatNumber(pos.take_profit || pos.tp, 2) : '-'}</td>
+                        <td>${pos.stop_loss || pos.sl ? '$' + formatNumber(pos.stop_loss || pos.sl, 2) : '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderComboPerformance() {
+            const container = document.getElementById('comboList');
+            const combos = state.comboData;
+
+            if (!combos || Object.keys(combos).length === 0) {
+                container.innerHTML = '<div class="empty-state">No symbol performance data</div>';
+                return;
+            }
+
+            container.innerHTML = Object.entries(combos).map(([symbol, data]) => {
+                const overall = data.overall || {};
+                const winRate = overall.win_rate || 0;
+                const pf = overall.profit_factor || 0;
+                const totalReturn = overall.total_return || 0;
+
+                return `
+                    <div class="combo-item">
+                        <span class="symbol">${symbol}</span>
+                        <div class="stats">
+                            <span class="${getValueClass(winRate - 50)}">WR: ${formatNumber(winRate, 1)}%</span>
+                            <span class="${getValueClass(pf - 1)}">PF: ${formatNumber(pf, 2)}</span>
+                            <span class="${getValueClass(totalReturn)}">Ret: ${formatPercent(totalReturn)}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ==================== Chart Functions ====================
+        function renderChart() {
+            const canvas = document.getElementById('mainChart');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const history = state.historyData;
+            const data = state.dashboardData;
+
+            if (state.mainChart) {
+                state.mainChart.destroy();
+            }
+
+            let chartConfig;
+
+            switch (state.currentChartType) {
+                case 'equity':
+                    chartConfig = createEquityChart(ctx, history, data);
+                    break;
+                case 'pnl':
+                    chartConfig = createPnLChart(ctx, history);
+                    break;
+                case 'drawdown':
+                    chartConfig = createDrawdownChart(ctx, history);
+                    break;
+                case 'winrate':
+                    chartConfig = createWinRateChart(ctx, history, data);
+                    break;
+                default:
+                    chartConfig = createEquityChart(ctx, history, data);
+            }
+
+            state.mainChart = new Chart(ctx, chartConfig);
+        }
+
+        function createEquityChart(ctx, history, data) {
+            let labels = [];
+            let values = [];
+
+            // Try to get equity history from dashboard data first
+            if (data?.equityHistory?.labels?.length > 0) {
+                labels = data.equityHistory.labels;
+                values = data.equityHistory.values;
+            } else if (history && history.length > 0) {
+                // Fall back to history data
+                history.forEach(h => {
+                    labels.push(new Date(h.timestamp).toLocaleTimeString());
+                    values.push(h.equity || h.account_balance);
+                });
+            }
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 350);
+            gradient.addColorStop(0, 'rgba(0,255,136,0.3)');
+            gradient.addColorStop(1, 'rgba(0,255,136,0.02)');
+
+            return {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Equity ($)',
+                        data: values,
+                        borderColor: '#00ff88',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: getChartOptions('$')
+            };
+        }
+
+        function createPnLChart(ctx, history) {
+            const labels = [];
+            const values = [];
+            let cumulative = 0;
+
+            if (history && history.length > 0) {
+                history.forEach(h => {
+                    labels.push(new Date(h.timestamp).toLocaleTimeString());
+                    values.push(h.total_pnl || cumulative);
+                });
+            }
+
+            return {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Cumulative P&L ($)',
+                        data: values,
+                        borderColor: values[values.length - 1] >= 0 ? '#00ff88' : '#ff4757',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }]
+                },
+                options: getChartOptions('$')
+            };
+        }
+
+        function createDrawdownChart(ctx, history) {
+            const labels = [];
+            const values = [];
+
+            if (history && history.length > 0) {
+                history.forEach(h => {
+                    labels.push(new Date(h.timestamp).toLocaleTimeString());
+                    values.push(-(h.max_drawdown || 0));
+                });
+            }
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 350);
+            gradient.addColorStop(0, 'rgba(255,71,87,0.3)');
+            gradient.addColorStop(1, 'rgba(255,71,87,0.02)');
+
+            return {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Drawdown (%)',
+                        data: values,
+                        borderColor: '#ff4757',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }]
+                },
+                options: getChartOptions('%')
+            };
+        }
+
+        function createWinRateChart(ctx, history, data) {
+            const winRate = data?.winRate ||
+                           (data?.win_rate * 100) ||
+                           (history?.[history.length - 1]?.win_rate * 100) || 0;
+            const lossRate = 100 - winRate;
+
+            return {
+                type: 'doughnut',
+                data: {
+                    labels: ['Wins', 'Losses'],
+                    datasets: [{
+                        data: [winRate, lossRate],
+                        backgroundColor: ['rgba(0,255,136,0.8)', 'rgba(255,71,87,0.8)'],
+                        borderColor: ['#00ff88', '#ff4757'],
+                        borderWidth: 2,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#ffffff', padding: 20 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.parsed.toFixed(1)}%`
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        function getChartOptions(valuePrefix) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        padding: 12,
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        callbacks: {
+                            label: (ctx) => `${ctx.dataset.label}: ${valuePrefix}${ctx.parsed.y.toFixed(2)}`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: 'rgba(255,255,255,0.5)', maxTicksLimit: 8 }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: {
+                            color: 'rgba(255,255,255,0.5)',
+                            callback: (v) => valuePrefix + v.toFixed(0)
+                        }
+                    }
+                }
+            };
+        }
+
+        // ==================== Event Handlers ====================
+        function setupEventHandlers() {
+            // Chart tabs
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    state.currentChartType = tab.dataset.chart;
+                    renderChart();
+                });
+            });
+
+            // Refresh button
+            document.getElementById('refreshBtn').addEventListener('click', async () => {
+                const btn = document.getElementById('refreshBtn');
+                btn.classList.add('spinning');
+
+                if (state.mode === 'local') {
+                    await loadLocalData();
+                } else {
+                    await loadServerData();
+                }
+
+                btn.classList.remove('spinning');
+            });
+        }
+
+        // ==================== Initialization ====================
+        async function init() {
+            console.log('Initializing dashboard...');
+
+            setupEventHandlers();
+
+            const mode = await detectMode();
+            console.log('Mode detected:', mode);
+
+            if (mode === 'local') {
+                // Load local data
+                await loadLocalData();
+
+                // Set up periodic refresh for local mode
+                setInterval(loadLocalData, CONFIG.REFRESH_INTERVAL);
+            } else {
+                // Load initial data from server
+                await loadServerData();
+
+                // Initialize WebSocket for real-time updates
+                initWebSocket();
+            }
+        }
+
+        // Start
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

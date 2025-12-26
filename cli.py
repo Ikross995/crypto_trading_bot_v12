@@ -460,11 +460,30 @@ def live(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
     config_file: str | None = typer.Option(
         None, "--config", help="Config file path"
+    ),
+    # Telegram Bot Options
+    tg_enabled: bool = typer.Option(
+        False, "--tg-enabled", help="Enable Telegram notifications and dashboard updates"
+    ),
+    tg_bot_token: str | None = typer.Option(
+        None, "--tg-bot-token", help="Telegram bot token from @BotFather"
+    ),
+    tg_chat_id: str | None = typer.Option(
+        None, "--tg-chat-id", help="Telegram chat/group ID for notifications"
+    ),
+    tg_dashboard_interval: int | None = typer.Option(
+        None, "--tg-interval", help="Dashboard update interval in seconds (default: 300)"
+    ),
+    tg_trade_notifications: bool = typer.Option(
+        True, "--tg-trades/--no-tg-trades", help="Send trade open/close notifications (default: True)"
     ),
 ) -> None:
     """
@@ -489,6 +508,21 @@ def live(
         console.print("[cyan]   - Market regime detection[/cyan]")
         console.print("[cyan]   - Smart signal filtering[/cyan]")
 
+    # Enable COMBO RL Position Advisor if requested
+    if use_combo:
+        config.use_combo_signals = True
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED[/cyan]")
+        console.print("[cyan]   - IMBA opens positions with TP1/TP2/TP3[/cyan]")
+        console.print("[cyan]   - RL Agent manages positions after TP2[/cyan]")
+        console.print("[cyan]   - Intelligent trailing stop (3% from peak)[/cyan]")
+        console.print("[cyan]   - Early close on reversal detection (≥75% confidence)[/cyan]")
+        console.print("[yellow]⚠️  Note: COMBO models must be trained first![/yellow]")
+        console.print("[yellow]   Run: python run_full_combo_system_multi.py --symbols <SYMBOL>[/yellow]")
+
     # Handle both --symbol and --symbols
     if symbol:
         config.symbols = validate_symbols([symbol])
@@ -498,6 +532,31 @@ def live(
         config.symbol = symbols[0]  # Use first as primary
     if timeframe:
         config.timeframe = timeframe
+
+    # Configure Telegram settings from CLI arguments
+    if tg_enabled or tg_bot_token or tg_chat_id:
+        if tg_bot_token:
+            config.tg_bot_token = tg_bot_token
+        if tg_chat_id:
+            config.tg_chat_id = tg_chat_id
+        if tg_dashboard_interval:
+            config.tg_dashboard_interval = tg_dashboard_interval
+
+        # Enable dashboard updates if token and chat_id are provided
+        if config.tg_bot_token and config.tg_chat_id:
+            config.tg_dashboard_enabled = tg_enabled
+            config.tg_trade_notifications = tg_trade_notifications
+
+            console.print("[cyan]📱 Telegram Integration ENABLED[/cyan]")
+            console.print(f"[cyan]   - Bot Token: {config.tg_bot_token[:10]}...{config.tg_bot_token[-5:]}[/cyan]")
+            console.print(f"[cyan]   - Chat ID: {config.tg_chat_id}[/cyan]")
+            if config.tg_dashboard_enabled:
+                console.print(f"[cyan]   - Dashboard updates every {config.tg_dashboard_interval}s[/cyan]")
+            if config.tg_trade_notifications:
+                console.print("[cyan]   - Trade notifications: ON[/cyan]")
+        else:
+            console.print("[yellow]⚠️  Telegram: Missing bot token or chat ID[/yellow]")
+            console.print("[yellow]   Set TG_BOT_TOKEN and TG_CHAT_ID in .env or use --tg-bot-token and --tg-chat-id[/yellow]")
 
     console.print("[green]Starting Live Trading Mode[/green]")
     print_config_summary()
@@ -543,6 +602,9 @@ def paper(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
@@ -567,6 +629,16 @@ def paper(
     if use_imba:
         config.use_imba_signals = True
         console.print("[cyan]🎯 IMBA Research Signals ENABLED[/cyan]")
+
+    # Enable COMBO RL Position Advisor if requested
+    if use_combo:
+        config.use_combo_signals = True
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED[/cyan]")
+        console.print("[cyan]   - IMBA opens positions, RL manages after TP2[/cyan]")
 
     # Handle both --symbol and --symbols
     if symbol:
@@ -603,6 +675,9 @@ def backtest(
     use_imba: bool = typer.Option(
         False, "--use-imba", help="Use IMBA research signals (9 advanced signals + regime detection)"
     ),
+    use_combo: bool = typer.Option(
+        False, "--use-combo", help="Use COMBO ML models (Ensemble + RL Agent + Meta-Learner)"
+    ),
     self_learning: bool = typer.Option(
         False, "--self-learning", help="Enable self-learning system (trade journal + adaptive optimizer)"
     ),
@@ -635,7 +710,17 @@ def backtest(
     if use_imba:
         config.use_imba_signals = True
         console.print("[cyan]IMBA Research Signals ENABLED for backtest[/cyan]")
-    
+
+    # Enable COMBO RL Position Advisor if requested
+    if use_combo:
+        config.use_combo_signals = True
+        # IMPORTANT: Keep IMBA enabled! IMBA opens positions, RL manages them after TP2
+        if not use_imba:
+            config.use_imba_signals = True  # Force IMBA on for position opening
+            console.print("[cyan]🎯 IMBA auto-enabled (required for COMBO RL Advisor)[/cyan]")
+        console.print("[cyan]🚀 COMBO RL Position Advisor ENABLED for backtest[/cyan]")
+        console.print("[cyan]   - IMBA opens positions, RL manages after TP2[/cyan]")
+
     # Enable self-learning if requested
     if self_learning:
         config.enable_trade_journal = True

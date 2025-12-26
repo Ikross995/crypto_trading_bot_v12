@@ -133,93 +133,135 @@ class RegimeDetector:
     def regime_filter(self, regime: Regime, signal_name: str, signal_direction: str) -> bool:
         """
         Filter signals based on regime compatibility.
-        
-        HIGH-QUALITY RARE SIGNALS (ema_pinch, sfp) are NEVER filtered!
-        They have strong weights and should always be considered.
-        
+
+        ⚠️ КРИТИЧНО: Mean-reversion сигналы БЛОКИРУЮТСЯ в трендах!
+        Они открывают ПРОТИВ тренда и приводят к убыткам.
+
         Args:
             regime: Current market regime
             signal_name: Name of the signal
             signal_direction: Signal direction ('buy', 'sell', 'wait')
-            
+
         Returns:
             True if signal should be allowed, False to filter out
         """
         if signal_direction == "wait":
             return False
-        
-        # Never filter high-quality rare signals (they have 1.3-1.5x weights!)
-        high_quality_signals = [
-            "ema_pinch",      # 1.5x weight - rare, accurate
-            "sfp",            # 1.3x weight - rare, strong
-            "breakout_retest" # 1.2x weight - medium quality
+
+        # ⚠️ MEAN-REVERSION СИГНАЛЫ - ОПАСНЫ В ТРЕНДАХ!
+        # Они открывают ПРОТИВ движения цены
+        mean_reversion_signals = [
+            "rsi_mr",           # RSI oversold/overbought
+            "vwap_bands_mr",    # VWAP band bounces
+            "sfp",              # Swing Failure Pattern
+            "volume_profile",   # POC mean reversion
+            "fvg",              # Fair Value Gap fills
+            "market_stress",    # Stress mean reversion
         ]
-        
-        if signal_name in high_quality_signals:
-            logger.debug(f"Allowing high-quality signal {signal_name} regardless of regime")
-            return True
-        
-        # Trend-friendly signals
-        trend_signals = [
-            "atr_momentum",
-            "bb_squeeze",
-            "vwap_pullback",
+
+        # TREND-FOLLOWING СИГНАЛЫ - безопасны, следуют за трендом
+        trend_following_signals = [
+            "ema_pinch",        # EMA convergence + breakout
+            "atr_momentum",     # Strong momentum candles
+            "breakout_retest",  # Breakout + retest
+            "bb_squeeze",       # BB squeeze breakout
+            "cvd",              # Volume delta divergence
+            "trend_structure",  # Higher highs/lows
+            "consolidation_breakout",
+            "price_momentum",
+            "ema_slope_trend",
         ]
-        
-        # Mean reversion signals (better in flat markets)
-        flat_signals = [
-            "rsi_mr",
-            "vwap_bands_mr"  # Noisy, 0.7x weight
-        ]
-        
-        # Strong trend: Filter ONLY noisy mean reversion in very strong trends
+
+        # ========== TREND REGIME (ADX >= 25) ==========
         if regime.kind == "trend":
-            # Only filter vwap_bands_mr in VERY strong trends (ADX > 40)
-            if signal_name == "vwap_bands_mr" and regime.adx > 40:
-                logger.debug(f"Filtering noisy {signal_name} in very strong trend (ADX={regime.adx:.2f})")
+            # 🚫 БЛОКИРОВАТЬ mean-reversion сигналы в ЛЮБОМ тренде!
+            if signal_name in mean_reversion_signals:
+                logger.warning(
+                    f"🚫 BLOCKED {signal_name} in TREND regime (ADX={regime.adx:.1f}) - "
+                    f"mean-reversion signals are DANGEROUS in trends!"
+                )
                 return False
+
+            # ✅ Разрешить trend-following сигналы
             return True
-        
-        # Flat market: Filter ONLY low-quality trend signals in very flat markets
+
+        # ========== FLAT REGIME (ADX < 20) ==========
         elif regime.kind == "flat":
-            # Only filter bb_squeeze in VERY flat markets (ADX < 12)
-            if signal_name == "bb_squeeze" and regime.adx < 12:
+            # В флэте mean-reversion работает лучше, но с осторожностью
+            # Блокируем только самые агрессивные breakout сигналы
+            if signal_name == "atr_momentum" and regime.adx < 15:
                 logger.debug(f"Filtering {signal_name} in very flat market (ADX={regime.adx:.2f})")
                 return False
             return True
-        
-        # Volatile: Allow all signals
-        return True
+
+        # ========== VOLATILE REGIME ==========
+        else:
+            # В волатильности блокируем mean-reversion - слишком рискованно
+            if signal_name in mean_reversion_signals and regime.adx > 22:
+                logger.warning(
+                    f"🚫 BLOCKED {signal_name} in VOLATILE regime (ADX={regime.adx:.1f})"
+                )
+                return False
+            return True
     
     def get_regime_multiplier(self, regime: Regime, signal_name: str) -> float:
         """
         Get signal strength multiplier based on regime.
-        
+
+        ⚠️ КРИТИЧНО: Mean-reversion получает ШТРАФ в трендах!
+
         Args:
             regime: Current market regime
             signal_name: Name of the signal
-            
+
         Returns:
-            Multiplier for signal strength (e.g., 1.12 = +12%)
+            Multiplier for signal strength (e.g., 1.2 = +20%, 0.5 = -50%)
         """
-        # Trend signals in trend regime: +12%
-        trend_signals = ["atr_momentum", "bb_squeeze", "breakout_retest", 
-                        "vwap_pullback", "ema_pinch"]
-        
-        # Flat signals in flat regime: +12%
-        flat_signals = ["rsi_mr", "sfp", "vwap_bands_mr"]
-        
+        # TREND-FOLLOWING сигналы - бонус в тренде
+        trend_signals = [
+            "atr_momentum", "bb_squeeze", "breakout_retest",
+            "ema_pinch", "trend_structure", "consolidation_breakout",
+            "price_momentum", "ema_slope_trend", "cvd"
+        ]
+
+        # MEAN-REVERSION сигналы - бонус только во флэте, штраф в тренде
+        mean_reversion_signals = [
+            "rsi_mr", "sfp", "vwap_bands_mr", "vwap_pullback",
+            "volume_profile", "fvg", "market_stress"
+        ]
+
         # Orderbook imbalance: +5% always
-        if signal_name == "orderbook_imbalance":
+        if signal_name == "obi":
             return 1.05
-        
-        if regime.kind == "trend" and signal_name in trend_signals:
-            return 1.12
-        
-        if regime.kind == "flat" and signal_name in flat_signals:
-            return 1.12
-        
-        # No bonus
+
+        # ========== TREND REGIME ==========
+        if regime.kind == "trend":
+            # Trend-following сигналы получают +20% бонус
+            if signal_name in trend_signals:
+                return 1.2
+
+            # Mean-reversion получает ШТРАФ -50% (если вообще дошёл сюда)
+            if signal_name in mean_reversion_signals:
+                return 0.5
+
+        # ========== FLAT REGIME ==========
+        elif regime.kind == "flat":
+            # Mean-reversion получает +15% бонус во флэте
+            if signal_name in mean_reversion_signals:
+                return 1.15
+
+            # Trend-following без бонуса во флэте
+            if signal_name in trend_signals:
+                return 0.9
+
+        # ========== VOLATILE REGIME ==========
+        else:
+            # В волатильности все сигналы слабее
+            if signal_name in mean_reversion_signals:
+                return 0.6  # Mean-reversion рискован
+            return 0.9  # Остальные немного слабее
+
+        # Default: no bonus
         return 1.0
     
     def regime_stats(self, df: pd.DataFrame, lookback: int = 100) -> dict:

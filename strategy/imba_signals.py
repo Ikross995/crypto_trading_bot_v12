@@ -29,19 +29,35 @@ logger = logging.getLogger(__name__)
 # Rare, accurate signals get higher weight
 # Frequent, noisy signals get lower weight
 # IMPORTANT: Use internal signal names (not display names!)
+#
+# ⚠️ КРИТИЧНО: Mean-reversion сигналы ОПАСНЫ в трендах!
+# Они открывают ПРОТИВ движения и часто приводят к убыткам.
+# Веса снижены для защиты от контр-трендовых входов.
+#
 SIGNAL_WEIGHTS = {
+    # === TREND-FOLLOWING SIGNALS (высокий вес) ===
     "ema_pinch": 1.5,           # Rare, very accurate convergence signal
-    "cvd": 1.4,                 # 🔥 NEW! Cumulative Volume Delta - divergences very accurate (70-80%)
-    "volume_profile": 1.3,      # 🔥 NEW! Volume Profile POC - mean reversion 65-70% accurate
-    "sfp": 1.3,                 # Swing Failure Pattern - rare, strong reversal
-    "fvg": 1.3,                 # 🔥 NEW! Fair Value Gaps - gap fills 65-70% accurate
-    "breakout_retest": 1.2,     # Medium frequency, good quality
-    "atr_momentum": 1.1,        # Momentum confirmation
-    "bb_squeeze": 1.0,          # Standard signal
-    "rsi_mr": 0.9,              # RSI Mean Rev - can be noisy in trends
-    "vwap_pullback": 0.8,       # Moderate frequency
-    "vwap_bands_mr": 0.7,       # ⚠️ VWAP Mean Rev - VERY FREQUENT, NOISY - reduced weight
-    "obi": 1.0,                 # Orderbook imbalance (when available)
+    "atr_momentum": 1.4,        # 🔥 УВЕЛИЧЕН: Momentum = следуем за трендом
+    "breakout_retest": 1.4,     # 🔥 УВЕЛИЧЕН: Breakout = следуем за трендом
+    "cvd": 1.3,                 # CVD divergences - хорошо для разворотов
+    "trend_structure": 1.3,     # Higher highs / lower lows - reliable structure
+    "consolidation_breakout": 1.3,  # Breakout from consolidation
+    "price_momentum": 1.2,      # Velocity & acceleration - accurate impulse moves
+    "ema_slope_trend": 1.2,     # 🔥 УВЕЛИЧЕН: EMA slope = тренд
+    "bb_squeeze": 1.0,          # Standard signal - breakout from squeeze
+
+    # === MEAN-REVERSION SIGNALS (⚠️ СНИЖЕННЫЙ вес - ОПАСНЫ в трендах!) ===
+    "sfp": 0.6,                 # ⚠️ СНИЖЕН: SFP = контр-тренд, опасен
+    "rsi_mr": 0.5,              # ⚠️ СНИЖЕН: RSI Mean Rev - ОЧЕНЬ ОПАСЕН в трендах!
+    "vwap_pullback": 0.5,       # ⚠️ СНИЖЕН: Pullback может быть против тренда
+    "vwap_bands_mr": 0.3,       # ⚠️ СИЛЬНО СНИЖЕН: Самый опасный - открывает ПРОТИВ движения!
+    "volume_profile": 0.5,      # ⚠️ СНИЖЕН: POC mean reversion
+    "fvg": 0.5,                 # ⚠️ СНИЖЕН: Fair Value Gaps - gap fills могут не сработать
+    "market_stress": 0.4,       # ⚠️ СНИЖЕН: Mean reversion on stress - очень рискованно
+
+    # === NEUTRAL SIGNALS ===
+    "obi": 0.8,                 # Orderbook imbalance (when available)
+    "volatility_regime": 0.7,   # Volatility expansion - medium accuracy
 }
 
 
@@ -931,7 +947,7 @@ class IMBASignalAggregator:
         # Detect regime
         regime = self.regime_detector.detect_regime(df)
         
-        # Generate all signals (12 indicators now!)
+        # Generate all signals (11 base + 6 ML feature = 17 indicators now!)
         signals = [
             IMBASignals.bb_squeeze(df),
             IMBASignals.vwap_pullback(df),
@@ -945,6 +961,11 @@ class IMBASignalAggregator:
             IMBASignals.fvg(df),             # 🔥 NEW! Fair Value Gaps
             IMBASignals.volume_profile(df),  # 🔥 NEW! Volume Profile POC
         ]
+
+        # 🧠 Add ML Feature Signals (6 new signals from 18 MLFeatures)
+        from strategy.imba_signals_ml_features import get_all_ml_feature_signals
+        ml_signals = get_all_ml_feature_signals(df)
+        signals.extend(ml_signals)
         
         # Aggregate votes with weighted voting
         votes = {"buy": 0.0, "sell": 0.0}

@@ -1,7 +1,7 @@
 {
-  "analysis_start": "2025-09-15T09:30:53.828058+00:00",
-  "analysis_end": "2025-11-04T09:30:53.828058+00:00",
-  "last_update": "2025-11-04T09:32:02.452074+00:00",
+  "analysis_start": "2025-10-13T10:17:47.828163+00:00",
+  "analysis_end": "2025-12-02T10:17:47.828163+00:00",
+  "last_update": "2025-12-02T10:19:14.846726+00:00",
   "overall_trend": "BEARISH",
   "volatility_level": "LOW",
   "recent_signals": [],
@@ -16,12 +16,12 @@
   "market_conditions": {
     "trend": "BEARISH",
     "volatility": "LOW",
-    "price_change_pct": -9.505086329449115,
-    "current_price": 103824.0,
-    "support_level": 103666.0,
-    "resistance_level": 111189.4,
-    "volume_trend": "INCREASING",
-    "avg_volatility": 0.006436810451940744,
+    "price_change_pct": -23.93756294058409,
+    "current_price": 86859.5,
+    "support_level": 82000.0,
+    "resistance_level": 91905.4,
+    "volume_trend": "STABLE",
+    "avg_volatility": 0.012503663734975448,
     "signals": []
   }
 }

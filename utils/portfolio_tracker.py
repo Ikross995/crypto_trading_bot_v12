@@ -215,34 +215,54 @@ class PortfolioTracker:
         try:
             # FIXED: Use BinanceClient.get_positions() method
             position_info = self.client.get_positions()
-            
+
             for pos in position_info:
                 quantity = float(pos.get('positionAmt', 0))
-                
+
                 # Skip if no position
                 if quantity == 0:
                     continue
-                
+
                 symbol = pos.get('symbol', '')
                 entry_price = float(pos.get('entryPrice', 0))
                 mark_price = float(pos.get('markPrice', 0))
                 unrealized_pnl = float(pos.get('unRealizedProfit', 0))
-                leverage = int(pos.get('leverage', 1))
                 liquidation_price = float(pos.get('liquidationPrice', 0))
-                
+
+                # Get leverage and margin from API
+                api_leverage = float(pos.get('leverage', 1))  # Symbol leverage setting
+                isolated_margin = float(pos.get('isolatedMargin', 0))
+                notional = float(pos.get('notional', 0))
+
                 # Determine side
                 side = 'LONG' if quantity > 0 else 'SHORT'
                 quantity = abs(quantity)
-                
-                # Calculate notional value
-                notional_value = quantity * mark_price
-                
+
+                # Calculate notional value (if not provided)
+                if notional == 0:
+                    notional_value = quantity * mark_price
+                else:
+                    notional_value = abs(notional)  # Use API notional
+
+                # Calculate REAL leverage from margin
+                if isolated_margin > 0:
+                    # Real leverage = Notional / Margin Used
+                    real_leverage = notional_value / isolated_margin
+                elif api_leverage > 0:
+                    # Use API leverage if no isolated margin
+                    real_leverage = api_leverage
+                else:
+                    real_leverage = 1.0
+
+                # Round to 1 decimal place
+                leverage = round(real_leverage, 1)
+
                 # Calculate P&L percentage
                 if entry_price > 0:
                     pnl_pct = (unrealized_pnl / (quantity * entry_price)) * 100
                 else:
                     pnl_pct = 0.0
-                
+
                 position = PositionInfo(
                     symbol=symbol,
                     side=side,
@@ -252,10 +272,10 @@ class PortfolioTracker:
                     notional_value=notional_value,
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_pct=pnl_pct,
-                    leverage=leverage,
+                    leverage=int(leverage),  # Convert to int for display
                     liquidation_price=liquidation_price if liquidation_price > 0 else None
                 )
-                
+
                 positions.append(position)
         
         except Exception as e:

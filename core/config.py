@@ -58,10 +58,10 @@ class Config(BaseModel):
     level_spacing_pct: float = Field(default=1.5, ge=0.5, le=5.0)  # Spacing between DCA levels (%)
     level_multipliers: list[float] = Field(default=[1.0, 1.5, 2.0, 2.5, 3.0])  # Quantity multipliers per DCA level
 
-    # Stop Loss & Take Profit - BALANCED FOR PROFITABILITY WITH LEVERAGE
+    # Stop Loss & Take Profit - OPTIMIZED FOR INTRADAY TRADING
     sl_fixed_pct: float = Field(default=2.0, ge=0.1, le=10.0)  # 2% SL for safe risk management
     sl_atr_mult: float = Field(default=1.5, ge=0.5, le=5.0)  # ATR multiplier for volatility-based SL
-    tp_levels: str = Field(default="1.5,3.0,5.0")  # SMART TP: 1.5%, 3%, 5% - balanced for leverage trading
+    tp_levels: str = Field(default="1.2,1.8,2.3")  # Intraday TP: 1.2%, 1.8%, 2.3% - realistic for day trading
     tp_shares: str = Field(default="0.4,0.35,0.25")  # Distribution: 40%, 35%, 25% - front-loaded profits
     be_trigger_r: float = Field(default=0.5, ge=0.0, le=5.0)  # Безубыток раньше
     trail_enable: bool = Field(default=True)
@@ -76,10 +76,16 @@ class Config(BaseModel):
     exits_ensure_interval: int = Field(default=12, ge=5, le=60)
 
     # ML Models
-    lstm_enable: bool = Field(default=True)  # FIXED: Enable LSTM by default for enhanced predictions
+    lstm_enable: bool = Field(default=False)  # DISABLED: Use PyTorch GRU instead
     lstm_input: int = Field(default=16, ge=1, le=100)
     seq_len: int = Field(default=30, ge=10, le=200)
     lstm_signal_threshold: float = Field(default=0.0015, ge=0.0001, le=0.01)
+
+    # GRU Model (PyTorch) - PHASE 2
+    gru_enable: bool = Field(default=True)
+    gru_model_path: str = Field(default="models/checkpoints/gru_model_pytorch.pt")
+    gru_input_features: int = Field(default=22, ge=1, le=100)
+    gru_sequence_length: int = Field(default=60, ge=10, le=200)
 
     gpt_enable: bool = Field(default=False)
     
@@ -132,9 +138,22 @@ class Config(BaseModel):
     # IMBA Integration
     use_imba_signals: bool = Field(default=True)  # Enable IMBA signals by default
 
+    # COMBO ML System Integration (Ensemble + RL Agent + Meta-Learner)
+    use_combo_signals: bool = Field(default=False)  # Enable COMBO ML models
+
+    # RL Position Advisor Settings (works with COMBO RL Agent)
+    rl_close_confidence_min: float = Field(default=0.75, ge=0.5, le=1.0)  # Minimum confidence to close position early
+    rl_emergency_confidence: float = Field(default=0.95, ge=0.8, le=1.0)  # Emergency close confidence threshold
+    rl_trailing_distance_pct: float = Field(default=3.0, ge=1.0, le=10.0)  # Trailing stop distance from peak (%)
+
     # Notifications
     tg_bot_token: str = Field(default="")
     tg_chat_id: str = Field(default="")
+    tg_dashboard_enabled: bool = Field(default=False)  # Enable Telegram dashboard updates
+    tg_dashboard_interval: int = Field(default=300, ge=60, le=3600)  # Update interval in seconds (5 min default)
+    tg_trade_notifications: bool = Field(default=True)  # Send notifications on trade open/close
+    tg_position_updates: bool = Field(default=False)  # Send position updates (can be spammy)
+    tg_webapp_url: str = Field(default="")  # Telegram Web App URL для интерактивного дашборда
 
     # File Paths
     kl_persist: str = Field(default="data/klines.csv")
@@ -226,7 +245,7 @@ class Config(BaseModel):
     def parse_tp_levels(self) -> List[float]:
         """Parse TP levels string to list of percentages."""
         if not self.tp_levels:
-            return [1.5, 3.0, 5.0]  # Default values - balanced for leverage trading
+            return [1.2, 1.8, 2.3]  # Default values - optimized for intraday trading
         return [float(x.strip()) for x in self.tp_levels.split(",") if x.strip()]
 
     def parse_tp_shares(self) -> List[float]:
@@ -295,7 +314,7 @@ class Config(BaseModel):
             # Stop Loss & Take Profit
             'sl_fixed_pct': float(os.getenv('SL_FIXED_PCT', '2.0')),  # Balanced SL for futures
             'sl_atr_mult': float(os.getenv('SL_ATR_MULT', '1.5')),  # ATR multiplier
-            'tp_levels': os.getenv('TP_LEVELS', '1.5,3.0,5.0'),  # Smart TP levels for leverage trading
+            'tp_levels': os.getenv('TP_LEVELS', '1.2,1.8,2.3'),  # Intraday TP levels
             'tp_shares': os.getenv('TP_SHARES', '0.4,0.35,0.25'),  # Front-loaded profit distribution
             'be_trigger_r': float(os.getenv('BE_TRIGGER_R', '0.5')),  # Безубыток раньше
             'trail_enable': os.getenv('TRAIL_ENABLE', 'true').lower() == 'true',
@@ -314,6 +333,12 @@ class Config(BaseModel):
             'lstm_input': int(os.getenv('LSTM_INPUT', '16')),
             'seq_len': int(os.getenv('SEQ_LEN', '30')),
             'lstm_signal_threshold': float(os.getenv('LSTM_SIGNAL_THRESHOLD', '0.0015')),
+
+            # GRU Model (PyTorch) - PHASE 2
+            'gru_enable': os.getenv('GRU_ENABLE', 'true').lower() == 'true',
+            'gru_model_path': os.getenv('GRU_MODEL_PATH', 'models/checkpoints/gru_model_pytorch.pt'),
+            'gru_input_features': int(os.getenv('GRU_INPUT_FEATURES', '22')),
+            'gru_sequence_length': int(os.getenv('GRU_SEQUENCE_LENGTH', '60')),
 
             'gpt_enable': os.getenv('GPT_ENABLE', 'false').lower() == 'true',
             'gpt_api_url': os.getenv('GPT_API_URL', 'http://127.0.0.1:1234'),
@@ -345,6 +370,10 @@ class Config(BaseModel):
             # Notifications
             'tg_bot_token': os.getenv('TG_BOT_TOKEN', ''),
             'tg_chat_id': os.getenv('TG_CHAT_ID', ''),
+            'tg_dashboard_enabled': os.getenv('TG_DASHBOARD_ENABLED', 'false').lower() == 'true',
+            'tg_dashboard_interval': int(os.getenv('TG_DASHBOARD_INTERVAL', '300')),
+            'tg_trade_notifications': os.getenv('TG_TRADE_NOTIFICATIONS', 'true').lower() == 'true',
+            'tg_position_updates': os.getenv('TG_POSITION_UPDATES', 'false').lower() == 'true',
 
             # File Paths
             'kl_persist': os.getenv('KL_PERSIST', 'data/klines.csv'),

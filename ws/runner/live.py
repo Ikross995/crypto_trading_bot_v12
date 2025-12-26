@@ -19,7 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Callable
 
 try:
     # Optional structured logging init (present in the user's project)
-    from infra.logging import setup_structured_logging  # type: ignore
+    from infra.log_config import setup_structured_logging  # type: ignore
 except Exception:  # pragma: no cover
 
     def setup_structured_logging() -> None:
@@ -75,16 +75,66 @@ try:
 except Exception:  # pragma: no cover
     EnhancedDashboardGenerator = None  # type: ignore
 
+# Telegram Bot Integration
+try:
+    from infra.telegram_bot import TelegramDashboardBot  # type: ignore
+except Exception:  # pragma: no cover
+    TelegramDashboardBot = None  # type: ignore
+
 # DCA and LSTM integration
 try:
     from strategy.dca import DCAManager  # type: ignore
 except Exception:  # pragma: no cover
     DCAManager = None  # type: ignore
 
+# LSTM disabled - use PyTorch GRU instead
+# try:
+#     from models.lstm import LSTMPredictor  # type: ignore
+# except Exception:  # pragma: no cover
+LSTMPredictor = None  # type: ignore
+
+# ==================== PHASE 1-4 INTEGRATIONS ====================
+
+# Phase 1: Critical Fixes
 try:
-    from models.lstm import LSTMPredictor  # type: ignore
+    from utils.concurrency import get_global_safe_state  # type: ignore
 except Exception:  # pragma: no cover
-    LSTMPredictor = None  # type: ignore
+    get_global_safe_state = None  # type: ignore
+
+try:
+    from utils.rate_limiter import AdaptiveRateLimiter  # type: ignore
+except Exception:  # pragma: no cover
+    AdaptiveRateLimiter = None  # type: ignore
+
+# Phase 2: GRU Model (PyTorch)
+try:
+    from models.gru_predictor_pytorch import GRUPredictorPyTorch  # type: ignore
+except Exception:  # pragma: no cover
+    GRUPredictorPyTorch = None  # type: ignore
+
+# Phase 3: Adaptive Strategy
+try:
+    from strategy.regime_detector import MarketRegimeDetector  # type: ignore
+except Exception:  # pragma: no cover
+    MarketRegimeDetector = None  # type: ignore
+
+try:
+    from strategy.adaptive_strategy import AdaptiveStrategyManager  # type: ignore
+except Exception:  # pragma: no cover
+    AdaptiveStrategyManager = None  # type: ignore
+
+# Phase 4: Risk Management
+try:
+    from strategy.kelly_criterion import KellyCriterionCalculator  # type: ignore
+except Exception:  # pragma: no cover
+    KellyCriterionCalculator = None  # type: ignore
+
+try:
+    from strategy.dynamic_stops import DynamicStopLossManager  # type: ignore
+except Exception:  # pragma: no cover
+    DynamicStopLossManager = None  # type: ignore
+
+# ================================================================
 
 logger = logging.getLogger(__name__)
 
@@ -293,20 +343,53 @@ class LiveTradingEngine:
                 "🎯 [TRAIL_SL] Trailing stop loss enabled - will initialize with Binance client"
             )
 
+        # RL Position Advisor - Intelligent position management with RL Agent
+        self.rl_position_advisor = None
+        if getattr(config, "use_combo_signals", False):
+            try:
+                from strategy.rl_position_advisor import RLPositionAdvisor
+                self.rl_position_advisor = RLPositionAdvisor(config)
+                self.logger.info("🤖 [RL_ADVISOR] RL Position Advisor initialized")
+            except Exception as e:
+                self.logger.warning("🤖 [RL_ADVISOR] Failed to initialize: %s", e)
+
         # Telegram Notifications
-        self.telegram = None
+        self.telegram_bot = None
+        self.telegram_update_handler = None
+        self.telegram_trade_notifications = getattr(config, "tg_trade_notifications", True)
         try:
             tg_token = getattr(config, "tg_bot_token", "")
             tg_chat_id = getattr(config, "tg_chat_id", "")
+            tg_webapp_url = getattr(config, "tg_webapp_url", None)
             if tg_token and tg_chat_id:
-                from infra.telegram import init_notifier
+                from infra.telegram_bot import TelegramDashboardBot, TelegramUpdateHandler
 
-                self.telegram = init_notifier(tg_token, tg_chat_id)
-                self.logger.info("[TELEGRAM] Notifier initialized")
+                self.telegram_bot = TelegramDashboardBot(tg_token, tg_chat_id, webapp_url=tg_webapp_url)
+                self.telegram_update_handler = TelegramUpdateHandler(self.telegram_bot, self)
+                self.logger.info("📱 [TELEGRAM] Bot initialized - notifications enabled")
+                if tg_webapp_url:
+                    self.logger.info(f"📱 [TELEGRAM] Web App enabled: {tg_webapp_url}")
             else:
-                self.logger.info("[TELEGRAM] Not configured - notifications disabled")
+                self.logger.info("📱 [TELEGRAM] Not configured - notifications disabled")
         except Exception as e:
-            self.logger.warning("[TELEGRAM] Failed to initialize: %s", e)
+            self.logger.warning("📱 [TELEGRAM] Failed to initialize: %s", e)
+
+        # Dashboard State Manager for Web App API
+        self.dashboard_state_manager = None
+        try:
+            from utils.dashboard_state import DashboardStateManager
+            self.dashboard_state_manager = DashboardStateManager()
+            self.logger.info("📊 [WEB_APP] Dashboard state manager initialized")
+
+            # Connect to WebSocket bridge for real-time updates
+            try:
+                from utils.websocket_bridge import ws_bridge
+                ws_bridge.set_dashboard_manager(self.dashboard_state_manager)
+                self.logger.info("🔴 [WEBSOCKET] Bridge connected for real-time streaming")
+            except Exception as ws_err:
+                self.logger.debug(f"[WEBSOCKET] Bridge connection skipped: {ws_err}")
+        except Exception as e:
+            self.logger.warning("📊 [WEB_APP] Failed to initialize dashboard state manager: %s", e)
 
         # Accounting
         self.equity_usdt = float(getattr(config, "paper_equity", 1000.0))
@@ -321,6 +404,9 @@ class LiveTradingEngine:
 
         # Active positions tracking for DCA
         self.active_positions: Dict[str, Dict] = {}
+
+        # Startup flag - prevents Telegram notifications for existing positions
+        self._startup_loading = True  # Will be set to False after loading existing positions
 
         # Emergency Stop Loss tracking
         self.initial_equity: Optional[float] = None  # Set on first run
@@ -359,8 +445,92 @@ class LiveTradingEngine:
         else:
             self.logger.info("📊 [DASHBOARD] Dashboard disabled or not available")
 
+        # ==================== PHASE 1-4 INITIALIZATION ====================
+
+        # Phase 1: Concurrency Protection & Rate Limiting
+        self.safe_state = None
+        if get_global_safe_state:
+            try:
+                self.safe_state = get_global_safe_state()
+                self.logger.info("🔒 [PHASE 1] Concurrency protection initialized")
+            except Exception as e:
+                self.logger.warning("🔒 [PHASE 1] Failed to initialize concurrency: %s", e)
+
+        self.rate_limiter = None
+        if AdaptiveRateLimiter:
+            try:
+                # Binance limits: 1200 requests/min, 50 orders/10s
+                self.rate_limiter = AdaptiveRateLimiter(
+                    max_calls=1200,
+                    time_window=60,
+                    enable_adaptive=True
+                )
+                self.logger.info("⏱️  [PHASE 1] Adaptive rate limiter initialized (1200 req/min)")
+            except Exception as e:
+                self.logger.warning("⏱️  [PHASE 1] Failed to initialize rate limiter: %s", e)
+
+        # Phase 2: GRU Price Predictor (PyTorch)
+        self.gru_predictor = None
+        if GRUPredictorPyTorch and getattr(config, "gru_enable", False):
+            try:
+                self.gru_predictor = GRUPredictorPyTorch(device="auto")
+                model_path = getattr(config, "gru_model_path", "models/checkpoints/gru_model_pytorch.pt")
+                self.gru_predictor.load(model_path)
+                self.logger.info("🧠 [PHASE 2] PyTorch GRU predictor loaded: MAE $2.04, MAPE 30.50%")
+                self.logger.info(f"   Model: {model_path}")
+                self.logger.info(f"   Features: 22 (price + volume indicators)")
+                self.logger.info(f"   Device: {self.gru_predictor.device}")
+            except Exception as e:
+                self.logger.warning("🧠 [PHASE 2] Failed to load GRU model: %s", e)
+
+        # Phase 3: Market Regime Detection & Adaptive Strategy
+        self.regime_detector = None
+        if MarketRegimeDetector:
+            try:
+                self.regime_detector = MarketRegimeDetector()
+                self.logger.info("📊 [PHASE 3] Market regime detector initialized (5 regimes)")
+            except Exception as e:
+                self.logger.warning("📊 [PHASE 3] Failed to initialize regime detector: %s", e)
+
+        self.adaptive_strategy = None
+        if AdaptiveStrategyManager:
+            try:
+                self.adaptive_strategy = AdaptiveStrategyManager()
+                self.logger.info("🎯 [PHASE 3] Adaptive strategy manager initialized")
+            except Exception as e:
+                self.logger.warning("🎯 [PHASE 3] Failed to initialize adaptive strategy: %s", e)
+
+        # Phase 4: Kelly Criterion & Dynamic Stops
+        self.kelly_calculator = None
+        if KellyCriterionCalculator:
+            try:
+                fractional_kelly = getattr(config, "kelly_fractional", 0.25)
+                self.kelly_calculator = KellyCriterionCalculator(
+                    use_fractional=fractional_kelly
+                )
+                self.logger.info(f"💰 [PHASE 4] Kelly Criterion initialized (fractional={fractional_kelly})")
+            except Exception as e:
+                self.logger.warning("💰 [PHASE 4] Failed to initialize Kelly: %s", e)
+
+        self.dynamic_stops = None
+        if DynamicStopLossManager:
+            try:
+                self.dynamic_stops = DynamicStopLossManager()
+                self.logger.info("🛡️  [PHASE 4] Dynamic stop-loss manager initialized (ATR-based)")
+            except Exception as e:
+                self.logger.warning("🛡️  [PHASE 4] Failed to initialize dynamic stops: %s", e)
+
+        # Trade history for Kelly Criterion calculation
+        self.trade_history: List[Dict] = []
+        self.max_trade_history = getattr(config, "kelly_lookback_trades", 50)
+
+        # Position extremes for trailing stops
+        self.position_extremes: Dict[str, Dict] = {}
+
+        # ================================================================
+
         self.logger.info(
-            "Live trading engine initialized with DCA, LSTM and Dashboard support"
+            "Live trading engine initialized with DCA, LSTM, Dashboard and Phase 1-4 improvements"
         )
     
     def _get_market_session(self) -> str:
@@ -464,7 +634,7 @@ class LiveTradingEngine:
         return None
 
     def _position_size_qty(
-        self, price: Optional[float], strength: float = 0.5
+        self, price: Optional[float], strength: float = 0.5, symbol: str = "UNKNOWN"
     ) -> Optional[float]:
         """
         FIXED: Conservative position sizing with proper risk management.
@@ -517,6 +687,10 @@ class LiveTradingEngine:
         if qty <= 0:
             return None
 
+        # Round quantity to proper precision for the symbol
+        # Most futures have precision 0-3 decimal places
+        qty = self._round_quantity(qty, symbol)
+
         self.logger.info(
             "[POSITION_SIZE] Equity=%.2f, Risk=%.2f%%, Strength=%.2f (clamped=%.2f), Value=%.2f (max=%.2f), Qty=%.6f",
             equity,
@@ -530,6 +704,465 @@ class LiveTradingEngine:
 
         return qty
 
+    async def _position_size_qty_adaptive(
+        self,
+        price: Optional[float],
+        strength: float = 0.5,
+        symbol: str = "UNKNOWN",
+        regime: Optional[str] = None
+    ) -> Optional[float]:
+        """
+        PHASE 4: Enhanced position sizing using Kelly Criterion and adaptive strategy.
+        Falls back to legacy method if Kelly is not available.
+        """
+        # Fallback to legacy method if Kelly not initialized
+        if not self.kelly_calculator or not self.trade_history:
+            return self._position_size_qty(price, strength, symbol)
+
+        p = _to_float(price)
+        if not p or p <= 0:
+            return None
+
+        equity = float(self.equity_usdt)
+
+        try:
+            # Calculate Kelly-optimal size
+            kelly_result = await self.kelly_calculator.calculate_kelly_size(
+                trade_history=self.trade_history,
+                regime=regime
+            )
+
+            if not kelly_result.is_valid or kelly_result.recommended_size_pct <= 0:
+                self.logger.warning(
+                    "[KELLY] Invalid result, falling back to legacy sizing"
+                )
+                return self._position_size_qty(price, strength, symbol)
+
+            # Base position size from Kelly
+            kelly_pct = kelly_result.recommended_size_pct  # Already fractional (e.g., 2.5%)
+            base_position_value = equity * (kelly_pct / 100.0)
+
+            # Apply regime-based multiplier if adaptive strategy is available
+            regime_multiplier = 1.0
+            if self.adaptive_strategy and regime:
+                params = await self.adaptive_strategy.get_strategy_parameters(regime)
+                regime_multiplier = params.position_size_multiplier
+
+            # Apply signal strength multiplier
+            strength_clamped = min(1.0, max(0.5, strength))
+
+            # Final position value
+            position_value = base_position_value * regime_multiplier * strength_clamped
+
+            # Ensure minimum notional
+            final_value = max(self.min_notional, position_value)
+
+            # SAFETY: Cap maximum position to 30% of equity
+            max_position = equity * 0.3 * self.leverage
+            final_value = min(final_value, max_position)
+
+            # Convert to quantity
+            qty = final_value / p
+
+            if qty <= 0:
+                return None
+
+            self.logger.info(
+                "[KELLY_SIZE] Symbol=%s, Kelly=%.2f%%, Regime=%s (×%.2f), Strength=%.2f (×%.2f), Value=%.2f, Qty=%.6f",
+                symbol,
+                kelly_pct,
+                regime or "UNKNOWN",
+                regime_multiplier,
+                strength,
+                strength_clamped,
+                final_value,
+                qty,
+            )
+
+            return qty
+
+        except Exception as e:
+            self.logger.warning(
+                "[KELLY] Error calculating adaptive size: %s, falling back to legacy", e
+            )
+            return self._position_size_qty(price, strength, symbol)
+
+    async def _detect_market_regime(self, symbol: str, candles_df: Any) -> Optional[str]:
+        """
+        PHASE 3: Detect current market regime for adaptive strategy.
+        Returns regime string (e.g., 'STRONG_TREND', 'CHOPPY') or None.
+        """
+        if not self.regime_detector:
+            return None
+
+        try:
+            # Convert to DataFrame if needed
+            import pandas as pd
+            if isinstance(candles_df, list):
+                candles_df = pd.DataFrame(candles_df)
+
+            regime_result = await self.regime_detector.detect_regime(candles_df)
+
+            if regime_result and hasattr(regime_result, 'regime'):
+                regime_str = str(regime_result.regime.value) if hasattr(regime_result.regime, 'value') else str(regime_result.regime)
+
+                self.logger.info(
+                    "[REGIME] Symbol=%s, Regime=%s, ADX=%.2f, Confidence=%.2f",
+                    symbol,
+                    regime_str,
+                    getattr(regime_result, 'adx', 0),
+                    getattr(regime_result, 'confidence', 0)
+                )
+
+                return regime_str
+
+            return None
+
+        except Exception as e:
+            self.logger.warning("[REGIME] Error detecting regime for %s: %s", symbol, e)
+            return None
+
+    async def _fetch_real_mainnet_data(self, symbol: str, timeframe: str, limit: int = 250) -> Optional[Any]:
+        """
+        Fetch REAL market data from Binance MAINNET (not testnet).
+        Used for GRU predictions to ensure accurate price data.
+        """
+        try:
+            import aiohttp
+            import pandas as pd
+            from datetime import datetime
+
+            # Binance MAINNET API (not testnet!)
+            base_url = "https://fapi.binance.com"
+            endpoint = f"{base_url}/fapi/v1/klines"
+
+            params = {
+                'symbol': symbol,
+                'interval': timeframe,
+                'limit': limit
+            }
+
+            self.logger.info("🌐 [REAL_DATA] Fetching %d candles for %s from Binance MAINNET", limit, symbol)
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # Convert to DataFrame
+                        df = pd.DataFrame(data, columns=[
+                            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                            'taker_buy_quote', 'ignore'
+                        ])
+
+                        # Convert types
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                        df['open'] = df['open'].astype(float)
+                        df['high'] = df['high'].astype(float)
+                        df['low'] = df['low'].astype(float)
+                        df['close'] = df['close'].astype(float)
+                        df['volume'] = df['volume'].astype(float)
+
+                        # Keep only needed columns
+                        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+
+                        self.logger.info(
+                            "🌐 [REAL_DATA] ✅ Loaded %d candles: $%.2f → $%.2f (Latest: $%.2f)",
+                            len(df),
+                            df['close'].iloc[0],
+                            df['close'].iloc[-1],
+                            df['close'].iloc[-1]
+                        )
+
+                        return df
+                    else:
+                        self.logger.warning(
+                            "🌐 [REAL_DATA] ❌ HTTP %d from Binance mainnet",
+                            response.status
+                        )
+                        return None
+
+        except Exception as e:
+            self.logger.warning("🌐 [REAL_DATA] ❌ Error fetching mainnet data: %s", str(e))
+            return None
+
+    async def _get_gru_prediction(self, symbol: str, candles_df: Any) -> Optional[Dict]:
+        """
+        PHASE 2: Get GRU model price prediction (PyTorch).
+        Returns dict with 'predicted_price', 'direction', 'confidence' or None.
+        """
+        if not self.gru_predictor:
+            self.logger.warning("🧠 [GRU_DEBUG] %s: GRU predictor not initialized", symbol)
+            return None
+
+        try:
+            # Check if model is loaded
+            if not hasattr(self.gru_predictor, 'model') or self.gru_predictor.model is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: GRU model not loaded", symbol)
+                return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Attempting prediction with %d candles", symbol, len(candles_df))
+
+            # Debug: Check data order and range
+            if 'close' in candles_df.columns:
+                first_price = float(candles_df['close'].iloc[0])
+                last_price = float(candles_df['close'].iloc[-1])
+                min_price = float(candles_df['close'].min())
+                max_price = float(candles_df['close'].max())
+
+                self.logger.info(
+                    "🧠 [GRU_DATA_CHECK] %s: First=$%.4f, Last=$%.4f, Range=$%.4f-$%.4f",
+                    symbol, first_price, last_price, min_price, max_price
+                )
+
+                # Check if timestamps are in correct order
+                if 'timestamp' in candles_df.columns:
+                    first_time = candles_df['timestamp'].iloc[0]
+                    last_time = candles_df['timestamp'].iloc[-1]
+                    self.logger.info(
+                        "🧠 [GRU_TIME_CHECK] %s: First=%s, Last=%s",
+                        symbol, first_time, last_time
+                    )
+
+            # Get prediction (returns float)
+            predicted_price = self.gru_predictor.predict(candles_df)
+
+            if predicted_price is None:
+                self.logger.warning("🧠 [GRU_DEBUG] %s: Prediction returned None", symbol)
+                return None
+
+            self.logger.info("🧠 [GRU_DEBUG] %s: Prediction successful: $%.2f", symbol, predicted_price)
+
+            # Get current price
+            current_price = float(candles_df['close'].iloc[-1])
+
+            # 🛡️ CRITICAL: Check for invalid predictions
+            if predicted_price is None or predicted_price <= 0:
+                self.logger.error(
+                    "🚨 [GRU_INVALID] %s: Invalid prediction: $%.2f - MODEL NEEDS RETRAINING!",
+                    symbol, predicted_price
+                )
+                return None
+
+            # Calculate direction and confidence
+            price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+            # 🛡️ SANITY CHECK: Limit extreme predictions
+            # For 30m timeframe, realistic max change is ~5%
+            # For 1h timeframe, realistic max change is ~8%
+            #
+            # NOTE: If GRU consistently gives extreme predictions, it needs retraining
+            # on more recent data. Old training data may not reflect current price ranges.
+            max_change_pct = 5.0  # Conservative limit
+            was_clamped = False
+
+            if abs(price_change_pct) > max_change_pct:
+                original_prediction = predicted_price
+                original_change = price_change_pct
+                was_clamped = True
+
+                # Clamp prediction to realistic range
+                if price_change_pct > 0:
+                    predicted_price = current_price * (1 + max_change_pct / 100)
+                else:
+                    predicted_price = current_price * (1 - max_change_pct / 100)
+
+                price_change_pct = ((predicted_price - current_price) / current_price) * 100
+
+                self.logger.warning(
+                    "🛡️ [GRU_SANITY] %s: Extreme prediction clamped: $%.2f (%+.2f%%) → $%.2f (%+.2f%%) - MODEL NEEDS RETRAINING!",
+                    symbol, original_prediction, original_change, predicted_price, price_change_pct
+                )
+
+                # Warn if prediction is extremely off (>20% error)
+                if abs(original_change) > 20:
+                    self.logger.error(
+                        "⛔ [GRU_CRITICAL] %s: Model prediction >20%% off (%+.2f%%)! Training data is outdated. "
+                        "Retrain with: python -m training.train_gru_pytorch --symbol %s",
+                        symbol, original_change, symbol
+                    )
+
+            if abs(price_change_pct) < 0.1:
+                direction = "NEUTRAL"
+            elif price_change_pct > 0:
+                direction = "LONG"
+            else:
+                direction = "SHORT"
+
+            # Confidence based on price change magnitude (0-1 scale)
+            # Larger price changes = higher confidence
+            # BUT: Significantly reduce confidence if prediction was clamped
+            confidence = min(abs(price_change_pct) / 2.0, 1.0)  # Cap at 100%
+
+            if was_clamped:
+                # Reduce confidence by 80% if prediction was unrealistic
+                confidence *= 0.2
+                self.logger.warning(
+                    "⚠️ [GRU_CONFIDENCE] %s: Confidence reduced to %.1f%% due to extreme prediction clamping",
+                    symbol, confidence * 100
+                )
+
+            result = {
+                'predicted_price': predicted_price,
+                'current_price': current_price,
+                'direction': direction,
+                'confidence': confidence,
+                'price_change_pct': price_change_pct
+            }
+
+            self.logger.info(
+                "[GRU] %s: Current=$%.2f → Predicted=$%.2f (%+.2f%%) | %s | Confidence=%.1f%%",
+                symbol,
+                current_price,
+                predicted_price,
+                price_change_pct,
+                direction,
+                confidence * 100
+            )
+
+            # Save last GRU prediction for dashboard
+            self.last_gru_prediction = result
+
+            return result
+
+        except Exception as e:
+            # Changed from debug to warning to see errors!
+            self.logger.warning("🧠 [GRU_ERROR] %s: Prediction failed: %s", symbol, str(e))
+            import traceback
+            self.logger.warning("🧠 [GRU_ERROR] Traceback:\n%s", traceback.format_exc())
+            return None
+
+    async def _calculate_dynamic_stops(
+        self,
+        symbol: str,
+        entry_price: float,
+        side: str,
+        market_data: Dict,
+        regime: Optional[str] = None
+    ) -> Dict[str, float]:
+        """
+        PHASE 4: Calculate dynamic ATR-based stop loss and take profit levels.
+        Returns dict with 'stop_loss', 'take_profit', 'breakeven_trigger'.
+        """
+        if not self.dynamic_stops:
+            # Fallback to fixed percentages
+            sl_pct = getattr(self.config, 'sl_pct', 2.0) / 100.0
+            tp_pct = getattr(self.config, 'tp_pct', 4.0) / 100.0
+
+            if side == 'BUY':
+                return {
+                    'stop_loss': entry_price * (1 - sl_pct),
+                    'take_profit': entry_price * (1 + tp_pct),
+                    'breakeven_trigger': entry_price * (1 + tp_pct / 2)
+                }
+            else:
+                return {
+                    'stop_loss': entry_price * (1 + sl_pct),
+                    'take_profit': entry_price * (1 - tp_pct),
+                    'breakeven_trigger': entry_price * (1 - tp_pct / 2)
+                }
+
+        try:
+            # Calculate initial stop with ATR
+            stop_result = await self.dynamic_stops.calculate_initial_stop(
+                entry_price=entry_price,
+                side=side,
+                market_data=market_data,
+                regime=regime
+            )
+
+            # Calculate take profit levels
+            tp_result = await self.dynamic_stops.calculate_take_profit_levels(
+                entry_price=entry_price,
+                side=side,
+                stop_loss=stop_result.stop_price,
+                market_data=market_data
+            )
+
+            result = {
+                'stop_loss': stop_result.stop_price,
+                'take_profit': tp_result.primary_target if tp_result else entry_price * 1.02,
+                'breakeven_trigger': entry_price * (1.015 if side == 'BUY' else 0.985),
+                'atr_multiplier': stop_result.atr_multiplier,
+                'stop_distance_pct': stop_result.distance_pct
+            }
+
+            self.logger.info(
+                "[DYNAMIC_STOPS] Symbol=%s, Side=%s, Entry=%.2f, SL=%.2f (%.2f%% / %.2fx ATR), TP=%.2f",
+                symbol,
+                side,
+                entry_price,
+                result['stop_loss'],
+                result['stop_distance_pct'],
+                result['atr_multiplier'],
+                result['take_profit']
+            )
+
+            return result
+
+        except Exception as e:
+            self.logger.warning(
+                "[DYNAMIC_STOPS] Error calculating stops for %s: %s, using fallback", symbol, e
+            )
+            # Fallback to fixed percentages
+            sl_pct = 0.02
+            tp_pct = 0.04
+            if side == 'BUY':
+                return {
+                    'stop_loss': entry_price * (1 - sl_pct),
+                    'take_profit': entry_price * (1 + tp_pct),
+                    'breakeven_trigger': entry_price * 1.015
+                }
+            else:
+                return {
+                    'stop_loss': entry_price * (1 + sl_pct),
+                    'take_profit': entry_price * (1 - tp_pct),
+                    'breakeven_trigger': entry_price * 0.985
+                }
+
+    def _record_trade_for_kelly(
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        quantity: float,
+        pnl: float,
+        regime: Optional[str] = None
+    ) -> None:
+        """
+        PHASE 4: Record completed trade for Kelly Criterion calculation.
+        Maintains a sliding window of recent trades.
+        """
+        trade_record = {
+            'symbol': symbol,
+            'side': side,
+            'entry_price': entry_price,
+            'exit_price': exit_price,
+            'quantity': quantity,
+            'pnl': pnl,
+            'pnl_pct': (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0,
+            'regime': regime,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+        self.trade_history.append(trade_record)
+
+        # Maintain sliding window
+        if len(self.trade_history) > self.max_trade_history:
+            self.trade_history = self.trade_history[-self.max_trade_history:]
+
+        self.logger.info(
+            "[KELLY_RECORD] Trade recorded: %s %s, PnL=$%.2f (%.2f%%), Regime=%s, History size=%d",
+            side,
+            symbol,
+            pnl,
+            trade_record['pnl_pct'],
+            regime or 'UNKNOWN',
+            len(self.trade_history)
+        )
+
     async def start(self) -> None:
         if callable(setup_structured_logging):
             try:
@@ -537,10 +1170,18 @@ class LiveTradingEngine:
             except Exception:
                 pass
         self.running = True
+
+        # Set start time for uptime calculation
+        from datetime import datetime, timezone
+        self._start_time = datetime.now(timezone.utc)
+
         self.logger.info("Starting live trading engine...")
 
         # 🧪 ENHANCED: Market Context Analysis & Pre-Trading Backtest
         await self._initialize_market_context()
+
+        # 📊 Load existing positions from exchange (before starting trading)
+        await self._load_existing_positions()
 
         # Preload historical data if configured
         preload_candles = getattr(self.config, "preload_candles", 0)
@@ -557,8 +1198,21 @@ class LiveTradingEngine:
         if self.dashboard:
             try:
                 self.logger.info("📊 [DASHBOARD] Generating initial dashboard...")
+
+                # Принудительно получаем свежие данные из portfolio_tracker
+                if self.portfolio_tracker:
+                    try:
+                        self.portfolio_tracker.log_portfolio_summary()
+                        self.logger.info("📊 [DASHBOARD] Portfolio data refreshed for dashboard")
+                    except Exception as pt_e:
+                        self.logger.debug("📊 [DASHBOARD] Portfolio refresh failed: %s", pt_e)
+
+                # Передаём все данные включая enhanced_ai
+                enhanced_ai = getattr(self, 'enhanced_ai', None)
                 dashboard_path = await self.dashboard.update_dashboard(
-                    trading_engine=self, adaptive_learning=self.adaptive_learning
+                    trading_engine=self,
+                    adaptive_learning=self.adaptive_learning,
+                    enhanced_ai=enhanced_ai
                 )
 
                 if dashboard_path:
@@ -576,7 +1230,7 @@ class LiveTradingEngine:
                             file_url,
                         )
                         self.logger.info(
-                            "📊 [DASHBOARD] 🔄 Will auto-update every 30 seconds during trading"
+                            "📊 [DASHBOARD] 🔄 Auto-updates: every 5s (first 30 iterations), then every 30s"
                         )
                     except Exception as browser_e:
                         self.logger.warning(
@@ -591,6 +1245,16 @@ class LiveTradingEngine:
                 self.logger.warning(
                     "📊 [DASHBOARD] Failed to initialize on startup: %s", dash_e
                 )
+
+        # Start Telegram dashboard update task in background
+        if self.telegram_bot and getattr(self.config, "tg_dashboard_enabled", False):
+            asyncio.create_task(self._telegram_dashboard_task())
+            self.logger.info("📱 [TELEGRAM] Dashboard update task started")
+
+        # Start Telegram update polling for commands and button presses
+        if self.telegram_update_handler:
+            asyncio.create_task(self.telegram_update_handler.start_polling())
+            self.logger.info("📱 [TELEGRAM] Update polling started - commands and buttons are active")
 
         await self._run_trading_loop()
 
@@ -830,6 +1494,418 @@ class LiveTradingEngine:
                 "⚠️ [MARKET_CONTEXT] Continuing with default trading settings"
             )
             # Don't fail the startup - continue with default settings
+
+    async def _load_existing_positions(self) -> None:
+        """Load existing positions from exchange at startup to prevent duplicate notifications."""
+        try:
+            # Initialize Binance client if not ready
+            if not hasattr(self, "client") or not self.client:
+                await self._init_binance_client()
+
+            if not self.client:
+                self.logger.warning("📊 [STARTUP] Cannot load positions - client not initialized")
+                self._startup_loading = False
+                return
+
+            # Get all positions from exchange
+            positions = self.client.get_positions()
+            existing_count = 0
+
+            for pos in positions:
+                symbol = pos["symbol"]
+                position_amt = float(pos.get("positionAmt", 0))
+
+                # Only track positions with non-zero amount
+                if abs(position_amt) > 0:
+                    entry_price = float(pos.get("entryPrice", 0))
+                    unrealized_pnl = float(pos.get("unRealizedProfit", 0))
+                    mark_price = float(pos.get("markPrice", 0))
+
+                    # Add to active_positions tracking
+                    self.active_positions[symbol] = {
+                        "side": "BUY" if position_amt > 0 else "SELL",
+                        "entry_price": entry_price,
+                        "quantity": abs(position_amt),
+                        "unrealized_pnl": unrealized_pnl,
+                        "created_time": None,  # Unknown for existing positions
+                        "from_startup": True,  # Mark as loaded from startup
+                    }
+                    existing_count += 1
+
+                    self.logger.info(
+                        "📊 [STARTUP] Loaded existing position: %s %s %.3f @ %.4f (P&L: $%.2f)",
+                        "LONG" if position_amt > 0 else "SHORT",
+                        symbol,
+                        abs(position_amt),
+                        entry_price,
+                        unrealized_pnl,
+                    )
+
+            if existing_count > 0:
+                self.logger.info(
+                    "📊 [STARTUP] ✅ Loaded %d existing position(s)",
+                    existing_count,
+                )
+
+                # 📱 Send Telegram notification about existing positions at startup
+                if self.telegram_bot and self.telegram_trade_notifications:
+                    try:
+                        # Get account balance
+                        account_balance = 0.0
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    break
+                        except Exception as bal_e:
+                            self.logger.debug("Failed to fetch account balance: %s", bal_e)
+
+                        # Get current prices from exchange
+                        current_prices = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                ticker = self.client.get_ticker_price(symbol)
+                                current_prices[symbol] = float(ticker.get("price", 0))
+                        except Exception as price_e:
+                            self.logger.debug("Failed to fetch current prices: %s", price_e)
+
+                        # Get open orders (TP/SL limit orders)
+                        all_open_orders = {}
+                        try:
+                            for symbol in self.active_positions.keys():
+                                orders = self.client.get_open_orders(symbol)
+                                all_open_orders[symbol] = orders
+                        except Exception as orders_e:
+                            self.logger.debug("Failed to fetch open orders: %s", orders_e)
+
+                        # Prepare positions summary
+                        positions_list = []
+                        total_pnl = 0.0
+                        total_margin = 0.0
+                        total_notional = 0.0
+
+                        for symbol, pos_data in self.active_positions.items():
+                            side = pos_data["side"]
+                            entry_price = pos_data["entry_price"]
+                            quantity = pos_data["quantity"]
+                            pnl = pos_data["unrealized_pnl"]
+
+                            # Calculate values
+                            notional = entry_price * quantity
+                            margin = notional / self.leverage
+                            roi_pct = (pnl / margin * 100) if margin > 0 else 0
+
+                            # Get current price
+                            current_price = current_prices.get(symbol, entry_price)
+                            price_change_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+                            # Estimate liquidation price (simplified)
+                            if side == "BUY":
+                                liq_price = entry_price * (1 - 0.9 / self.leverage)  # 90% margin loss
+                            else:
+                                liq_price = entry_price * (1 + 0.9 / self.leverage)
+
+                            total_pnl += pnl
+                            total_margin += margin
+                            total_notional += notional
+
+                            # Extract TP/SL orders
+                            tp_orders = []
+                            sl_orders = []
+                            open_orders = all_open_orders.get(symbol, [])
+                            for order in open_orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+
+                            # Sort TP orders (closest first for LONG, furthest first for SHORT)
+                            if side == "BUY":
+                                tp_orders.sort()  # Ascending for LONG
+                            else:
+                                tp_orders.sort(reverse=True)  # Descending for SHORT
+
+                            # Get first TP and SL
+                            first_tp = tp_orders[0] if tp_orders else None
+                            first_sl = sl_orders[0] if sl_orders else None
+
+                            positions_list.append({
+                                "symbol": symbol,
+                                "side": "LONG" if side == "BUY" else "SHORT",
+                                "entry_price": entry_price,
+                                "current_price": current_price,
+                                "quantity": quantity,
+                                "pnl": pnl,
+                                "roi_pct": roi_pct,
+                                "price_change_pct": price_change_pct,
+                                "margin": margin,
+                                "notional": notional,
+                                "leverage": self.leverage,
+                                "liq_price": liq_price,
+                                "tp_price": first_tp,
+                                "sl_price": first_sl,
+                                "tp_count": len(tp_orders),
+                                "sl_count": len(sl_orders)
+                            })
+
+                        # Sort by ROI% (highest first)
+                        positions_list.sort(key=lambda x: x["roi_pct"], reverse=True)
+
+                        # Calculate statistics
+                        avg_roi = total_pnl / total_margin * 100 if total_margin > 0 else 0
+                        best_pos = positions_list[0] if positions_list else None
+                        worst_pos = positions_list[-1] if positions_list else None
+                        winning_count = sum(1 for p in positions_list if p["pnl"] > 0)
+                        losing_count = sum(1 for p in positions_list if p["pnl"] < 0)
+
+                        # Build beautiful motivating message
+                        from datetime import datetime
+                        current_time = datetime.now().strftime("%H:%M:%S")
+
+                        # Motivational greeting based on performance
+                        if avg_roi > 5:
+                            greeting = "Excellent performance! 🌟"
+                        elif avg_roi > 2:
+                            greeting = "Great job! Keep it up! 💪"
+                        elif avg_roi > 0:
+                            greeting = "Building wealth steadily! 📈"
+                        elif avg_roi > -2:
+                            greeting = "Trading smart, stay focused! 🎯"
+                        else:
+                            greeting = "Patience pays off! 💎"
+
+                        # Header with box
+                        message = f"""╔═══════════════════════╗
+║  <b>⚡ BOT IS LIVE!</b>  ║
+╚═══════════════════════╝
+
+🚀 <b>{greeting}</b>
+⏰ <i>Session started at {current_time} UTC</i>
+
+╭─────────────────────╮
+│ <b>💰 ACCOUNT STATUS</b>   │
+╰─────────────────────╯
+
+<b>💵 Balance:</b> {account_balance:,.2f} USDT
+<b>📊 Active Positions:</b> {existing_count}
+<b>⚡ Leverage:</b> {self.leverage}x
+<b>💼 Margin in Use:</b> ${total_margin:,.2f}
+"""
+
+                        # Capital utilization
+                        if account_balance > 0:
+                            capital_used = (total_margin / account_balance * 100) if account_balance > 0 else 0
+                            util_bar_length = 15
+                            util_filled = min(int(capital_used / 5), util_bar_length)  # 5% per segment
+                            util_bar = "█" * util_filled + "░" * (util_bar_length - util_filled)
+                            message += f"<b>📈 Capital Used:</b> {capital_used:.1f}%\n[{util_bar}]\n"
+
+                        message += "\n"
+
+                        # P&L Section with motivational indicators
+                        pnl_emoji = "💰" if total_pnl >= 0 else "📊"
+
+                        # Determine motivation level
+                        if avg_roi > 10:
+                            roi_emoji = "🌟"
+                            performance_status = "OUTSTANDING"
+                            motivation_msg = "Incredible returns! 🏆"
+                        elif avg_roi > 5:
+                            roi_emoji = "🚀"
+                            performance_status = "EXCELLENT"
+                            motivation_msg = "Strong performance! 💪"
+                        elif avg_roi > 2:
+                            roi_emoji = "📈"
+                            performance_status = "VERY GOOD"
+                            motivation_msg = "Solid gains! 👍"
+                        elif avg_roi > 0:
+                            roi_emoji = "✅"
+                            performance_status = "POSITIVE"
+                            motivation_msg = "Profitable trades! 💵"
+                        elif avg_roi > -2:
+                            roi_emoji = "📊"
+                            performance_status = "LEARNING"
+                            motivation_msg = "Building experience! 🎓"
+                        elif avg_roi > -5:
+                            roi_emoji = "⚠️"
+                            performance_status = "ADJUSTING"
+                            motivation_msg = "Staying disciplined! 🛡️"
+                        else:
+                            roi_emoji = "🎯"
+                            performance_status = "PROTECTED"
+                            motivation_msg = "Stops did their job! 🛡️"
+
+                        # Enhanced progress bar
+                        bar_length = 15
+                        if avg_roi >= 0:
+                            filled = min(int(avg_roi / 1.5), bar_length)
+                            bar = "█" * filled + "░" * (bar_length - filled)
+                        else:
+                            filled = min(int(abs(avg_roi) / 1.5), bar_length)
+                            bar = "▓" * filled + "·" * (bar_length - filled)
+
+                        message += f"""╭─────────────────────╮
+│ <b>{roi_emoji} {performance_status}</b>
+╰─────────────────────╯
+
+{pnl_emoji} <b>Total P&L:</b> ${total_pnl:+,.2f} USDT
+📈 <b>Portfolio ROI:</b> {avg_roi:+.2f}%
+[{bar}] {abs(avg_roi):.1f}%
+
+💬 <i>{motivation_msg}</i>
+
+"""
+
+                        # Win/Loss ratio with encouragement
+                        win_rate = (winning_count / existing_count * 100) if existing_count > 0 else 0
+                        if win_rate >= 60:
+                            wr_emoji = "🏆"
+                            wr_status = "Excellent!"
+                        elif win_rate >= 50:
+                            wr_emoji = "✅"
+                            wr_status = "Good ratio!"
+                        else:
+                            wr_emoji = "🎯"
+                            wr_status = "Quality over quantity!"
+
+                        message += f"""<b>{wr_emoji} Win Rate:</b> {win_rate:.0f}% <i>({wr_status})</i>
+<b>🎯 Winners:</b> {winning_count}  |  <b>📚 Learning:</b> {losing_count}
+
+"""
+
+                        # Best/Worst positions with celebration
+                        if best_pos:
+                            if best_pos["roi_pct"] > 15:
+                                best_emoji = "🏆"
+                                best_label = "STAR PERFORMER"
+                            elif best_pos["roi_pct"] > 10:
+                                best_emoji = "🌟"
+                                best_label = "TOP WINNER"
+                            elif best_pos["roi_pct"] > 5:
+                                best_emoji = "⭐"
+                                best_label = "Great Trade"
+                            else:
+                                best_emoji = "✨"
+                                best_label = "Leading"
+                            message += f"""<b>{best_emoji} {best_label}:</b> {best_pos["symbol"]} <b>{best_pos["roi_pct"]:+.2f}%</b>
+"""
+                        if worst_pos:
+                            if worst_pos["roi_pct"] >= 0:
+                                worst_emoji = "💎"
+                                worst_label = "Holding Strong"
+                            else:
+                                worst_emoji = "🛡️"
+                                worst_label = "Under Review"
+                            message += f"""<b>{worst_emoji} {worst_label}:</b> {worst_pos["symbol"]} <b>{worst_pos["roi_pct"]:+.2f}%</b>
+
+"""
+
+                        # Position details
+                        message += """╔════════════════════════╗
+║  <b>📊 ACTIVE POSITIONS</b>   ║
+╚════════════════════════╝
+
+"""
+
+                        # Add each position with rich details
+                        for i, pos in enumerate(positions_list, 1):
+                            # Position type emoji
+                            direction_emoji = "🎯" if pos["side"] == "LONG" else "🎲"
+
+                            # P&L emoji based on ROI
+                            if pos["roi_pct"] > 10:
+                                status_emoji = "🚀"
+                            elif pos["roi_pct"] > 5:
+                                status_emoji = "📈"
+                            elif pos["roi_pct"] > 2:
+                                status_emoji = "✅"
+                            elif pos["roi_pct"] > 0:
+                                status_emoji = "🔹"
+                            elif pos["roi_pct"] > -2:
+                                status_emoji = "⚠️"
+                            elif pos["roi_pct"] > -5:
+                                status_emoji = "📉"
+                            else:
+                                status_emoji = "🔥"
+
+                            # Price change emoji
+                            if pos["price_change_pct"] > 5:
+                                price_emoji = "🔥"
+                            elif pos["price_change_pct"] > 2:
+                                price_emoji = "⬆️"
+                            elif pos["price_change_pct"] > 0:
+                                price_emoji = "↗️"
+                            elif pos["price_change_pct"] > -2:
+                                price_emoji = "↘️"
+                            elif pos["price_change_pct"] > -5:
+                                price_emoji = "⬇️"
+                            else:
+                                price_emoji = "❄️"
+
+                            # Build TP/SL info
+                            tp_sl_info = ""
+                            if pos["tp_price"]:
+                                tp_distance = ((pos["tp_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                tp_badge = f" ({pos['tp_count']}x)" if pos["tp_count"] > 1 else ""
+                                tp_sl_info += f"🎯 <b>TP:</b> ${pos['tp_price']:,.4f} ({tp_distance:+.2f}%){tp_badge}\n"
+                            if pos["sl_price"]:
+                                sl_distance = ((pos["sl_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] > 0 else 0
+                                sl_badge = f" ({pos['sl_count']}x)" if pos["sl_count"] > 1 else ""
+                                tp_sl_info += f"🛡️ <b>SL:</b> ${pos['sl_price']:,.4f} ({sl_distance:+.2f}%){sl_badge}\n"
+
+                            message += f"""╭──────────────────╮
+│ <b>{i}. {pos["symbol"]}</b>  {direction_emoji}  <b>{pos["side"]}</b>
+╰──────────────────╯
+<b>Entry:</b> ${pos["entry_price"]:,.4f}
+<b>Now:</b> ${pos["current_price"]:,.4f} {price_emoji} <b>{pos["price_change_pct"]:+.2f}%</b>
+<b>Qty:</b> {pos["quantity"]:.4f} | <b>Leverage:</b> {pos["leverage"]}x
+
+{status_emoji} <b>P&L: ${pos["pnl"]:+,.2f}</b> (<b>{pos["roi_pct"]:+.2f}%</b>)
+💵 <b>Margin:</b> ${pos["margin"]:.2f}
+{tp_sl_info}⚡ <b>Liq:</b> ${pos["liq_price"]:,.4f}
+
+"""
+
+                        # Footer with motivation
+                        message += """╔═══════════════════════╗
+║  <b>🎯 SYSTEM READY</b> ║
+╚═══════════════════════╝
+
+<b>🔔 Active Monitoring:</b>
+✅ New trade entries
+✅ Position exits with P&L
+✅ TP/SL triggers
+✅ Real-time updates
+
+💡 <i>Trade smart, stay patient, build wealth!</i>"""
+
+                        # Send async
+                        asyncio.create_task(
+                            self.telegram_bot.send_message(message, parse_mode="HTML")
+                        )
+                        self.logger.info("📱 [TELEGRAM] Startup positions summary sent")
+                    except Exception as tg_e:
+                        self.logger.warning(
+                            "📱 [TELEGRAM] Failed to send startup summary: %s", tg_e
+                        )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
+            else:
+                self.logger.info("📊 [STARTUP] No existing positions found")
+
+            # IMPORTANT: Set flag to False - now we'll send notifications for NEW positions
+            self._startup_loading = False
+            self.logger.info("📊 [STARTUP] Position loading complete - Telegram notifications enabled")
+
+        except Exception as e:
+            self.logger.warning("📊 [STARTUP] Failed to load existing positions: %s", e)
+            # Still set flag to False to enable notifications
+            self._startup_loading = False
 
     async def _preload_historical_data(self, limit: int) -> None:
         """Preload historical candle data for all symbols before trading starts."""
@@ -1147,14 +2223,284 @@ class LiveTradingEngine:
 
         self.logger.info("[PRELOAD] COMPLETE: Historical data preload finished!")
 
+    async def _telegram_dashboard_task(self) -> None:
+        """Background task to send periodic dashboard updates to Telegram."""
+        if not self.telegram_bot:
+            return
+
+        self.logger.info("📱 [TELEGRAM] Starting dashboard update task...")
+
+        interval = getattr(self.config, "tg_dashboard_interval", 300)
+
+        # Wait a bit before first update to let system stabilize
+        await asyncio.sleep(30)
+
+        while self.running:
+            try:
+                # DISABLED: Periodic dashboard updates to Telegram (use WebSocket dashboard instead)
+                # Only save dashboard state for Web App API real-time updates
+                # Trade signals (open/close/TP/SL) will still be sent to Telegram
+
+                # Save dashboard state for Web App API
+                if self.dashboard_state_manager:
+                    try:
+                        self.dashboard_state_manager.save_state(self)
+                        self.logger.debug("📊 [WEB_APP] Dashboard state saved to file")
+                    except Exception as save_e:
+                        self.logger.warning(f"📊 [WEB_APP] Failed to save dashboard state: {save_e}")
+
+            except Exception as e:
+                self.logger.error(f"📱 [TELEGRAM] Error in dashboard task: {e}")
+
+            # Wait for next update
+            await asyncio.sleep(interval)
+
+    async def _generate_telegram_dashboard_data(self) -> Optional[Any]:
+        """Generate dashboard data for Telegram bot."""
+        try:
+            from datetime import datetime
+            from dataclasses import dataclass
+
+            @dataclass
+            class DashboardData:
+                timestamp: datetime
+                account_balance: float
+                equity: float
+                total_pnl: float
+                roi_pct: float
+                hourly_pnl: float
+                total_trades: int
+                winning_trades: int
+                losing_trades: int
+                win_rate: float
+                profit_factor: float
+                sharpe_ratio: float
+                best_trade: float
+                worst_trade: float
+                win_streak: int
+                loss_streak: int
+                max_win_streak: int
+                max_loss_streak: int
+                risk_score: float
+                total_margin_used: float
+                margin_usage_pct: float
+                free_margin: float
+                open_positions_details: list
+
+            # Get account balance
+            balance = self.equity_usdt
+
+            # Get trade statistics from portfolio tracker
+            stats = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'total_pnl': 0.0,
+                'best_trade': 0.0,
+                'worst_trade': 0.0,
+                'win_streak': 0,
+                'loss_streak': 0,
+                'max_win_streak': 0,
+                'max_loss_streak': 0,
+            }
+
+            if self.portfolio_tracker:
+                try:
+                    portfolio_stats = self.portfolio_tracker.get_stats()
+                    if portfolio_stats:
+                        stats['total_trades'] = portfolio_stats.get('total_trades', 0)
+                        stats['winning_trades'] = portfolio_stats.get('winning_trades', 0)
+                        stats['losing_trades'] = portfolio_stats.get('losing_trades', 0)
+                        stats['total_pnl'] = portfolio_stats.get('total_pnl', 0.0)
+                        stats['best_trade'] = portfolio_stats.get('best_trade', 0.0)
+                        stats['worst_trade'] = portfolio_stats.get('worst_trade', 0.0)
+                except Exception:
+                    pass
+
+            # Calculate metrics
+            win_rate = (stats['winning_trades'] / stats['total_trades']) if stats['total_trades'] > 0 else 0.0
+
+            initial_balance = getattr(self.config, 'paper_equity', 1000.0)
+            roi_pct = ((balance - initial_balance) / initial_balance * 100) if initial_balance > 0 else 0.0
+
+            # Get open positions
+            open_positions = []
+            total_margin = 0.0
+
+            if hasattr(self, 'active_positions'):
+                for symbol, pos_data in self.active_positions.items():
+                    try:
+                        entry_price = pos_data.get('entry_price', 0.0)
+                        quantity = pos_data.get('quantity', 0.0)
+                        side = pos_data.get('side', 'LONG')
+                        leverage = pos_data.get('leverage', self.leverage)
+
+                        # Get current price
+                        current_price = 0.0
+                        if hasattr(self, 'client') and self.client:
+                            try:
+                                ticker = await self.client.get_ticker_price(symbol)
+                                current_price = float(ticker.get('price', 0))
+                            except Exception:
+                                current_price = entry_price
+
+                        # Calculate P&L
+                        if side == 'LONG':
+                            pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
+                        else:
+                            pnl_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0.0
+
+                        pnl = quantity * (current_price - entry_price) * leverage if side == 'LONG' else quantity * (entry_price - current_price) * leverage
+                        margin_used = (quantity * entry_price) / leverage if leverage > 0 else 0.0
+                        total_margin += margin_used
+
+                        open_positions.append({
+                            'symbol': symbol,
+                            'side': side,
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'quantity': quantity,
+                            'leverage': leverage,
+                            'pnl': pnl,
+                            'pnl_pct': pnl_pct,
+                            'margin_used': margin_used,
+                        })
+                    except Exception as e:
+                        self.logger.debug(f"Error processing position {symbol}: {e}")
+
+            margin_usage_pct = (total_margin / balance * 100) if balance > 0 else 0.0
+            free_margin = balance - total_margin
+
+            # Create dashboard data object
+            data = DashboardData(
+                timestamp=datetime.utcnow(),
+                account_balance=balance,
+                equity=balance + sum(p['pnl'] for p in open_positions),
+                total_pnl=stats['total_pnl'],
+                roi_pct=roi_pct,
+                hourly_pnl=0.0,  # TODO: Calculate from recent trades
+                total_trades=stats['total_trades'],
+                winning_trades=stats['winning_trades'],
+                losing_trades=stats['losing_trades'],
+                win_rate=win_rate,
+                profit_factor=0.0,  # TODO: Calculate
+                sharpe_ratio=0.0,  # TODO: Calculate
+                best_trade=stats['best_trade'],
+                worst_trade=stats['worst_trade'],
+                win_streak=stats['win_streak'],
+                loss_streak=stats['loss_streak'],
+                max_win_streak=stats['max_win_streak'],
+                max_loss_streak=stats['max_loss_streak'],
+                risk_score=margin_usage_pct,  # Simple risk score based on margin usage
+                total_margin_used=total_margin,
+                margin_usage_pct=margin_usage_pct,
+                free_margin=free_margin,
+                open_positions_details=open_positions,
+            )
+
+            return data
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate dashboard data: {e}")
+            return None
+
     async def stop(self) -> None:
+        """Gracefully stop trading engine and cleanup resources."""
+        self.logger.info("🛑 [SHUTDOWN] Stopping trading engine...")
         self.running = False
+
+        # Stop metrics
         if self.metrics:
             try:
                 self.metrics.stop()  # type: ignore
-            except Exception:
-                pass
-        self.logger.info("Live trading engine stopped")
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Metrics stop error: {e}")
+
+        # Stop Telegram update polling
+        if self.telegram_update_handler:
+            try:
+                await self.telegram_update_handler.stop_polling()
+                self.logger.info("📱 [TELEGRAM] Update polling stopped")
+            except Exception as e:
+                self.logger.debug(f"[SHUTDOWN] Telegram polling stop error: {e}")
+
+        # Cancel all pending tasks (except current task to avoid recursion)
+        try:
+            current_task = asyncio.current_task()
+            tasks = [t for t in asyncio.all_tasks() if not t.done() and t is not current_task]
+            if tasks:
+                self.logger.info(f"🛑 [SHUTDOWN] Cancelling {len(tasks)} pending tasks...")
+                for task in tasks:
+                    task.cancel()
+                # Wait for tasks to complete cancellation with timeout
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=5.0
+                    )
+                    self.logger.info("✅ [SHUTDOWN] All tasks cancelled successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("⚠️ [SHUTDOWN] Some tasks did not cancel within 5s timeout")
+        except Exception as e:
+            self.logger.error(f"[SHUTDOWN] Task cleanup error: {e}")
+
+        # Save all data before shutdown
+        try:
+            # Save dashboard history
+            if self.dashboard:
+                try:
+                    self.logger.info("💾 [SHUTDOWN] Saving dashboard history...")
+                    self.dashboard._save_history()
+                    self.logger.info("✅ [SHUTDOWN] Dashboard saved")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Dashboard save error: {e}")
+
+            # 🧠 Save ML learning data and models
+            if hasattr(self, 'enhanced_ai') and self.enhanced_ai:
+                try:
+                    self.logger.info("💾 [SHUTDOWN] Saving ML models and learning data...")
+                    await self.enhanced_ai.save_all_data()
+
+                    # Log ML statistics
+                    if hasattr(self.enhanced_ai, 'ml_system') and hasattr(self.enhanced_ai.ml_system, 'models_by_symbol'):
+                        ml_samples = 0
+                        for symbol_models in self.enhanced_ai.ml_system.models_by_symbol.values():
+                            ml_samples += sum(
+                                getattr(model, 'samples_seen', 0)
+                                for model in symbol_models.values()
+                            )
+                        self.logger.info(f"✅ [SHUTDOWN] ML models saved ({ml_samples} samples trained)")
+                    else:
+                        self.logger.info("✅ [SHUTDOWN] ML learning data saved")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] ML save error: {e}")
+
+            # Save active positions state
+            if hasattr(self, 'active_positions') and self.active_positions:
+                try:
+                    positions_count = len(self.active_positions)
+                    self.logger.info(f"💾 [SHUTDOWN] Active positions tracked: {positions_count}")
+                    for symbol, pos in self.active_positions.items():
+                        pnl = pos.get('unrealized_pnl', 0)
+                        self.logger.info(f"  • {symbol}: P&L ${pnl:+.2f}")
+                    self.logger.info("✅ [SHUTDOWN] Positions state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Position logging error: {e}")
+
+            # Save trailing stop state if exists
+            if hasattr(self, 'trailing_stop_manager') and self.trailing_stop_manager:
+                try:
+                    if hasattr(self.trailing_stop_manager, '_positions'):
+                        tracked = len(self.trailing_stop_manager._positions)
+                        self.logger.info(f"💾 [SHUTDOWN] Trailing stops tracked: {tracked}")
+                        self.logger.info("✅ [SHUTDOWN] Trailing stop state logged")
+                except Exception as e:
+                    self.logger.error(f"❌ [SHUTDOWN] Trailing stop logging error: {e}")
+
+        except Exception as e:
+            self.logger.error(f"❌ [SHUTDOWN] Data save error: {e}")
+
+        self.logger.info("✅ [SHUTDOWN] Trading engine stopped cleanly")
 
     async def _run_trading_loop(self) -> None:
         self.logger.info(
@@ -1162,6 +2508,10 @@ class LiveTradingEngine:
             len(self.symbols),
             ", ".join(self.symbols),
         )
+
+        # Sync existing positions on startup and send Telegram notification
+        await self._sync_existing_positions_on_startup()
+
         # Default: iterate forever; we will sleep 1s between cycles to be gentle.
         while self.running:
             self.iteration += 1
@@ -1189,6 +2539,37 @@ class LiveTradingEngine:
                 if self.iteration % 10 == 0:
                     await self._update_all_positions_pnl()
 
+                # Monitor TP fills for RL Position Advisor (every 5 iterations ~ 5 seconds)
+                if self.rl_position_advisor and self.iteration % 5 == 0:
+                    try:
+                        await self._monitor_tp_fills()
+                    except Exception as tp_e:
+                        self.logger.debug("🤖 [TP_MONITOR] Error: %s", tp_e)
+
+                # 🧠 Validate pending signals for ML learning (every 20 iterations ~ 20 seconds)
+                if self.iteration % 20 == 0:
+                    try:
+                        from strategy.signal_validator import get_signal_validator
+                        validator = get_signal_validator(self.config)
+
+                        from datetime import datetime, timezone
+                        validated_count = validator.validate_pending_signals(datetime.now(timezone.utc))
+
+                        if validated_count > 0:
+                            self.logger.debug(
+                                f"📝 [SIGNAL_VALIDATOR] Validated {validated_count} pending signals for ML learning"
+                            )
+
+                            # Get training data if we have enough samples
+                            training_data = validator.get_training_data_for_ml(min_samples=30)
+                            if training_data and hasattr(self, 'enhanced_ai') and self.enhanced_ai:
+                                features, labels = training_data
+                                self.logger.info(
+                                    f"🧠 [SIGNAL_ML] {len(labels)} validated signals ready for ML training"
+                                )
+                    except Exception as sv_e:
+                        self.logger.debug("[SIGNAL_VALIDATOR] Validation error: %s", sv_e)
+
                 # Advanced AI periodic learning and optimization (every 20 iterations ~ 20 seconds)
                 if self.adaptive_learning and self.iteration % 20 == 0:
                     try:
@@ -1212,8 +2593,18 @@ class LiveTradingEngine:
                             "[LEARNING_VIZ] Failed to generate visualization: %s", viz_e
                         )
 
-                # 📊 Update Enhanced Dashboard (every 30 iterations ~ 30 seconds)
-                if self.dashboard and self.iteration % 30 == 0:
+                # 📊 Update Enhanced Dashboard
+                # Быстрее в начале (каждые 5 итераций), потом реже (каждые 30)
+                should_update_dashboard = False
+                if self.dashboard:
+                    if self.iteration <= 30:
+                        # Первые 30 итераций - обновлять каждые 5 секунд
+                        should_update_dashboard = self.iteration % 5 == 0
+                    else:
+                        # После 30 итераций - обновлять каждые 30 секунд
+                        should_update_dashboard = self.iteration % 30 == 0
+
+                if should_update_dashboard:
                     try:
                         await self._update_enhanced_dashboard()
                     except Exception as dash_e:
@@ -1259,6 +2650,167 @@ class LiveTradingEngine:
             except Exception as e:
                 self.logger.debug("get_candles(%s) error: %s", symbol, e)
 
+        # 🤖 RL POSITION ADVISOR: Monitor existing positions
+        if self.rl_position_advisor and md is not None:
+            try:
+                # Get current price
+                current_price = await self._latest_price(symbol)
+                if current_price:
+                    # Get advice from RL Agent
+                    advice = self.rl_position_advisor.update_and_advise(
+                        symbol=symbol,
+                        current_price=current_price,
+                        market_data=md
+                    )
+
+                    # Execute RL Agent's advice
+                    action = advice.get('action', 'hold')
+                    confidence = advice.get('confidence', 0.0)
+                    reason = advice.get('reason', '')
+
+                    if action == 'close':
+                        # RL Agent recommends closing position early
+                        self.logger.warning(
+                            "🤖 [RL_CLOSE] %s: RL Agent recommends CLOSE (conf=%.0f%%) - %s",
+                            symbol, confidence * 100, reason
+                        )
+                        # Close position via market order
+                        if not self.dry_run and hasattr(self, 'client') and self.client:
+                            try:
+                                # Get current position to determine close side
+                                position = await self.client.get_position(symbol)
+                                if position:
+                                    pos_amt = float(position.get('positionAmt', 0))
+                                    if abs(pos_amt) > 0:
+                                        close_side = 'SELL' if pos_amt > 0 else 'BUY'
+                                        close_qty = abs(pos_amt)
+                                        # Place market close order
+                                        self.client.place_order(
+                                            symbol=symbol,
+                                            side=close_side,
+                                            type='MARKET',
+                                            quantity=self._round_quantity(close_qty, symbol),
+                                            reduceOnly='true'
+                                        )
+                                        self.logger.info("🤖 [RL_CLOSE] ✅ Position closed per RL advice")
+
+                                        # 📱 NEW: Send Telegram notification for RL close
+                                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                                            try:
+                                                # Get trade info from active positions
+                                                trade_data = self.active_positions.get(symbol, {})
+                                                entry_price = trade_data.get("entry_price", 0.0)
+                                                entry_qty = close_qty
+                                                entry_side = "BUY" if close_side == "SELL" else "SELL"
+
+                                                # Get current price
+                                                current_price = await self._latest_price(symbol)
+
+                                                # Calculate P&L
+                                                if entry_side == "BUY":
+                                                    pnl_usdt = (current_price - entry_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((current_price - entry_price) / entry_price) * 100 * self.leverage
+                                                else:  # SELL
+                                                    pnl_usdt = (entry_price - current_price) * entry_qty * self.leverage
+                                                    pnl_pct = ((entry_price - current_price) / entry_price) * 100 * self.leverage
+
+                                                # Calculate duration
+                                                from datetime import datetime, timezone
+                                                entry_time = trade_data.get("created_time", datetime.now(timezone.utc))
+                                                exit_time = datetime.now(timezone.utc)
+
+                                                if isinstance(entry_time, str):
+                                                    try:
+                                                        entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                                                    except:
+                                                        entry_time = exit_time
+
+                                                duration_seconds = (exit_time - entry_time).total_seconds()
+
+                                                # Prepare trade close info
+                                                trade_close_info = {
+                                                    "symbol": symbol,
+                                                    "side": entry_side,
+                                                    "entry_price": entry_price,
+                                                    "exit_price": current_price,
+                                                    "quantity": entry_qty,
+                                                    "pnl_usdt": pnl_usdt,
+                                                    "pnl_pct": pnl_pct,
+                                                    "duration_seconds": duration_seconds,
+                                                    "exit_reason": f"rl_close: {reason}",
+                                                    "leverage": self.leverage,
+                                                }
+
+                                                # Send notification (await directly to avoid recursion on shutdown)
+                                                await self.telegram_bot.send_trade_closed(trade_close_info)
+                                                self.logger.info("📱 [TELEGRAM] RL close notification sent (P&L: $%.2f)", pnl_usdt)
+                                            except Exception as tg_e:
+                                                self.logger.warning("📱 [TELEGRAM] Failed to send RL close notification: %s", tg_e)
+
+                                        # Remove from tracking
+                                        self.rl_position_advisor.remove_position(symbol)
+                                        if symbol in self.active_positions:
+                                            del self.active_positions[symbol]
+                            except Exception as close_e:
+                                self.logger.error("🤖 [RL_CLOSE] Failed to close: %s", close_e)
+
+                    elif action == 'update_stop':
+                        # RL Agent moved trailing stop
+                        new_stop = advice.get('new_stop')
+                        if new_stop:
+                            self.logger.info(
+                                "🤖 [RL_TRAIL] %s: Trailing stop updated to $%.2f - %s",
+                                symbol, new_stop, reason
+                            )
+                            # Update stop loss order (implementation depends on your stop management)
+                            # This could integrate with trailing_stop_manager or update orders directly
+
+            except Exception as rl_e:
+                self.logger.debug("🤖 [RL_ADVISOR] Error monitoring %s: %s", symbol, rl_e)
+
+        # ==================== PHASE 3: REGIME DETECTION ====================
+        current_regime = None
+        if md is not None:
+            current_regime = await self._detect_market_regime(symbol, md)
+
+        # ==================== PHASE 2: GRU PREDICTION ====================
+        gru_prediction = None
+        if md is not None:
+            # 🌐 ALWAYS fetch REAL mainnet data for GRU predictions
+            # Even if bot is running on testnet, GRU needs accurate prices
+            try:
+                import pandas as pd
+
+                # Fetch real Binance mainnet data for GRU
+                real_candles = await self._fetch_real_mainnet_data(symbol, self.timeframe, limit=250)
+
+                if real_candles is not None:
+                    # Convert to DataFrame for GRU
+                    if isinstance(real_candles, list):
+                        df_candles = pd.DataFrame(real_candles)
+                    elif isinstance(real_candles, pd.DataFrame):
+                        df_candles = real_candles
+                    else:
+                        # Try to convert from market data object
+                        df_candles = pd.DataFrame({
+                            'timestamp': real_candles.timestamp if hasattr(real_candles, 'timestamp') else [],
+                            'open': real_candles.open if hasattr(real_candles, 'open') else [],
+                            'high': real_candles.high if hasattr(real_candles, 'high') else [],
+                            'low': real_candles.low if hasattr(real_candles, 'low') else [],
+                            'close': real_candles.close if hasattr(real_candles, 'close') else [],
+                            'volume': real_candles.volume if hasattr(real_candles, 'volume') else [],
+                        })
+
+                    if len(df_candles) >= 60:  # GRU needs at least 60 candles
+                        gru_prediction = await self._get_gru_prediction(symbol, df_candles)
+                    else:
+                        self.logger.warning("🧠 [GRU_DATA] %s: Not enough real data (%d candles)", symbol, len(df_candles))
+                else:
+                    self.logger.warning("🧠 [GRU_DATA] %s: Failed to fetch real mainnet data", symbol)
+
+            except Exception as e:
+                self.logger.warning("🧠 [GRU_DATA] %s: Error fetching real data: %s", symbol, e)
+
         raw = await self._produce_raw_signal(symbol, md)
         sig = normalize_signal_obj(raw, symbol_default=symbol)
         if not sig:
@@ -1268,15 +2820,166 @@ class LiveTradingEngine:
             )
             return  # nothing actionable
 
+        # Increment signals generated counter
+        self.signals_generated += 1
+
         # Ensure we have a price to size the order
         price = sig.entry_price or await self._latest_price(symbol)
         if not price:
             self.logger.debug("Skip %s: missing price", symbol)
             return
 
+        # ==================== PHASE 2: GRU SIGNAL INTEGRATION ====================
+        # Apply GRU prediction to adjust signal strength
+        if gru_prediction:
+            gru_direction = gru_prediction.get('direction', 'NEUTRAL')
+            gru_confidence = gru_prediction.get('confidence', 0.0)
+            gru_price_change = gru_prediction.get('price_change_pct', 0.0)
+
+            # Check if GRU agrees with IMBA signal
+            signal_direction = sig.side  # "BUY" or "SELL"
+            gru_agrees = (
+                (signal_direction == "BUY" and gru_direction == "LONG") or
+                (signal_direction == "SELL" and gru_direction == "SHORT")
+            )
+
+            if gru_agrees:
+                # GRU confirms signal - boost strength
+                gru_boost = 1.0 + (gru_confidence * 0.3)  # Up to +30% boost
+                original_strength = sig.strength
+                sig.strength = min(2.0, sig.strength * gru_boost)
+
+                self.logger.info(
+                    "🧠 [GRU_BOOST] %s: GRU agrees (%s %.1f%% confidence) - Signal %.2f → %.2f",
+                    symbol, gru_direction, gru_confidence * 100,
+                    original_strength, sig.strength
+                )
+            elif gru_direction != "NEUTRAL":
+                # GRU disagrees - reduce strength
+                gru_penalty = 1.0 - (gru_confidence * 0.4)  # Up to -40% penalty
+                original_strength = sig.strength
+                sig.strength = max(0.1, sig.strength * gru_penalty)
+
+                self.logger.warning(
+                    "🧠 [GRU_CONFLICT] %s: GRU disagrees (predicts %s with %.1f%% conf) - Signal %.2f → %.2f",
+                    symbol, gru_direction, gru_confidence * 100,
+                    original_strength, sig.strength
+                )
+            else:
+                # GRU neutral - no adjustment
+                self.logger.info(
+                    "🧠 [GRU_NEUTRAL] %s: GRU prediction neutral - No signal adjustment",
+                    symbol
+                )
+
+        # 🤖 RL AGENT SIGNAL VALIDATION (COMBO RL Position Advisor)
+        # If COMBO is enabled, use RL Agent to validate/filter IMBA signals
+        rl_signal = None  # Save RL prediction for ML learning
+
+        if self.config.use_combo_signals and md is not None:
+            try:
+                # Import COMBO integration
+                from strategy.combo_integration import COMBOSignalIntegration
+
+                # Initialize if not already initialized
+                if not hasattr(self, '_combo_signal_checker'):
+                    self._combo_signal_checker = COMBOSignalIntegration(self.config)
+                    self.logger.info("🤖 [RL_FILTER] COMBO RL Agent signal filter initialized")
+
+                # Convert market data to DataFrame
+                import pandas as pd
+
+                if hasattr(md, 'close'):
+                    df_for_rl = pd.DataFrame({
+                        'timestamp': md.timestamp,
+                        'open': md.open,
+                        'high': md.high,
+                        'low': md.low,
+                        'close': md.close,
+                        'volume': md.volume
+                    })
+                elif isinstance(md, list) and len(md) > 0 and isinstance(md[0], dict):
+                    df_for_rl = pd.DataFrame(md)
+                elif isinstance(md, pd.DataFrame):
+                    df_for_rl = md
+                else:
+                    df_for_rl = None
+
+                if df_for_rl is not None and len(df_for_rl) >= 250:
+                    # Get RL Agent's opinion (save for ML learning)
+                    rl_signal = self._combo_signal_checker.generate_signal_from_df(df_for_rl, symbol)
+
+                    if rl_signal:
+                        rl_direction = rl_signal.get('direction', 'wait')
+                        rl_confidence = rl_signal.get('confidence', 0.0)
+
+                        # Map IMBA signal to RL direction format
+                        imba_direction = 'buy' if sig.side == 'BUY' else 'sell'
+
+                        # Check agreement between IMBA and RL
+                        signals_agree = (imba_direction == rl_direction)
+
+                        if signals_agree and rl_confidence >= 0.75:
+                            # Strong agreement - boost signal
+                            boost = 1.0 + (rl_confidence - 0.75) * 0.8  # Up to +20% boost
+                            original_strength = sig.strength
+                            sig.strength = min(2.0, sig.strength * boost)
+
+                            self.logger.info(
+                                "🤖 [RL_BOOST] %s: RL agrees with IMBA (%.0f%% conf) - Signal %.2f → %.2f ✅",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif signals_agree and rl_confidence >= 0.50:
+                            # Moderate agreement - no change
+                            self.logger.info(
+                                "🤖 [RL_CONFIRM] %s: RL confirms IMBA (%.0f%% conf) - Signal unchanged ✓",
+                                symbol, rl_confidence * 100
+                            )
+
+                        elif signals_agree and rl_confidence < 0.50:
+                            # Weak agreement - reduce signal
+                            penalty = 0.7  # -30% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_WEAK] %s: RL low confidence (%.0f%%) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        elif not signals_agree and rl_confidence >= 0.75:
+                            # Strong disagreement - REJECT signal
+                            self.logger.warning(
+                                "🤖 [RL_REJECT] %s: RL strongly disagrees (wants %s, %.0f%% conf) - Signal REJECTED ❌",
+                                symbol, rl_direction.upper(), rl_confidence * 100
+                            )
+                            return  # Skip this signal
+
+                        elif not signals_agree:
+                            # Moderate disagreement - weaken signal significantly
+                            penalty = 0.5  # -50% strength
+                            original_strength = sig.strength
+                            sig.strength = max(0.1, sig.strength * penalty)
+
+                            self.logger.warning(
+                                "🤖 [RL_CONFLICT] %s: RL disagrees (wants %s, %.0f%% conf) - Signal %.2f → %.2f ⚠️",
+                                symbol, rl_direction.upper(), rl_confidence * 100, original_strength, sig.strength
+                            )
+
+                        # Log RL details
+                        self.logger.debug(
+                            "🤖 [RL_DETAIL] %s: IMBA=%s, RL=%s, Conf=%.2f, Agree=%s",
+                            symbol, imba_direction.upper(), rl_direction.upper(),
+                            rl_confidence, signals_agree
+                        )
+
+            except Exception as rl_e:
+                self.logger.warning("🤖 [RL_FILTER] Error filtering signal with RL Agent: %s", rl_e)
+
         # 🧠 NEW: Enhanced ML Analysis of Signal Context
         enhanced_analysis = None
-        if self.enhanced_ai and md is not None:
+        if hasattr(self, 'enhanced_ai') and self.enhanced_ai and md is not None:
             try:
                 # Convert market data to DataFrame if needed
                 import pandas as pd
@@ -1317,9 +3020,18 @@ class LiveTradingEngine:
                             'timeframe': self.timeframe,
                             'iteration': self.iteration,
                             'market_session': self._get_market_session(),
-                            'volatility_factor': getattr(self.config, 'volatility_factor', 1.0)
+                            'volatility_factor': getattr(self.config, 'volatility_factor', 1.0),
+                            'gru_prediction': gru_prediction,  # GRU prediction for ML context
+                            'rl_prediction': rl_signal  # RL Agent prediction for ML learning
                         }
                     )
+
+                    # Add GRU and RL predictions to enhanced_analysis for recording
+                    if enhanced_analysis:
+                        if gru_prediction:
+                            enhanced_analysis['gru_prediction'] = gru_prediction
+                        if rl_signal:
+                            enhanced_analysis['rl_prediction'] = rl_signal
                     
                     processing_time = time.time() - start_time
                     
@@ -1348,7 +3060,8 @@ class LiveTradingEngine:
                         ai_rec = enhanced_analysis.get('ai_recommendations', {})
                         trading_decision = enhanced_analysis.get('trading_decision', {})
                         risk_assessment = enhanced_analysis.get('risk_assessment', {})
-                        
+                        gru_pred = enhanced_analysis.get('gru_prediction', {})
+
                         self.logger.info(
                             "🧠 [ML_ANALYSIS] %s: Expected PnL %+.2f%% | Win Prob %.0f%% | Risk %s | Confidence %.2f",
                             symbol,
@@ -1357,6 +3070,17 @@ class LiveTradingEngine:
                             risk_assessment.get('risk_level', 'unknown'),
                             ml_pred.get('prediction_confidence', 0)
                         )
+
+                        # Log GRU prediction if available
+                        if gru_pred:
+                            self.logger.info(
+                                "🧠 [GRU_IN_ML] %s: Predicted $%.2f (%+.2f%%) | Direction: %s | Confidence: %.1f%%",
+                                symbol,
+                                gru_pred.get('predicted_price', 0),
+                                gru_pred.get('price_change_pct', 0),
+                                gru_pred.get('direction', 'UNKNOWN'),
+                                gru_pred.get('confidence', 0) * 100
+                            )
                         
                         self.logger.info("🎯 [TRADING_DECISION] %s", trading_decision.get('reasoning', 'No reasoning'))
                         
@@ -1406,8 +3130,14 @@ class LiveTradingEngine:
                 self.logger.warning("🧠 [ML_ANALYSIS] Error in ML analysis: %s", ml_e)
                 enhanced_analysis = None
         
-        # Calculate position size with potentially ML-adjusted strength
-        qty = self._position_size_qty(price, sig.strength)
+        # ==================== PHASE 4: ADAPTIVE POSITION SIZING ====================
+        # Use Kelly Criterion + regime-adaptive sizing if available
+        qty = await self._position_size_qty_adaptive(
+            price=price,
+            strength=sig.strength,
+            symbol=symbol,
+            regime=current_regime
+        )
         if not qty:
             self.logger.debug(
                 "Skip %s: missing qty (price=%s strength=%s)", symbol, price, sig.strength
@@ -1494,7 +3224,17 @@ class LiveTradingEngine:
                     )
                     return
 
-                await self._place_order(symbol, sig.side, qty, price, sig.strength)
+                # Pass regime, market data, and enhanced ML analysis
+                await self._place_order(
+                    symbol,
+                    sig.side,
+                    qty,
+                    price,
+                    sig.strength,
+                    regime=current_regime,
+                    market_data=md,
+                    enhanced_analysis=enhanced_analysis
+                )
 
                 # Update active positions for DCA tracking
                 if symbol not in self.active_positions:
@@ -1553,9 +3293,21 @@ class LiveTradingEngine:
                 self.logger.debug("ExitManager.on_new_signal error: %s", e)
 
     async def _place_order(
-        self, symbol: str, side: str, qty: float, price: float, strength: float
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        strength: float,
+        regime: Optional[str] = None,
+        market_data: Optional[Any] = None,
+        enhanced_analysis: Optional[Dict] = None
     ) -> None:
-        """Place a real order on the exchange."""
+        """
+        Place a real order on the exchange.
+        PHASE 3-4: Now accepts regime and market_data for dynamic stops.
+        PHASE 2: Now accepts enhanced_analysis with ML predictions.
+        """
         try:
             # Initialize Binance client if not already done
             if not hasattr(self, "_binance_client") or not self._binance_client:
@@ -1589,6 +3341,7 @@ class LiveTradingEngine:
                 "DOGEUSDT": 1.0,  # Whole numbers only
                 "MATICUSDT": 1.0,  # Whole numbers only
                 "LINKUSDT": 0.1,
+                "APTUSDT": 0.1,  # APT step size is 0.1
             }
 
             min_qty = min_qty_map.get(symbol, 0.001)  # Default to 0.001
@@ -1613,6 +3366,7 @@ class LiveTradingEngine:
                 "AVAXUSDT": 0,  # FIXED: AVAX needs 0 decimals like ADA/DOGE
                 "LINKUSDT": 1,
                 "MATICUSDT": 0,
+                "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
             }
             decimal_places = precision_map.get(symbol, 3)
             qty_format = f"{{:.{decimal_places}f}}"
@@ -1633,6 +3387,11 @@ class LiveTradingEngine:
                     # Convert float to string with proper precision, then back to float
                     # This prevents 2.77 from being sent as 2.770 to Binance
                     api_quantity = float(f"{rounded_qty:.{decimal_places}f}")
+
+                    # ==================== PHASE 1: RATE LIMITING ====================
+                    # Apply rate limiting before API calls
+                    if self.rate_limiter:
+                        await self.rate_limiter.acquire(weight=1)
 
                     # Get current bid/ask to calculate expected execution price
                     try:
@@ -1656,20 +3415,29 @@ class LiveTradingEngine:
                                 )
                                 return  # Don't place order with extreme slippage
 
-                        # Use LIMIT order with slight price adjustment for better execution
-                        if order_side == "BUY":
-                            # For BUY orders, add small premium to ensure execution
-                            limit_price = current_market_price * 1.001  # 0.1% premium
+                        # CRITICAL FIX: On testnet, use MARKET orders for reliable fills
+                        # Testnet has very low liquidity, causing LIMIT orders to hang
+                        if self.config.testnet:
+                            limit_price = None  # Use MARKET order
+                            self.logger.info("[ORDER_TYPE] Using MARKET order for testnet (better fill rate)")
                         else:
-                            # For SELL orders, subtract small discount to ensure execution
-                            limit_price = current_market_price * 0.999  # 0.1% discount
+                            # For LIVE trading, use LIMIT with tight spread for better execution
+                            if order_side == "BUY":
+                                limit_price = current_market_price * 1.002  # 0.2% above
+                            else:  # SELL
+                                limit_price = current_market_price * 0.998  # 0.2% below (taker order)
 
-                        # Round limit price to proper precision
-                        limit_price = self._round_price(limit_price, symbol)
+                            # Round limit price to proper precision
+                            limit_price = self._round_price(limit_price, symbol)
 
-                        self.logger.info(
-                            f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
-                        )
+                        if limit_price:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Limit: ${limit_price:.4f}"
+                            )
+                        else:
+                            self.logger.info(
+                                f"[ORDER_PRICE] Signal: ${price:.4f}, Market: ${current_market_price:.4f}, Type: MARKET"
+                            )
 
                     except Exception as price_e:
                         self.logger.warning(
@@ -1677,24 +3445,51 @@ class LiveTradingEngine:
                         )
                         limit_price = None
 
-                    # Place order with better execution strategy
-                    if limit_price:
-                        order_result = self.client.place_order(
-                            symbol=symbol,
-                            side=order_side,
-                            type="LIMIT",
-                            quantity=api_quantity,
-                            price=limit_price,
-                            timeInForce="IOC",  # Immediate or Cancel - fills immediately or cancels
-                        )
+                    # ==================== PHASE 1: RATE LIMITING FOR ORDERS ====================
+                    # Apply rate limiting before order placement (weight=2 for order)
+                    if self.rate_limiter:
+                        await self.rate_limiter.acquire(weight=2)
+
+                    # ==================== PHASE 1: CONCURRENCY PROTECTION ====================
+                    # Wrap order placement in atomic operation to prevent race conditions
+                    if self.safe_state:
+                        async with self.safe_state.atomic_order_update():
+                            # Place order with better execution strategy
+                            if limit_price:
+                                order_result = self.client.place_order(
+                                    symbol=symbol,
+                                    side=order_side,
+                                    type="LIMIT",
+                                    quantity=api_quantity,
+                                    price=limit_price,
+                                    timeInForce="GTC",  # Good Til Cancelled - better for testnet
+                                )
+                            else:
+                                # Fallback to market order
+                                order_result = self.client.place_order(
+                                    symbol=symbol,
+                                    side=order_side,
+                                    type="MARKET",
+                                    quantity=api_quantity,
+                                )
                     else:
-                        # Fallback to market order
-                        order_result = self.client.place_order(
-                            symbol=symbol,
-                            side=order_side,
-                            type="MARKET",
-                            quantity=api_quantity,
-                        )
+                        # Fallback: no concurrency protection
+                        if limit_price:
+                            order_result = self.client.place_order(
+                                symbol=symbol,
+                                side=order_side,
+                                type="LIMIT",
+                                quantity=api_quantity,
+                                price=limit_price,
+                                timeInForce="GTC",  # Good Til Cancelled - better for testnet
+                            )
+                        else:
+                            order_result = self.client.place_order(
+                                symbol=symbol,
+                                side=order_side,
+                                type="MARKET",
+                                quantity=api_quantity,
+                            )
 
                     # CRITICAL: Verify order was actually filled!
                     order_id = order_result.get("orderId", "N/A")
@@ -1810,9 +3605,59 @@ class LiveTradingEngine:
                         )
 
                         # Setup Take Profit and Stop Loss orders with actual fill data
+                        # PHASE 4: Pass regime and market_data for dynamic stops
                         await self._setup_tp_sl_orders(
-                            symbol, order_side, executed_qty, avg_fill_price, strength
+                            symbol,
+                            order_side,
+                            executed_qty,
+                            avg_fill_price,
+                            strength,
+                            regime=regime,
+                            market_data=market_data
                         )
+
+                        # 📱 NEW: Send Telegram trade notification
+                        if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                            try:
+                                # Calculate TP/SL levels for notification
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Prepare trade info
+                                trade_info = {
+                                    "symbol": symbol,
+                                    "side": order_side,
+                                    "entry_price": avg_fill_price,
+                                    "quantity": executed_qty,
+                                    "leverage": self.leverage,
+                                    "margin_used": (executed_qty * avg_fill_price) / self.leverage,
+                                    "notional": executed_qty * avg_fill_price,
+                                    "take_profit": tp_prices[0] if tp_prices and len(tp_prices) > 0 else None,
+                                    "stop_loss": sl_price if sl_price else None,
+                                    "tp_count": len(tp_prices) if tp_prices else 0,
+                                    "tp_distance": ((tp_prices[0] - avg_fill_price) / avg_fill_price * 100) if tp_prices and len(tp_prices) > 0 else 0,
+                                    "sl_distance": ((sl_price - avg_fill_price) / avg_fill_price * 100) if sl_price else 0,
+                                    "account_balance": self.equity_usdt,
+                                    "signal_strength": strength,
+                                    "regime": regime if regime else "unknown",
+                                    "reason": f"Signal: {strength:.2f} | Regime: {regime if regime else 'unknown'}",
+                                }
+
+                                # Send notification (await directly to avoid recursion on shutdown)
+                                await self.telegram_bot.send_trade_opened(trade_info)
+                                self.logger.info("📱 [TELEGRAM] Trade open notification sent for %s", symbol)
+                            except Exception as tg_e:
+                                self.logger.warning("📱 [TELEGRAM] Failed to send trade notification: %s", tg_e)
+
+                        # Update active_positions with accurate fill data (for RL close notifications)
+                        from datetime import datetime, timezone
+                        if symbol in self.active_positions:
+                            self.active_positions[symbol].update({
+                                "entry_price": avg_fill_price,
+                                "quantity": executed_qty,
+                                "created_time": datetime.now(timezone.utc)
+                            })
 
                         # Register TP/SL orders with Exit Tracker if available
                         if (
@@ -1836,7 +3681,7 @@ class LiveTradingEngine:
                                 )
 
                         # 🧠 NEW: Record trade opening with Enhanced ML system
-                        if self.enhanced_ai:
+                        if hasattr(self, 'enhanced_ai') and self.enhanced_ai:
                             try:
                                 from strategy.adaptive_learning import TradeRecord
                                 from datetime import datetime, timezone
@@ -1906,6 +3751,7 @@ class LiveTradingEngine:
                                 )
                                 self.pending_trades[symbol] = {
                                     "entry_time": datetime.now(timezone.utc),
+                                    "created_time": datetime.now(timezone.utc),  # For Telegram notifications
                                     "entry_price": avg_fill_price,
                                     "quantity": executed_qty,
                                     "side": order_side,
@@ -1937,6 +3783,103 @@ class LiveTradingEngine:
                             executed_qty,
                             symbol,
                         )
+
+                        # 📱 Send Telegram notification for NEW positions (not startup loaded)
+                        if (
+                            self.telegram_bot
+                            and self.telegram_trade_notifications
+                            and not self._startup_loading
+                        ):
+                            try:
+                                # Get account balance
+                                account_balance = None
+                                try:
+                                    account_info = self.client.get_account()
+                                    for asset in account_info.get("assets", []):
+                                        if asset.get("asset") == "USDT":
+                                            account_balance = float(asset.get("walletBalance", 0))
+                                            self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
+                                            break
+                                except Exception as e:
+                                    self.logger.warning(f"Failed to fetch account balance: {e}")
+
+                                # Calculate leverage and margin
+                                leverage = self.leverage
+                                notional = avg_fill_price * executed_qty
+                                margin_used = notional / leverage
+
+                                # Calculate distances for TP/SL
+                                tp_distance = None
+                                sl_distance = None
+                                if tp_prices and tp_prices[0]:
+                                    tp_distance = ((tp_prices[0] - avg_fill_price) / avg_fill_price * 100)
+                                if sl_price:
+                                    sl_distance = ((sl_price - avg_fill_price) / avg_fill_price * 100)
+
+                                trade_info = {
+                                    "symbol": symbol,
+                                    "side": "LONG" if order_side == "BUY" else "SHORT",
+                                    "entry_price": avg_fill_price,
+                                    "quantity": executed_qty,
+                                    "leverage": leverage,
+                                    "notional": notional,
+                                    "margin_used": margin_used,
+                                    "stop_loss": sl_price,
+                                    "take_profit": tp_prices[0] if tp_prices else None,
+                                    "tp_distance": tp_distance,
+                                    "sl_distance": sl_distance,
+                                    "tp_count": len(tp_prices) if tp_prices else 0,
+                                    "account_balance": account_balance,
+                                    "reason": f"Signal strength: {strength:.2f}",
+                                }
+
+                                # Send async (non-blocking)
+                                asyncio.create_task(
+                                    self.telegram_bot.send_trade_opened(trade_info)
+                                )
+                                self.logger.info("📱 [TELEGRAM] Trade opened notification sent")
+                            except Exception as tg_e:
+                                self.logger.warning(
+                                    "📱 [TELEGRAM] Failed to send notification: %s", tg_e
+                                )
+
+                        # 🔴 Send WebSocket real-time update
+                        if not self._startup_loading:
+                            try:
+                                from utils.websocket_bridge import ws_bridge
+                                ws_bridge.emit_trade({
+                                    "symbol": symbol,
+                                    "side": "LONG" if order_side == "BUY" else "SHORT",
+                                    "entry_price": round(avg_fill_price, 2),
+                                    "quantity": round(executed_qty, 4),
+                                    "leverage": leverage,
+                                    "notional": round(notional, 2),
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                self.logger.info("🔴 [WEBSOCKET] Trade update emitted")
+                            except Exception as ws_e:
+                                self.logger.debug(f"[WEBSOCKET] Update failed: {ws_e}")
+
+                        # 🤖 Register position with RL Position Advisor
+                        if self.rl_position_advisor:
+                            try:
+                                # Calculate TP/SL to get initial stop
+                                tp_prices, sl_price = self._calculate_tp_sl_levels(
+                                    avg_fill_price, order_side, strength
+                                )
+
+                                # Register position for RL monitoring
+                                self.rl_position_advisor.register_position(
+                                    symbol=symbol,
+                                    side=order_side,
+                                    entry_price=avg_fill_price,
+                                    position_size=executed_qty,
+                                    initial_stop=sl_price
+                                )
+                                self.logger.info("🤖 [RL_ADVISOR] Position registered for intelligent monitoring")
+                            except Exception as rl_e:
+                                self.logger.warning("🤖 [RL_ADVISOR] Failed to register position: %s", rl_e)
+
                     else:
                         # CRITICAL: If order still not filled, cancel it and exit
                         if order_status in ["NEW", "PARTIALLY_FILLED"]:
@@ -2219,6 +4162,49 @@ class LiveTradingEngine:
         except Exception as e:
             self.logger.debug("[PNL_UPDATE_ALL] Error updating all positions: %s", e)
 
+    async def _monitor_tp_fills(self) -> None:
+        """Monitor take-profit order fills and notify RL Position Advisor."""
+        try:
+            if not self.rl_position_advisor:
+                return
+
+            # Check each symbol with RL-tracked positions
+            for symbol in list(self.rl_position_advisor.positions.keys()):
+                try:
+                    # Get all orders for this symbol
+                    if hasattr(self, 'client') and self.client:
+                        all_orders = self.client.get_all_orders(symbol=symbol, limit=10)
+
+                        # Find recently filled TP orders
+                        for order in all_orders:
+                            if order.get('status') == 'FILLED' and order.get('type') in ['LIMIT', 'TAKE_PROFIT_MARKET', 'TAKE_PROFIT']:
+                                # Check if this is a TP order (reduce only)
+                                if order.get('reduceOnly'):
+                                    # Get position to determine which TP this was
+                                    position = self.rl_position_advisor.positions.get(symbol)
+                                    if position:
+                                        fill_price = float(order.get('avgPrice', 0))
+
+                                        # Determine which TP level was hit based on price
+                                        if position.side == 'LONG':
+                                            # For LONG: TP prices are above entry
+                                            price_pct = (fill_price - position.entry_price) / position.entry_price * 100
+                                        else:
+                                            # For SHORT: TP prices are below entry
+                                            price_pct = (position.entry_price - fill_price) / position.entry_price * 100
+
+                                        # Estimate TP level based on profit percentage
+                                        if not position.tp1_hit and price_pct >= 1.0:  # ~TP1 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 1)
+                                        elif position.tp1_hit and not position.tp2_hit and price_pct >= 2.5:  # ~TP2 level
+                                            self.rl_position_advisor.mark_tp_hit(symbol, 2)
+
+                except Exception as sym_e:
+                    self.logger.debug("🤖 [TP_MONITOR] Error checking %s: %s", symbol, sym_e)
+
+        except Exception as e:
+            self.logger.debug("🤖 [TP_MONITOR] Error monitoring TP fills: %s", e)
+
     async def _run_ai_optimization_cycle(self) -> None:
         """Run AI optimization and learning cycle periodically."""
         try:
@@ -2347,14 +4333,17 @@ class LiveTradingEngine:
                         getattr(self.config, "testnet", True),
                     )
 
-                    # ✅ Теперь инициализируем ExitManager с готовой системой адаптивного обучения и клиентом
-                    if ExitManager and not self.exit_mgr and self.adaptive_learning:
+                    # ✅ CRITICAL FIX: Use enhanced_ai (ML system) instead of adaptive_learning
+                    # enhanced_ai contains ML models that need trade data for learning
+                    learning_system = getattr(self, 'enhanced_ai', None) or getattr(self, 'adaptive_learning', None)
+
+                    if ExitManager and not self.exit_mgr and learning_system:
                         try:
                             self.exit_mgr = ExitManager(
-                                self.client, self.config, self.adaptive_learning
+                                self.client, self.config, learning_system
                             )
                             self.logger.info(
-                                "🎯 [EXIT_MANAGER] Exit tracking integrated with AI learning system"
+                                "🎯 [EXIT_MANAGER] Exit tracking integrated with ML learning system"
                             )
                         except Exception as e:
                             self.logger.warning(
@@ -2484,15 +4473,202 @@ class LiveTradingEngine:
             self.logger.error("[BINANCE] Failed to initialize client: %s", e)
             self._binance_client = None
 
-    async def _setup_tp_sl_orders(
-        self, symbol: str, side: str, qty: float, entry_price: float, strength: float
-    ) -> None:
-        """Setup comprehensive Take Profit and Stop Loss orders with advanced monolith logic."""
+    async def _sync_existing_positions_on_startup(self) -> None:
+        """
+        Sync existing open positions from exchange on startup and send Telegram notifications.
+        """
         try:
-            # Calculate TP/SL levels based on signal strength and market conditions
-            tp_levels, sl_level = self._calculate_tp_sl_levels(
-                entry_price, side, strength
-            )
+            if not self.client:
+                return
+
+            self.logger.info("🔄 [STARTUP] Syncing existing positions from exchange...")
+
+            # Get all positions from Binance
+            positions = self.client.get_positions()
+            existing_positions_found = []
+
+            for pos in positions:
+                symbol = pos.get("symbol", "")
+                position_amt = float(pos.get("positionAmt", 0))
+
+                if abs(position_amt) > 0:  # Active position
+                    entry_price = float(pos.get("entryPrice", 0))
+                    mark_price = float(pos.get("markPrice", 0))
+                    unrealized_pnl = float(pos.get("unRealizedProfit", 0))
+                    leverage = int(pos.get("leverage", 1))
+                    isolated_margin = float(pos.get("isolatedMargin", 0))
+                    notional = abs(float(pos.get("notional", 0)))
+
+                    side = "BUY" if position_amt > 0 else "SELL"
+                    quantity = abs(position_amt)
+
+                    existing_positions_found.append({
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "leverage": leverage,
+                        "margin": isolated_margin,
+                        "notional": notional,
+                    })
+
+                    # Add to active_positions tracking
+                    from datetime import datetime, timezone
+                    self.active_positions[symbol] = {
+                        "side": side,
+                        "entry_price": entry_price,
+                        "quantity": quantity,
+                        "unrealized_pnl": unrealized_pnl,
+                        "created_time": datetime.now(timezone.utc),
+                    }
+
+                    self.logger.info(
+                        "📊 [STARTUP] Found existing position: %s %s %.4f @ $%.2f (P&L: $%.2f)",
+                        side, symbol, quantity, entry_price, unrealized_pnl
+                    )
+
+            # Send Telegram notification about existing positions
+            if existing_positions_found and self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                try:
+                    # Format message about existing positions
+                    message = "📊 <b>EXISTING POSITIONS ON STARTUP</b>\n\n"
+                    message += f"Found {len(existing_positions_found)} open position(s):\n\n"
+
+                    for idx, pos in enumerate(existing_positions_found, 1):
+                        pnl_emoji = "🟢" if pos['unrealized_pnl'] >= 0 else "🔴"
+                        side_emoji = "🟢" if pos['side'] == "BUY" else "🔴"
+
+                        message += f"{side_emoji} <b>{pos['symbol']}</b> ({pos['side']})\n"
+                        message += f"├─ Entry: ${pos['entry_price']:,.2f}\n"
+                        message += f"├─ Current: ${pos['mark_price']:,.2f}\n"
+                        message += f"├─ Quantity: {pos['quantity']:.4f}\n"
+                        message += f"├─ Leverage: {pos['leverage']}x\n"
+                        message += f"├─ Margin: ${pos['margin']:,.2f}\n"
+                        message += f"├─ Notional: ${pos['notional']:,.2f}\n"
+                        message += f"└─ {pnl_emoji} P&L: ${pos['unrealized_pnl']:+,.2f}\n\n"
+
+                    # Calculate total P&L
+                    total_pnl = sum(p['unrealized_pnl'] for p in existing_positions_found)
+                    total_pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    message += f"━━━━━━━━━━━━━━━━━━\n"
+                    message += f"{total_pnl_emoji} <b>Total Unrealized P&L: ${total_pnl:+,.2f}</b>"
+
+                    await self.telegram_bot.send_message(message)
+                    self.logger.info("📱 [TELEGRAM] Sent notification about %d existing positions", len(existing_positions_found))
+
+                except Exception as tg_e:
+                    self.logger.warning("📱 [TELEGRAM] Failed to send startup positions notification: %s", tg_e)
+
+            if not existing_positions_found:
+                self.logger.info("✅ [STARTUP] No existing positions found - starting fresh")
+
+        except Exception as e:
+            self.logger.error("[STARTUP] Failed to sync existing positions: %s", e)
+
+    async def _setup_tp_sl_orders(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        entry_price: float,
+        strength: float,
+        regime: Optional[str] = None,
+        market_data: Optional[Any] = None
+    ) -> None:
+        """
+        Setup comprehensive Take Profit and Stop Loss orders.
+        PHASE 4: Now uses dynamic ATR-based stops when available.
+        """
+        try:
+            # ==================== PHASE 4: DYNAMIC STOPS ====================
+            # Try to use dynamic ATR-based stops first
+            sl_level = None
+            tp_levels = []
+
+            if self.dynamic_stops and market_data is not None:
+                try:
+                    # Prepare market data dict with required indicators
+                    import pandas as pd
+                    if hasattr(market_data, 'close'):
+                        # Convert to dict format
+                        market_dict = {
+                            'close': float(market_data.close.iloc[-1]) if hasattr(market_data.close, 'iloc') else float(market_data.close[-1]),
+                            'atr_14': float(market_data.atr_14.iloc[-1]) if hasattr(market_data, 'atr_14') and hasattr(market_data.atr_14, 'iloc') else None,
+                        }
+                    else:
+                        market_dict = {'close': entry_price}
+
+                    # Calculate dynamic stops
+                    dynamic_result = await self._calculate_dynamic_stops(
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        side=side,
+                        market_data=market_dict,
+                        regime=regime
+                    )
+
+                    sl_level = dynamic_result.get('stop_loss')
+                    primary_tp = dynamic_result.get('take_profit')
+
+                    # Create 3-level TP structure using config percentages
+                    # Base TP levels from config: [1.2, 1.8, 2.3]
+                    config_tp_pcts = self.config.parse_tp_levels()
+
+                    # ADAPTIVE TP: Adjust based on signal strength
+                    # Strong signal (>= 2.0) → +20% wider TPs (more confident)
+                    # Medium signal (1.0-2.0) → base TPs
+                    # Weak signal (< 1.0) → -15% tighter TPs (less confident, take profit earlier)
+                    if strength >= 2.0:
+                        tp_multiplier = 1.20  # Strong signal: wider targets
+                    elif strength >= 1.5:
+                        tp_multiplier = 1.10  # Good signal: slightly wider
+                    elif strength >= 1.0:
+                        tp_multiplier = 1.0   # Normal signal: base targets
+                    elif strength >= 0.5:
+                        tp_multiplier = 0.90  # Weak signal: tighter targets
+                    else:
+                        tp_multiplier = 0.85  # Very weak: take profit quickly
+
+                    # Apply multiplier to TP percentages
+                    adjusted_tp_pcts = [pct * tp_multiplier for pct in config_tp_pcts]
+
+                    if side == 'BUY':
+                        # LONG: TP levels ABOVE entry
+                        tp_levels = [
+                            entry_price * (1 + pct / 100) for pct in adjusted_tp_pcts
+                        ]
+                    else:  # SELL
+                        # SHORT: TP levels BELOW entry
+                        tp_levels = [
+                            entry_price * (1 - pct / 100) for pct in adjusted_tp_pcts
+                        ]
+
+                    self.logger.info(
+                        "[DYNAMIC_TP_SL] %s %s: Entry=%.6f, TPs=%s (base: %s%%, mult: %.2f, strength: %.2f), SL=%.6f (regime=%s)",
+                        symbol, side, entry_price,
+                        [f"{tp:.6f}" for tp in tp_levels],
+                        config_tp_pcts,
+                        tp_multiplier,
+                        strength,
+                        sl_level or 0,
+                        regime or "UNKNOWN"
+                    )
+
+                except Exception as dynamic_e:
+                    self.logger.warning(
+                        "[DYNAMIC_TP_SL] Failed to calculate dynamic stops: %s, falling back to legacy",
+                        dynamic_e
+                    )
+                    sl_level = None
+                    tp_levels = []
+
+            # Fallback to legacy calculation if dynamic stops not available
+            if not sl_level or not tp_levels:
+                tp_levels, sl_level = self._calculate_tp_sl_levels(
+                    entry_price, side, strength
+                )
 
             if not tp_levels and not sl_level:
                 self.logger.info("[TP_SL] No TP/SL levels calculated for %s", symbol)
@@ -2523,6 +4699,27 @@ class LiveTradingEngine:
                 len(tp_levels),
                 sl_level or 0.0,
             )
+
+            # CRITICAL: Update active_positions with TP/SL data for dashboard
+            if symbol in self.active_positions:
+                tp_data = []
+                if tp_levels:
+                    # Split quantity across TP levels (50%, 30%, 20%)
+                    qty_percents = [0.5, 0.3, 0.2]
+                    for i, tp_price in enumerate(tp_levels[:3]):  # Max 3 levels
+                        tp_data.append({
+                            'price': round(tp_price, 4),
+                            'amount': round(qty * qty_percents[i], 6)
+                        })
+
+                self.active_positions[symbol].update({
+                    'stop_loss': round(sl_level, 4) if sl_level else None,
+                    'take_profit': tp_data if tp_data else None
+                })
+                self.logger.info(
+                    "[TP_SL] Updated active_positions for %s with TP/SL data",
+                    symbol
+                )
 
             # Register position with trailing stop manager
             if self.trailing_stop_manager and tp_levels and sl_level:
@@ -2604,27 +4801,25 @@ class LiveTradingEngine:
             leverage = getattr(self.config, "leverage", 5.0)
 
             # FIXED: Use correct config attribute for SL
-            base_sl_pct = getattr(self.config, "sl_fixed_pct", 2.0)
+            # sl_fixed_pct is already in fraction (0.01 = 1%) from settings.py
+            base_sl_pct = getattr(self.config, "sl_fixed_pct", 0.02)
 
-            # FIXED: Use configuration TP levels instead of hardcoded ones
-            config_tp_levels = (
-                self.config.parse_tp_levels()
-            )  # Get from config: [1.5, 3.0, 5.0]
+            # Get TP levels from config: [1.2, 1.8, 2.3] - optimized for intraday
+            config_tp_levels = self.config.parse_tp_levels()
 
-            # SMART TP ADJUSTMENT: Apply strength multiplier but keep TPs reasonable for leverage
-            # Higher strength = slightly more aggressive targets, but not extreme
+            # ADAPTIVE TP: Adjust based on signal strength
+            # Strong signal → wider TPs (more confident in move)
+            # Weak signal → tighter TPs (take profit earlier)
             if strength >= 2.0:
-                # Very strong signals: +20% more aggressive
-                strength_multiplier = 1.2
+                strength_multiplier = 1.20  # Very strong: +20%
             elif strength >= 1.5:
-                # Strong signals: +10% more aggressive
-                strength_multiplier = 1.1
+                strength_multiplier = 1.10  # Strong: +10%
             elif strength >= 1.0:
-                # Normal signals: use base levels
-                strength_multiplier = 1.0
+                strength_multiplier = 1.0   # Normal: base levels
+            elif strength >= 0.5:
+                strength_multiplier = 0.90  # Weak: -10%
             else:
-                # Weak signals: -10% more conservative
-                strength_multiplier = 0.9
+                strength_multiplier = 0.85  # Very weak: -15%
 
             # Apply strength adjustment to TP levels
             tp_levels_pct = [tp * strength_multiplier for tp in config_tp_levels]
@@ -2643,14 +4838,16 @@ class LiveTradingEngine:
 
             if side.upper() == "BUY":
                 # Long position: SL below entry, TP above entry
-                sl_level = self._round_price(entry_price * (1 - sl_pct / 100), symbol)
+                # sl_pct is already in fraction (0.01 = 1%), no /100 needed
+                sl_level = self._round_price(entry_price * (1 - sl_pct), symbol)
                 tp_levels = [
                     self._round_price(entry_price * (1 + tp_pct / 100), symbol)
                     for tp_pct in tp_levels_pct
                 ]
             else:
                 # Short position: SL above entry, TP below entry
-                sl_level = self._round_price(entry_price * (1 + sl_pct / 100), symbol)
+                # sl_pct is already in fraction (0.01 = 1%), no /100 needed
+                sl_level = self._round_price(entry_price * (1 + sl_pct), symbol)
                 tp_levels = [
                     self._round_price(entry_price * (1 - tp_pct / 100), symbol)
                     for tp_pct in tp_levels_pct
@@ -2954,6 +5151,7 @@ class LiveTradingEngine:
             "AVAXUSDT": 0,  # FIXED: AVAX needs whole numbers like ADA/DOGE
             "LINKUSDT": 1,
             "MATICUSDT": 0,
+            "APTUSDT": 1,  # APT step size 0.1 = 1 decimal
         }
 
         # Get precision for this symbol, default to 3
@@ -3039,7 +5237,8 @@ class LiveTradingEngine:
 
             # Place DCA order (same side as original position to average down/up)
             await self._place_order(
-                symbol, side, dca_qty, current_price, 0.8
+                symbol, side, dca_qty, current_price, 0.8,
+                regime=None, market_data=None, enhanced_analysis=None
             )  # Lower strength for DCA
 
             # Update position tracking
@@ -3193,6 +5392,59 @@ class LiveTradingEngine:
                     f"🎯 [POSITION_CLOSED] Detected closed position: {symbol} @ ~${current_price:.2f}"
                 )
 
+                # 📱 NEW: Send Telegram close notification
+                if self.telegram_bot and getattr(self.config, "tg_trade_notifications", True):
+                    try:
+                        from datetime import datetime, timezone
+
+                        # Calculate P&L
+                        entry_qty = pending_trade.get("quantity", 0.0)
+                        pnl_usdt = 0.0
+                        pnl_pct = 0.0
+
+                        if side == "BUY":
+                            pnl_usdt = (current_price - entry_price) * entry_qty
+                            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                        else:  # SELL
+                            pnl_usdt = (entry_price - current_price) * entry_qty
+                            pnl_pct = ((entry_price - current_price) / entry_price) * 100
+
+                        # Apply leverage to P&L
+                        pnl_usdt_leveraged = pnl_usdt * self.leverage
+                        pnl_pct_leveraged = pnl_pct * self.leverage
+
+                        # Calculate duration
+                        entry_time = pending_trade.get("created_time", datetime.now(timezone.utc))
+                        exit_time = datetime.now(timezone.utc)
+
+                        if isinstance(entry_time, str):
+                            try:
+                                entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                            except:
+                                entry_time = exit_time
+
+                        duration_seconds = (exit_time - entry_time).total_seconds()
+
+                        # Prepare trade close info
+                        trade_close_info = {
+                            "symbol": symbol,
+                            "side": side,
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "quantity": entry_qty,
+                            "pnl_usdt": pnl_usdt_leveraged,
+                            "pnl_pct": pnl_pct_leveraged,
+                            "duration_seconds": duration_seconds,
+                            "exit_reason": exit_reason,
+                            "leverage": self.leverage,
+                        }
+
+                        # Send notification (await directly to avoid recursion on shutdown)
+                        await self.telegram_bot.send_trade_closed(trade_close_info)
+                        self.logger.info("📱 [TELEGRAM] Trade close notification sent for %s (P&L: $%.2f)", symbol, pnl_usdt_leveraged)
+                    except Exception as tg_e:
+                        self.logger.warning("📱 [TELEGRAM] Failed to send close notification: %s", tg_e)
+
                 # Notify Exit Manager (which will notify AI system)
                 if self.exit_mgr and hasattr(self.exit_mgr, "notify_position_closed"):
                     await self.exit_mgr.notify_position_closed(
@@ -3202,6 +5454,113 @@ class LiveTradingEngine:
                         exit_reason=exit_reason,
                         fees_paid=0.0,  # Estimate
                     )
+
+                # 🧠 Notify Enhanced ML system for learning
+                if self.enhanced_ai and hasattr(self.enhanced_ai, "update_trade_exit_with_ml"):
+                    trade_record = pending_trade.get("trade_record")
+                    if trade_record:
+                        # Get candles data for ML context
+                        candles_data = None
+                        if hasattr(self, '_last_candles_data'):
+                            candles_data = getattr(self, '_last_candles_data', {}).get(symbol)
+
+                        await self.enhanced_ai.update_trade_exit_with_ml(
+                            trade_record=trade_record,
+                            exit_price=current_price,
+                            exit_reason=exit_reason,
+                            candles_data=candles_data
+                        )
+
+                        self.logger.info(
+                            f"🧠 [ML_LEARN] Trade {trade_id} sent to ML Learning System for analysis"
+                        )
+
+                # 📱 Send Telegram notification for closed position
+                if self.telegram_bot and self.telegram_trade_notifications:
+                    try:
+                        # Get account balance
+                        account_balance = None
+                        try:
+                            account_info = self.client.get_account()
+                            for asset in account_info.get("assets", []):
+                                if asset.get("asset") == "USDT":
+                                    account_balance = float(asset.get("walletBalance", 0))
+                                    self.logger.info(f"📊 Account balance fetched: ${account_balance:,.2f} USDT")
+                                    break
+                        except Exception as e:
+                            self.logger.warning(f"Failed to fetch account balance: {e}")
+
+                        # Get open orders info (TP/SL that were set)
+                        tp_orders = []
+                        sl_orders = []
+                        try:
+                            orders = self.client.get_open_orders(symbol)
+                            for order in orders:
+                                order_type = order.get("type", "")
+                                stop_price = float(order.get("stopPrice", 0))
+                                order_price = float(order.get("price", 0))
+                                if order_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                    tp_orders.append(stop_price if stop_price > 0 else order_price)
+                                elif order_type in ["STOP_MARKET", "STOP", "TRAILING_STOP_MARKET"]:
+                                    sl_orders.append(stop_price if stop_price > 0 else order_price)
+                        except Exception:
+                            pass
+
+                        # Calculate PnL
+                        quantity = pending_trade.get("quantity", 0.0)
+                        if side == "BUY":
+                            pnl = (current_price - entry_price) * quantity
+                        else:  # SELL
+                            pnl = (entry_price - current_price) * quantity
+
+                        pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price * quantity > 0 else 0
+
+                        # Calculate ROI from margin
+                        leverage = self.leverage
+                        notional = entry_price * quantity
+                        margin_used = notional / leverage
+                        roi_pct = (pnl / margin_used * 100) if margin_used > 0 else 0
+
+                        # Calculate duration
+                        entry_time = pending_trade.get("entry_time")
+                        duration_str = "Unknown"
+                        if entry_time:
+                            from datetime import datetime, timezone
+                            now = datetime.now(timezone.utc)
+                            duration = now - entry_time
+                            hours = int(duration.total_seconds() // 3600)
+                            minutes = int((duration.total_seconds() % 3600) // 60)
+                            duration_str = f"{hours}h {minutes}m"
+
+                        trade_info = {
+                            "symbol": symbol,
+                            "side": "LONG" if side == "BUY" else "SHORT",
+                            "entry_price": entry_price,
+                            "exit_price": current_price,
+                            "quantity": quantity,
+                            "pnl": pnl,
+                            "pnl_pct": pnl_pct,
+                            "roi_pct": roi_pct,
+                            "margin_used": margin_used,
+                            "leverage": leverage,
+                            "duration": duration_str,
+                            "reason": "Take Profit" if "tp" in exit_reason else "Stop Loss" if "sl" in exit_reason else "Manual Close",
+                            "account_balance": account_balance,
+                            "tp_orders": tp_orders,
+                            "sl_orders": sl_orders,
+                        }
+
+                        # Send async (non-blocking)
+                        asyncio.create_task(
+                            self.telegram_bot.send_trade_closed(trade_info)
+                        )
+                        self.logger.info("📱 [TELEGRAM] Trade closed notification sent for %s", symbol)
+                    except Exception as tg_e:
+                        self.logger.warning(
+                            "📱 [TELEGRAM] Failed to send close notification: %s", tg_e
+                        )
+                        import traceback
+                        self.logger.debug("Traceback: %s", traceback.format_exc())
 
                 # Clean up pending trade
                 if hasattr(self, "pending_trades") and symbol in self.pending_trades:
@@ -3302,14 +5661,15 @@ class LiveTradingEngine:
                     )
 
                     # Send Telegram alert if available
-                    if self.telegram:
+                    if self.telegram_bot:
                         try:
-                            await self.telegram.send_alert(
-                                f"🚨🚨🚨 EMERGENCY STOP LOSS TRIGGERED! 🚨🚨🚨\n\n"
+                            await self.telegram_bot.send_message(
+                                f"🚨🚨🚨 <b>EMERGENCY STOP LOSS TRIGGERED!</b> 🚨🚨🚨\n\n"
                                 f"Initial: ${self.initial_equity:.2f}\n"
                                 f"Current: ${current_equity:.2f}\n"
                                 f"Loss: {loss_pct:.2f}%\n\n"
-                                f"🛑 Bot halted automatically!"
+                                f"🛑 Bot halted automatically!",
+                                parse_mode="HTML"
                             )
                         except Exception as tg_e:
                             self.logger.error(f"Failed to send Telegram alert: {tg_e}")
@@ -3393,9 +5753,12 @@ class LiveTradingEngine:
             if not self.dashboard:
                 return
 
-            # Update dashboard with current trading engine and adaptive learning data
+            # Update dashboard with current trading engine, adaptive learning, and enhanced AI data
+            enhanced_ai = getattr(self, 'enhanced_ai', None)
             dashboard_path = await self.dashboard.update_dashboard(
-                trading_engine=self, adaptive_learning=self.adaptive_learning
+                trading_engine=self,
+                adaptive_learning=self.adaptive_learning,
+                enhanced_ai=enhanced_ai
             )
 
             if dashboard_path:

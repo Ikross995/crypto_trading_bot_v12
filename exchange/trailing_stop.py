@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from core.types import Position
 from .client import BinanceClient
 from .orders import OrderManager
+from .precision import adjust_price
 
 logger = logging.getLogger(__name__)
 
@@ -32,24 +33,24 @@ class TrailingStopConfig:
     move_sl_after_tp: List[int] = None  # [1, 2] means move after 1st and 2nd TP
     
     # SL adjustment rules per TP level
-    # 1st TP: Move to 50% between entry and current price
+    # 1st TP: Move to 75% between entry and current price (AGGRESSIVE profit protection)
     # 2nd TP: Move to break-even (entry price)
     # 3rd TP: Keep current or close
-    sl_adjustments: Dict[int, str] = None  # {1: "50%", 2: "breakeven", 3: "close"}
-    
+    sl_adjustments: Dict[int, str] = None  # {1: "75%", 2: "breakeven", 3: "keep"}
+
     # Cooldown between SL updates (seconds)
     update_cooldown: float = 5.0
-    
+
     # Safety buffer (percentage) to avoid immediate SL trigger
     safety_buffer_pct: float = 0.1  # 0.1% buffer
-    
+
     def __post_init__(self):
         if self.move_sl_after_tp is None:
             self.move_sl_after_tp = [1, 2]  # Default: move after 1st and 2nd TP
-        
+
         if self.sl_adjustments is None:
             self.sl_adjustments = {
-                1: "50%",       # After 1st TP: move to 50% protection
+                1: "75%",       # After 1st TP: move to 75% protection (FIXED: more aggressive)
                 2: "breakeven",  # After 2nd TP: move to entry (break-even)
                 3: "keep"        # After 3rd TP: keep current SL
             }
@@ -93,11 +94,11 @@ class TrailingStopManager:
         logger.info(f"  Move SL after TP levels: {self.config.move_sl_after_tp}")
         logger.info(f"  SL adjustments: {self.config.sl_adjustments}")
     
-    def register_position(self, symbol: str, entry_price: float, side: str, 
+    def register_position(self, symbol: str, entry_price: float, side: str,
                           tp_levels: List[float], initial_sl: float) -> None:
         """
         Register a new position for trailing stop management.
-        
+
         Args:
             symbol: Trading pair
             entry_price: Entry price of position
@@ -105,22 +106,31 @@ class TrailingStopManager:
             tp_levels: List of take profit prices
             initial_sl: Initial stop loss price
         """
+        # Check if position already exists to preserve tp_filled state
+        existing_tp_filled = 0
+        existing_last_update = time.time()
+        if symbol in self._positions:
+            existing_tp_filled = self._positions[symbol].get("tp_filled", 0)
+            existing_last_update = self._positions[symbol].get("last_update", time.time())
+            logger.debug(f"[TRAIL_SL] {symbol}: Re-registering position, preserving tp_filled={existing_tp_filled}")
+
         self._positions[symbol] = {
             "entry": entry_price,
             "side": side.upper(),
             "tp_levels": tp_levels,
-            "tp_filled": 0,  # Number of TPs filled
+            "tp_filled": existing_tp_filled,  # Preserve existing state or start at 0
             "last_sl": initial_sl,
-            "last_update": time.time(),
+            "last_update": existing_last_update,  # Preserve last update time
             "total_tps": len(tp_levels)
         }
-        
-        # Reset filled TP cache
-        self._filled_tps[symbol] = set()
-        
+
+        # Only reset filled TP cache for completely new positions
+        if existing_tp_filled == 0 and symbol not in self._filled_tps:
+            self._filled_tps[symbol] = set()
+
         logger.info(f"[TRAIL_SL] Registered position for {symbol}: "
                    f"entry={entry_price:.4f}, side={side}, "
-                   f"TPs={len(tp_levels)}, initial_sl={initial_sl:.4f}")
+                   f"TPs={len(tp_levels)}, initial_sl={initial_sl:.4f}, tp_filled={existing_tp_filled}")
     
     def unregister_position(self, symbol: str) -> None:
         """Remove position from tracking (when closed)."""
@@ -157,14 +167,19 @@ class TrailingStopManager:
             if filled_count > pos_data["tp_filled"]:
                 logger.info(f"[TRAIL_SL] {symbol}: Detected {filled_count} TP fills "
                            f"(was {pos_data['tp_filled']})")
-                
+
+                # ALWAYS update tp_filled to prevent repeated detection
+                pos_data["tp_filled"] = filled_count
+
                 # Update SL based on filled count
                 updated = await self._update_stop_loss(symbol, filled_count)
-                
+
                 if updated:
-                    pos_data["tp_filled"] = filled_count
                     pos_data["last_update"] = now
                     return True
+                else:
+                    # Even if SL wasn't updated, mark as checked to avoid spam
+                    pos_data["last_update"] = now
             
         except Exception as e:
             logger.error(f"[TRAIL_SL] Failed to check/update {symbol}: {e}")
@@ -323,34 +338,43 @@ class TrailingStopManager:
     def _calculate_new_sl(self, entry: float, current: float, side: str, rule: str) -> Optional[float]:
         """
         Calculate new SL price based on adjustment rule.
-        
+
         Args:
             entry: Entry price
             current: Current market price
             side: Position side ("BUY" or "SELL")
-            rule: Adjustment rule ("50%", "breakeven", "close")
-        
+            rule: Adjustment rule ("50%", "75%", "breakeven", "close")
+
         Returns:
             New SL price or None if invalid
         """
         if rule == "breakeven":
             # Move to entry price (break-even)
             return entry
-        
+
         elif rule == "50%":
-            # Move to 50% between entry and current price
+            # Move to 50% between entry and current price (50% of profit protected)
             if side == "BUY":
-                # Long: SL should be below entry
-                # Move from below entry to halfway between entry and current
-                return entry + (current - entry) * 0.5 * 0.5  # 50% of gain protection
+                # Long: SL moves up to protect 50% of gains
+                # FIXED: Was 0.5 * 0.5 = 25%, now correctly 50%
+                return entry + (current - entry) * 0.5
             else:
-                # Short: SL should be above entry
-                return entry - (entry - current) * 0.5 * 0.5
-        
+                # Short: SL moves down to protect 50% of gains
+                return entry - (entry - current) * 0.5
+
+        elif rule == "75%":
+            # Move to 75% between entry and current price (75% of profit protected)
+            if side == "BUY":
+                # Long: SL moves up to protect 75% of gains (more aggressive)
+                return entry + (current - entry) * 0.75
+            else:
+                # Short: SL moves down to protect 75% of gains
+                return entry - (entry - current) * 0.75
+
         elif rule == "close":
             # Close position (return None to indicate close)
             return None
-        
+
         else:
             logger.warning(f"Unknown SL adjustment rule: {rule}")
             return None
@@ -427,9 +451,9 @@ class TrailingStopManager:
     async def _place_stop_loss_order(self, symbol: str, side: str, stop_price: float) -> None:
         """Place new stop loss order."""
         try:
-            # Round stop price to proper precision
-            rounded_stop_price = round(stop_price, 4)  # Most pairs use 4 decimals for price
-            
+            # Round stop price to proper precision using exchange filters
+            rounded_stop_price = adjust_price(symbol, stop_price)
+
             # Place STOP_MARKET order with closePosition=true
             order_result = self.client.place_order(
                 symbol=symbol,
@@ -439,10 +463,10 @@ class TrailingStopManager:
                 closePosition="true",  # Close entire position
                 workingType="MARK_PRICE"  # Use mark price to avoid manipulation
             )
-            
+
             logger.info(f"🎯 [TRAIL_SL] Placed new SL order for {symbol}: {side} @ {rounded_stop_price:.4f} "
                        f"(order: {order_result.get('orderId', 'N/A')})")
-            
+
         except Exception as e:
             logger.error(f"[TRAIL_SL] Failed to place SL order for {symbol}: {e}")
             raise

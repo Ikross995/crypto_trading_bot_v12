@@ -25,18 +25,18 @@ logger = logging.getLogger(__name__)
 
 class EnhancedAdaptiveLearningSystem:
     """Продвинутая система адаптивного обучения с ML"""
-    
+
     def __init__(self, config):
         self.config = config
-        
+
         # Инициализируем компоненты ML системы
         self.ml_system = AdvancedMLLearningSystem(config)
         self.context_collector = MarketContextCollector()
-        
+
         # Кеш для текущего контекста рынка
         self.current_market_context = None
         self.recent_performance_cache = {}
-        
+
         # Улучшенные метрики
         self.enhanced_metrics = {
             'prediction_accuracy': 0.5,
@@ -45,11 +45,23 @@ class EnhancedAdaptiveLearningSystem:
             'model_performance': {},
             'recommendation_success_rate': 0.5
         }
-        
+
         # Статистика предсказаний
         self.prediction_history = []
         self.recommendation_history = []
-        
+
+        # Trade history для совместимости с Exit Manager
+        self.trades_history = []  # List[TradeRecord]
+
+        # 📊 Dashboard visualization
+        try:
+            from strategy.learning_visualizer import LearningVisualizer
+            self._learning_visualizer = LearningVisualizer(output_dir="data/learning_reports")
+            logger.info("📊 [ENHANCED_ML] Learning Visualizer initialized for dashboard")
+        except Exception as e:
+            logger.warning(f"📊 [ENHANCED_ML] Failed to initialize Learning Visualizer: {e}")
+            self._learning_visualizer = None
+
         logger.info("🧠 [ENHANCED_ML] Advanced adaptive learning system initialized")
         
     async def analyze_signal_context(self, 
@@ -130,6 +142,10 @@ class EnhancedAdaptiveLearningSystem:
                     current_price=trade_record.entry_price
                 )
             
+            # CRITICAL: Add to trades_history for Exit Manager to find it
+            self.trades_history.append(trade_record)
+            logger.info(f"📝 [TRADES_HISTORY] Added trade {trade_record.trade_id} (total: {len(self.trades_history)})")
+
             # Сохраняем предсказание для последующей оценки
             if hasattr(trade_record, 'ml_prediction'):
                 self.prediction_history.append({
@@ -139,13 +155,85 @@ class EnhancedAdaptiveLearningSystem:
                     'actual_pnl': None,  # Будет заполнено при закрытии
                     'timestamp': datetime.now(timezone.utc)
                 })
-            
+
             logger.info(f"📝 [ENHANCED_RECORD] {trade_record.symbol} {trade_record.side}: "
                        f"Entry @ ${trade_record.entry_price:.2f}, Qty: {trade_record.quantity}")
                        
         except Exception as e:
             logger.error(f"❌ [ENHANCED_RECORD] Error recording trade: {e}")
     
+    async def update_trade_exit(self, symbol: str = None, exit_price: float = None,
+                               exit_reason: str = "manual", trade_id: str = None, **kwargs) -> bool:
+        """
+        Compatibility wrapper for Exit Manager.
+
+        This method is called by Exit Manager when position closes.
+        It finds the trade record and calls update_trade_exit_with_ml for ML learning.
+        """
+        try:
+            logger.info(f"🔍 [ML_EXIT_SEARCH] Looking for trade: symbol={symbol}, trade_id={trade_id}")
+
+            # Find the pending trade record
+            target_trade = None
+
+            # Check if we have trades_history (from adaptive learning base)
+            if hasattr(self, 'trades_history') and self.trades_history:
+                if trade_id:
+                    for trade in self.trades_history:
+                        if trade.trade_id == trade_id and trade.exit_reason == "pending":
+                            target_trade = trade
+                            logger.info(f"✅ [ML_TRADE_FOUND] Found by trade_id: {trade_id}")
+                            break
+
+                if not target_trade and symbol:
+                    # Fallback: find last pending trade for symbol
+                    for i in range(len(self.trades_history) - 1, -1, -1):
+                        trade = self.trades_history[i]
+                        if (trade.symbol == symbol and
+                            trade.exit_reason == "pending"):
+                            target_trade = trade
+                            logger.info(f"✅ [ML_TRADE_FOUND] Found by symbol: {symbol}")
+                            break
+
+            if not target_trade:
+                logger.error(f"❌ [ML_TRADE_NOT_FOUND] No pending trade for symbol={symbol}, trade_id={trade_id}")
+                return False
+
+            # Update trade record
+            target_trade.exit_price = exit_price
+            target_trade.exit_reason = exit_reason
+
+            # Calculate PnL
+            if target_trade.side.upper() == "BUY":
+                target_trade.pnl = (exit_price - target_trade.entry_price) * target_trade.quantity
+            else:  # SELL
+                target_trade.pnl = (target_trade.entry_price - exit_price) * target_trade.quantity
+
+            notional = target_trade.entry_price * target_trade.quantity
+            target_trade.pnl_pct = (target_trade.pnl / notional) * 100 if notional > 0 else 0.0
+
+            hold_time = (datetime.now(timezone.utc) - target_trade.timestamp).total_seconds()
+            target_trade.hold_time_seconds = hold_time
+
+            logger.info(f"🎯 [ML_TRADE_UPDATED] {symbol} ({trade_id}): "
+                       f"PnL {target_trade.pnl:+.2f} USDT ({target_trade.pnl_pct:+.2f}%), "
+                       f"Hold {hold_time/60:.1f} min")
+
+            # Call ML learning
+            await self.update_trade_exit_with_ml(
+                trade_record=target_trade,
+                exit_price=exit_price,
+                exit_reason=exit_reason
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ [ML_EXIT_UPDATE] Error in update_trade_exit: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def update_trade_exit_with_ml(self, 
                                       trade_record: TradeRecord,
                                       exit_price: float,
@@ -177,13 +265,26 @@ class EnhancedAdaptiveLearningSystem:
                 # Обновляем предсказания в истории
                 self._update_prediction_accuracy(trade_record.trade_id, trade_record.pnl_pct)
                 
+                # Get total samples count for progress tracking
+                total_samples = len(self.ml_system.trade_outcomes) if hasattr(self.ml_system, 'trade_outcomes') else 0
+
                 logger.info(f"🧠 [ML_LEARNING] Learned from {trade_record.symbol}: "
                            f"{trade_record.pnl_pct:+.2f}% PnL in {trade_record.hold_time_seconds/60:.1f} min")
-                
+                logger.info(f"📚 [ML_SAMPLES] {total_samples}/50 samples collected for ML training")
+
                 # Периодически оцениваем и обновляем метрики
                 if len(self.prediction_history) % 10 == 0:
                     await self._update_enhanced_metrics()
-                    
+
+                # 💾 Периодически сохраняем модели (каждые 10 сделок)
+                if total_samples > 0 and total_samples % 10 == 0:
+                    try:
+                        logger.info(f"💾 [AUTO_SAVE] Saving ML models at {total_samples} samples...")
+                        await self.save_all_data()
+                        logger.info(f"✅ [AUTO_SAVE] ML models saved successfully")
+                    except Exception as save_error:
+                        logger.warning(f"⚠️ [AUTO_SAVE] Failed to save models: {save_error}")
+
         except Exception as e:
             logger.error(f"❌ [ML_EXIT_UPDATE] Error updating trade exit: {e}")
     
@@ -524,10 +625,10 @@ class EnhancedAdaptiveLearningSystem:
         """Backward compatibility property for advanced_ai access"""
         return self.ml_system
     
-    @property  
+    @property
     def learning_visualizer(self):
         """Backward compatibility property for learning_visualizer access"""
-        return None  # Placeholder for now
+        return getattr(self, '_learning_visualizer', None)
     
     async def get_advanced_ai_recommendations(self, market_data: Dict = None):
         """Backward compatibility method for advanced AI recommendations"""
@@ -561,39 +662,47 @@ class EnhancedAdaptiveLearningSystem:
             
             # 🎯 EXPLORATION PHASE - Первые 50 сделок
             if total_samples < 50:
-                logger.info(f"🧠 [COLD_START] Exploration mode: {total_samples}/50 samples")
-                
-                # В начале торгуем на основе ТОЛЬКО сигналов IMBA (не ML)
-                # Но с повышенным порогом для безопасности
-                exploration_threshold = 1.4  # Выше обычного 1.2
-                
-                if signal_strength >= exploration_threshold:
-                    logger.info(f"🚀 [EXPLORATION] TRADE: Signal {signal_strength:.2f} >= {exploration_threshold}")
-                    return True
-                else:
-                    logger.info(f"🚫 [EXPLORATION] SKIP: Signal {signal_strength:.2f} < {exploration_threshold}")
-                    return False
+                logger.info(f"🧠 [COLD_START] Learning mode: {total_samples}/50 samples - ML не блокирует")
+
+                # 📚 КОНЦЕПЦИЯ:
+                # - RL Agent уже обучен на исторических данных
+                # - ML Learning System учится на РЕАЛЬНЫХ сделках
+                # - Первые 50 сделок: ML только ЗАПОМИНАЕТ результаты
+                # - RL фильтрует сигналы, ML сравнивает его предсказания с фактом
+                # - После 50 сделок: ML начинает использовать свой опыт для фильтрации
+
+                logger.info(f"📚 [LEARNING_MODE] Пропускаем сигнал {signal_strength:.2f} - ML учится на реальных данных")
+                return True  # Всегда пропускаем - учимся на всех сделках!
             
             # 🧠 LEARNING PHASE - 50-200 сделок (постепенно добавляем ML)
             elif total_samples < 200:
                 learning_progress = (total_samples - 50) / 150  # 0.0 to 1.0
                 logger.info(f"🎓 [LEARNING] Learning mode: {total_samples}/200 samples, progress: {learning_progress:.1%}")
-                
-                # Постепенно снижаем порог сигнала и добавляем ML
-                adaptive_threshold = 1.4 - (learning_progress * 0.3)  # 1.4 → 1.1
-                ml_weight = learning_progress * 0.3  # 0 → 0.3
-                
-                # Комбинированная логика
+
+                # 🔧 ИСПРАВЛЕНИЕ: ML только наблюдает до 100 samples
+                if total_samples < 100:
+                    logger.info(f"📚 [LEARNING_MODE] ML наблюдает: {total_samples}/100 - пропускаем сигнал {signal_strength:.2f}")
+                    return signal_strength >= 1.2  # Только базовый IMBA порог
+
+                # После 100 samples постепенно добавляем ML
+                ml_progress = (total_samples - 100) / 100  # 0.0 to 1.0
+                adaptive_threshold = 1.3 - (ml_progress * 0.2)  # 1.3 → 1.1
+                ml_weight = ml_progress * 0.5  # 0 → 0.5
+
+                # Комбинированная логика - ML только ПОМОГАЕТ, не блокирует
                 signal_ok = signal_strength >= adaptive_threshold
-                ml_suggests = (ml_confidence * ml_weight + 
-                             win_probability * ml_weight) > (ml_weight * 0.6)
-                
-                should_trade = signal_ok and (ml_weight == 0 or ml_suggests)
-                
+
+                # ML может только усилить решение, но не блокировать
+                if ml_confidence > 0.3 and win_probability > 0.55:
+                    ml_boost = ml_weight * 0.2  # ML дает +20% к уверенности максимум
+                    logger.info(f"🎓 [LEARNING] ML усиливает: confidence={ml_confidence:.2f}, boost={ml_boost:.2f}")
+                    return signal_ok  # Пропускаем если сигнал OK
+
+                # ML не уверена - решаем по базовому сигналу
                 logger.info(f"🎓 [LEARNING] Signal: {signal_strength:.2f}>={adaptive_threshold:.2f}? {signal_ok}, "
-                           f"ML weight: {ml_weight:.2f}, Decision: {'TRADE' if should_trade else 'SKIP'}")
-                
-                return should_trade
+                           f"ML weight: {ml_weight:.2f}, Decision: {'TRADE' if signal_ok else 'SKIP'}")
+
+                return signal_ok
             
             # 🎯 FULL ML PHASE - После 200 сделок (полный ML)
             else:

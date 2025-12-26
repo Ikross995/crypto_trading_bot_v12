@@ -193,14 +193,15 @@ class BinanceClient:
     def _sync_time(self):
         """Synchronize with Binance server time to prevent -1021 errors."""
         now = time.time()
-        if self.client is None or (now - self._last_time_sync) < 2.0:
+        # Sync more frequently (every 0.5s instead of 2s) for better accuracy
+        if self.client is None or (now - self._last_time_sync) < 0.5:
             return
         try:
             # Get Binance server time directly (avoid safe_call recursion)
             server_time_response = self.client.futures_time()
             server_time = server_time_response['serverTime']
             local_time = int(time.time() * 1000)
-            
+
             # Calculate time offset
             self._time_offset = server_time - local_time
             logger.debug(f"[TIME_SYNC] Server: {server_time}, Local: {local_time}, Offset: {self._time_offset}ms")
@@ -257,6 +258,24 @@ class BinanceClient:
             logger.error("REST call failed: %s %s payload=%s err=%s", method, path, payload, e)
             raise
 
+    def _rest_unsigned(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
+        """REST call without signature (for public endpoints like ticker data)."""
+        url = self._base + path
+        try:
+            if method == "GET":
+                r = self.session.get(url, params=payload, timeout=10)
+            elif method == "POST":
+                r = self.session.post(url, params=payload, timeout=10)
+            else:
+                raise RuntimeError(f"Unsupported method {method}")
+            data = r.json() if r.headers.get("content-type","").startswith("application/json") else {"status": r.status_code, "text": r.text}
+            if not r.ok:
+                raise RuntimeError(f"REST {method} {path} failed [{r.status_code}]: {data}")
+            return data
+        except Exception as e:
+            logger.error("REST unsigned call failed: %s %s payload=%s err=%s", method, path, payload, e)
+            raise
+
     # -------------------- PUBLIC API --------------------
     def get_exchange_info(self) -> Dict[str, Any]:
         if self.client:
@@ -282,6 +301,33 @@ class BinanceClient:
             payload["symbol"] = symbol.upper()
         data = self._rest("GET", "/fapi/v1/openOrders", payload)
         return data if isinstance(data, list) else []
+
+    def get_all_orders(self, symbol: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """Get all orders (open, filled, canceled) for a symbol."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_get_all_orders, symbol=symbol.upper(), limit=limit)
+            except Exception as e:
+                msg = str(e)
+                if "_http" not in msg and "send_request" not in msg:
+                    raise
+        payload = {"symbol": symbol.upper(), "limit": limit}
+        data = self._rest("GET", "/fapi/v1/allOrders", payload)
+        return data if isinstance(data, list) else []
+
+    def get_24hr_ticker(self, symbol: str) -> Dict[str, Any]:
+        """Get 24hr ticker price change statistics."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_ticker, symbol=symbol.upper())
+            except Exception as e:
+                msg = str(e)
+                if "_http" not in msg and "send_request" not in msg:
+                    raise
+        # Use unsigned REST endpoint (no signature needed for ticker data)
+        payload = {"symbol": symbol.upper()}
+        data = self._rest_unsigned("GET", "/fapi/v1/ticker/24hr", payload)
+        return data if isinstance(data, dict) else {}
 
     def cancel_order(self, symbol: str, orderId: Optional[int] = None, origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
         if self.dry_run:
@@ -365,6 +411,26 @@ class BinanceClient:
     # compat alias expected by runner.paper status logging
     def get_balance(self) -> float:
         return self.get_account_balance()
+
+    def get_account(self) -> Dict[str, Any]:
+        """Get full account information (balances, positions, margins, etc.)."""
+        if self.client:
+            try:
+                return self.safe_call(self.client.futures_account)
+            except Exception:
+                pass
+        try:
+            return self._rest("GET", "/fapi/v2/account", {})
+        except Exception as e:
+            logger.warning(f"Failed to fetch account info: {e}")
+            return {
+                "assets": [],
+                "positions": [],
+                "totalWalletBalance": "0.0",
+                "totalUnrealizedProfit": "0.0",
+                "totalMarginBalance": "0.0",
+                "availableBalance": "0.0"
+            }
 
     def get_positions(self) -> List[Dict[str, Any]]:
         if self.client:
@@ -616,6 +682,26 @@ class MockBinanceClient(BinanceClient):
 
     def get_balance(self) -> Decimal:
         return self._paper_balance
+
+    def get_account(self) -> Dict[str, Any]:
+        """Return mock account info for dry-run mode."""
+        balance = float(self._paper_balance)
+        return {
+            "assets": [
+                {
+                    "asset": "USDT",
+                    "walletBalance": str(balance),
+                    "unrealizedProfit": "0.0",
+                    "marginBalance": str(balance),
+                    "availableBalance": str(balance)
+                }
+            ],
+            "positions": [],
+            "totalWalletBalance": str(balance),
+            "totalUnrealizedProfit": "0.0",
+            "totalMarginBalance": str(balance),
+            "availableBalance": str(balance)
+        }
 
 
 # Some code expects this alias
